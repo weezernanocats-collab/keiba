@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f8f9fa;
+  --foreground: #1a1a2e;
+  --primary: #16213e;
+  --primary-light: #0f3460;
+  --accent: #e94560;
+  --accent-light: #ff6b6b;
+  --success: #00b894;
+  --warning: #fdcb6e;
+  --card-bg: #ffffff;
+  --card-border: #e2e8f0;
+  --muted: #64748b;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-light: var(--primary-light);
+  --color-accent: var(--accent);
+  --color-accent-light: var(--accent-light);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-card-bg: var(--card-bg);
+  --color-card-border: var(--card-border);
+  --color-muted: var(--muted);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a1a;
+    --foreground: #e2e8f0;
+    --primary: #1e3a5f;
+    --primary-light: #2a5298;
+    --card-bg: #1a1a2e;
+    --card-border: #2d2d44;
+    --muted: #94a3b8;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', Arial, sans-serif;
+}
+
+/* 枠番カラー */
+.waku-1 { background-color: #ffffff; color: #000; border: 1px solid #ccc; }
+.waku-2 { background-color: #000000; color: #fff; }
+.waku-3 { background-color: #ff0000; color: #fff; }
+.waku-4 { background-color: #0066ff; color: #fff; }
+.waku-5 { background-color: #ffdd00; color: #000; }
+.waku-6 { background-color: #00aa00; color: #fff; }
+.waku-7 { background-color: #ff8800; color: #fff; }
+.waku-8 { background-color: #ff66aa; color: #fff; }
+
+/* グレードバッジ */
+.grade-g1 { background: linear-gradient(135deg, #ffd700, #ff8c00); color: #000; font-weight: bold; }
+.grade-g2 { background: linear-gradient(135deg, #c0c0c0, #a0a0a0); color: #000; font-weight: bold; }
+.grade-g3 { background: linear-gradient(135deg, #cd7f32, #a0522d); color: #fff; font-weight: bold; }
+
+/* アニメーション */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out;
+}

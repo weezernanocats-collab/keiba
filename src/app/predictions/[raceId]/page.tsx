@@ -1,0 +1,256 @@
+'use client';
+import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+import Link from 'next/link';
+import GradeBadge from '@/components/GradeBadge';
+import LoadingSpinner from '@/components/LoadingSpinner';
+
+interface Pick {
+  rank: number;
+  horseNumber: number;
+  horseName: string;
+  score: number;
+  reasons: string[];
+}
+
+interface Analysis {
+  trackBias: string;
+  paceAnalysis: string;
+  keyFactors: string[];
+  riskFactors: string[];
+}
+
+interface Bet {
+  type: string;
+  selections: number[];
+  reasoning: string;
+  expectedValue: number;
+}
+
+interface PredictionData {
+  raceId: string;
+  generatedAt: string;
+  confidence: number;
+  summary: string;
+  topPicks: Pick[];
+  analysis: Analysis;
+  recommendedBets: Bet[];
+}
+
+interface RaceData {
+  id: string;
+  name: string;
+  date: string;
+  racecourse_name: string;
+  race_number: number;
+  grade: string | null;
+  track_type: string;
+  distance: number;
+  track_condition: string | null;
+}
+
+export default function PredictionDetailPage() {
+  const params = useParams();
+  const raceId = params.raceId as string;
+  const [prediction, setPrediction] = useState<PredictionData | null>(null);
+  const [race, setRace] = useState<RaceData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const res = await fetch(`/api/predictions/${raceId}`);
+        const data = await res.json();
+        if (data.error) {
+          setError(data.error);
+        } else {
+          setPrediction(data.prediction || null);
+          setRace(data.race || null);
+        }
+      } catch (err) {
+        console.error('エラー:', err);
+        setError('データの取得に失敗しました');
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, [raceId]);
+
+  if (loading) return <LoadingSpinner message="AI予想を読み込んでいます..." />;
+
+  if (error) {
+    return (
+      <div className="text-center py-12 space-y-4">
+        <p className="text-lg text-muted">{error}</p>
+        <Link href="/predictions" className="text-accent hover:underline">← 予想一覧に戻る</Link>
+      </div>
+    );
+  }
+
+  if (!prediction || !race) {
+    return (
+      <div className="text-center py-12">
+        <p>予想データがありません</p>
+        <Link href="/predictions" className="text-accent hover:underline">← 予想一覧に戻る</Link>
+      </div>
+    );
+  }
+
+  const rankLabels = ['◎ 本命', '○ 対抗', '▲ 単穴', '△ 連下', '× 注意', '☆ 穴'];
+  const rankColors = [
+    'bg-red-50 border-red-300 dark:bg-red-900/20 dark:border-red-800',
+    'bg-blue-50 border-blue-300 dark:bg-blue-900/20 dark:border-blue-800',
+    'bg-yellow-50 border-yellow-300 dark:bg-yellow-900/20 dark:border-yellow-800',
+    'bg-green-50 border-green-300 dark:bg-green-900/20 dark:border-green-800',
+    'bg-purple-50 border-purple-300 dark:bg-purple-900/20 dark:border-purple-800',
+    'bg-gray-50 border-gray-300 dark:bg-gray-800/20 dark:border-gray-600',
+  ];
+
+  return (
+    <div className="space-y-6 animate-fadeIn">
+      <Link href="/predictions" className="text-sm text-accent hover:underline">← 予想一覧に戻る</Link>
+
+      {/* レース情報ヘッダー */}
+      <div className="bg-gradient-to-r from-primary to-primary-light rounded-xl p-6 text-white">
+        <div className="flex flex-wrap items-start gap-3 mb-2">
+          <GradeBadge grade={race.grade} />
+          <h1 className="text-2xl font-bold">{race.name}</h1>
+        </div>
+        <p className="text-white/80 text-sm">
+          {race.date} | {race.racecourse_name} {race.race_number}R | {race.track_type}{race.distance}m
+          {race.track_condition && ` | ${race.track_condition}`}
+        </p>
+        <div className="mt-4 flex items-center gap-4">
+          <div>
+            <span className="text-white/60 text-xs">AI信頼度</span>
+            <div className="flex items-center gap-2 mt-1">
+              <div className="w-32 h-3 bg-white/20 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${prediction.confidence}%`,
+                    backgroundColor: prediction.confidence >= 70 ? '#00b894' : prediction.confidence >= 50 ? '#fdcb6e' : '#e94560',
+                  }}
+                />
+              </div>
+              <span className="font-bold">{prediction.confidence}%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* サマリー */}
+      <div className="bg-card-bg border border-card-border rounded-xl p-6">
+        <h2 className="text-lg font-bold mb-3">📝 予想サマリー</h2>
+        <div className="whitespace-pre-line text-sm leading-relaxed">{prediction.summary}</div>
+      </div>
+
+      {/* トップピック */}
+      <div>
+        <h2 className="text-lg font-bold mb-4">🏇 予想印</h2>
+        <div className="space-y-3">
+          {prediction.topPicks.map((pick, idx) => (
+            <div
+              key={pick.horseNumber}
+              className={`border rounded-xl p-4 ${rankColors[idx] || rankColors[5]}`}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-3">
+                  <span className="text-lg font-bold">{rankLabels[idx] || '☆'}</span>
+                  <span className="text-xl font-bold">{pick.horseNumber}番 {pick.horseName}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-sm text-muted">スコア</span>
+                  <span className="ml-2 text-lg font-bold">{pick.score}</span>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {pick.reasons.map((reason, rIdx) => (
+                  <span key={rIdx} className="text-xs bg-white/60 dark:bg-black/20 px-2 py-1 rounded">
+                    {reason}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* レース分析 */}
+      <div className="bg-card-bg border border-card-border rounded-xl p-6">
+        <h2 className="text-lg font-bold mb-4">📊 レース分析</h2>
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-sm font-bold text-muted mb-1">馬場バイアス</h3>
+            <p className="text-sm">{prediction.analysis.trackBias}</p>
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-muted mb-1">ペース予想</h3>
+            <p className="text-sm">{prediction.analysis.paceAnalysis}</p>
+          </div>
+          {prediction.analysis.keyFactors.length > 0 && (
+            <div>
+              <h3 className="text-sm font-bold text-muted mb-1">注目ポイント</h3>
+              <ul className="space-y-1">
+                {prediction.analysis.keyFactors.map((f, i) => (
+                  <li key={i} className="text-sm flex items-start gap-2">
+                    <span className="text-accent">●</span> {f}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {prediction.analysis.riskFactors.length > 0 && (
+            <div>
+              <h3 className="text-sm font-bold text-muted mb-1">リスク要因</h3>
+              <ul className="space-y-1">
+                {prediction.analysis.riskFactors.map((f, i) => (
+                  <li key={i} className="text-sm flex items-start gap-2">
+                    <span className="text-warning">⚠</span> {f}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 推奨馬券 */}
+      {prediction.recommendedBets.length > 0 && (
+        <div>
+          <h2 className="text-lg font-bold mb-4">🎫 推奨馬券</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {prediction.recommendedBets.map((bet, idx) => (
+              <div key={idx} className="bg-card-bg border border-card-border rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="bg-primary text-white px-3 py-1 rounded text-sm font-bold">
+                    {bet.type}
+                  </span>
+                  <span className="text-sm text-muted">
+                    期待値: {bet.expectedValue.toFixed(2)}
+                  </span>
+                </div>
+                <p className="text-xl font-bold mb-2">
+                  {bet.selections.join(' - ')}
+                </p>
+                <p className="text-sm text-muted">{bet.reasoning}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 出馬表リンク */}
+      <div className="text-center pt-4">
+        <Link
+          href={`/races/${raceId}`}
+          className="inline-block bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-primary-light transition-colors"
+        >
+          出馬表を見る
+        </Link>
+      </div>
+    </div>
+  );
+}
