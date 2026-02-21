@@ -5,7 +5,7 @@
 
 import { getDatabase } from './database';
 import { RACECOURSES, type RaceEntry, type PastPerformance } from '@/types';
-import { seedRacecourses, upsertHorse, upsertJockey, upsertRace, upsertRaceEntry, insertPastPerformance, upsertOdds, setHorseTraits, savePrediction } from './queries';
+import { seedRacecourses, upsertHorse, upsertJockey, upsertRace, upsertRaceEntry, insertPastPerformance, upsertOdds, setHorseTraits, savePrediction, mapPastPerformance } from './queries';
 import { generatePrediction, type HorseAnalysisInput } from './prediction-engine';
 
 export function seedAllData() {
@@ -274,7 +274,8 @@ function seedPredictions() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const entries = db.prepare('SELECT * FROM race_entries WHERE race_id = ?').all(config.raceId) as any[];
     const horseInputs: HorseAnalysisInput[] = entries.map((e: Record<string, unknown>) => {
-      const pp = db.prepare('SELECT * FROM past_performances WHERE horse_id = ? ORDER BY date DESC LIMIT 10').all(e.horse_id as string) as PastPerformance[];
+      const ppRows = db.prepare('SELECT * FROM past_performances WHERE horse_id = ? ORDER BY date DESC LIMIT 10').all(e.horse_id as string);
+      const pp = ppRows.map(mapPastPerformance);
       const jockey = db.prepare('SELECT * FROM jockeys WHERE id = ?').get(e.jockey_id as string) as { win_rate: number; place_rate: number } | undefined;
 
       return {

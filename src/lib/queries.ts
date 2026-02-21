@@ -288,11 +288,42 @@ export function upsertJockey(jockey: Partial<Jockey> & { id: string }) {
 
 // ==================== 過去成績 ====================
 
+// DBのスネークケースカラムをキャメルケースにマッピング
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function mapPastPerformance(row: any): PastPerformance {
+  return {
+    raceId: row.race_id ?? row.raceId ?? '',
+    date: row.date ?? '',
+    raceName: row.race_name ?? row.raceName ?? '',
+    racecourseName: row.racecourse_name ?? row.racecourseName ?? '',
+    trackType: row.track_type ?? row.trackType ?? '芝',
+    distance: row.distance ?? 0,
+    trackCondition: row.track_condition ?? row.trackCondition ?? '良',
+    weather: row.weather ?? '晴',
+    entries: row.entries ?? 0,
+    postPosition: row.post_position ?? row.postPosition ?? 0,
+    horseNumber: row.horse_number ?? row.horseNumber ?? 0,
+    position: row.position ?? 0,
+    jockeyName: row.jockey_name ?? row.jockeyName ?? '',
+    handicapWeight: row.handicap_weight ?? row.handicapWeight ?? 0,
+    weight: row.weight ?? 0,
+    weightChange: row.weight_change ?? row.weightChange ?? 0,
+    time: row.time ?? '',
+    margin: row.margin ?? '',
+    lastThreeFurlongs: row.last_three_furlongs ?? row.lastThreeFurlongs ?? '',
+    cornerPositions: row.corner_positions ?? row.cornerPositions ?? '',
+    odds: row.odds ?? 0,
+    popularity: row.popularity ?? 0,
+    prize: row.prize ?? 0,
+  };
+}
+
 export function getHorsePastPerformances(horseId: string, limit: number = 20) {
   const db = getDatabase();
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT * FROM past_performances WHERE horse_id = ? ORDER BY date DESC LIMIT ?
-  `).all(horseId, limit) as PastPerformance[];
+  `).all(horseId, limit);
+  return rows.map(mapPastPerformance);
 }
 
 export function insertPastPerformance(horseId: string, perf: Partial<PastPerformance>) {

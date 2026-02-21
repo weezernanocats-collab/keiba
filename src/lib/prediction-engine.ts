@@ -355,10 +355,7 @@ function countWinStreak(pp: PastPerformance[]): number {
 }
 
 function calcCourseAptitude(pp: PastPerformance[], racecourseName: string): number {
-  const courseRaces = pp.filter(p =>
-    p.racecourseName === racecourseName ||
-    (p as unknown as Record<string, unknown>).racecourse_name === racecourseName
-  );
+  const courseRaces = pp.filter(p => p.racecourseName === racecourseName);
   if (courseRaces.length === 0) return 50;
 
   const avgRatio = courseRaces.reduce((sum, p) => {
@@ -569,7 +566,7 @@ function calcPostPositionBias(post: number, fieldSize: number, distance: number,
 function calcRotation(pp: PastPerformance[]): number {
   if (pp.length === 0) return 50;
 
-  const lastDate = pp[0].date || (pp[0] as unknown as Record<string, unknown>).date as string;
+  const lastDate = pp[0].date;
   if (!lastDate) return 50;
 
   const lastRaceDate = new Date(lastDate);
@@ -598,7 +595,7 @@ function calcLastThreeFurlongs(pp: PastPerformance[], trackType: TrackType): num
   const times: number[] = [];
 
   for (const perf of recent) {
-    const l3f = perf.lastThreeFurlongs || (perf as unknown as Record<string, unknown>).last_three_furlongs as string;
+    const l3f = perf.lastThreeFurlongs;
     if (!l3f) continue;
     const t = parseFloat(l3f);
     if (t > 0 && t < 50) times.push(t);
