@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -21,6 +21,8 @@ export default function RacesPage() {
   const [races, setRaces] = useState<RaceRow[]>([]);
   const [filter, setFilter] = useState<'upcoming' | 'results'>('upcoming');
   const [courseFilter, setCourseFilter] = useState<string>('all');
+  const [trackFilter, setTrackFilter] = useState<string>('all');
+  const [gradeFilter, setGradeFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -40,9 +42,18 @@ export default function RacesPage() {
   }, [filter]);
 
   const courses = [...new Set(races.map(r => r.racecourse_name))];
-  const filteredRaces = courseFilter === 'all'
-    ? races
-    : races.filter(r => r.racecourse_name === courseFilter);
+
+  const filteredRaces = useMemo(() => {
+    return races.filter(r => {
+      if (courseFilter !== 'all' && r.racecourse_name !== courseFilter) return false;
+      if (trackFilter !== 'all' && r.track_type !== trackFilter) return false;
+      if (gradeFilter === 'grade' && !r.grade) return false;
+      if (gradeFilter === 'G1' && r.grade !== 'G1') return false;
+      if (gradeFilter === 'G2' && r.grade !== 'G2') return false;
+      if (gradeFilter === 'G3' && r.grade !== 'G3') return false;
+      return true;
+    });
+  }, [races, courseFilter, trackFilter, gradeFilter]);
 
   // 日付ごとにグループ化
   const groupedByDate: Record<string, RaceRow[]> = {};
@@ -53,19 +64,19 @@ export default function RacesPage() {
 
   return (
     <div className="space-y-6 animate-fadeIn">
-      <h1 className="text-2xl font-bold">📋 レース一覧</h1>
+      <h1 className="text-2xl font-bold">レース一覧</h1>
 
       {/* フィルタ */}
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap gap-3 items-center">
         <div className="flex rounded-lg overflow-hidden border border-card-border">
           <button
-            className={`px-4 py-2 text-sm font-medium transition-colors ${filter === 'upcoming' ? 'bg-primary text-white' : 'bg-card-bg hover:bg-gray-100'}`}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${filter === 'upcoming' ? 'bg-primary text-white' : 'bg-card-bg hover:bg-gray-700'}`}
             onClick={() => setFilter('upcoming')}
           >
             今後のレース
           </button>
           <button
-            className={`px-4 py-2 text-sm font-medium transition-colors ${filter === 'results' ? 'bg-primary text-white' : 'bg-card-bg hover:bg-gray-100'}`}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${filter === 'results' ? 'bg-primary text-white' : 'bg-card-bg hover:bg-gray-700'}`}
             onClick={() => setFilter('results')}
           >
             結果
@@ -82,6 +93,42 @@ export default function RacesPage() {
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
+
+        <select
+          className="px-3 py-2 text-sm border border-card-border rounded-lg bg-card-bg"
+          value={trackFilter}
+          onChange={e => setTrackFilter(e.target.value)}
+        >
+          <option value="all">全トラック</option>
+          <option value="芝">芝</option>
+          <option value="ダート">ダート</option>
+          <option value="障害">障害</option>
+        </select>
+
+        <select
+          className="px-3 py-2 text-sm border border-card-border rounded-lg bg-card-bg"
+          value={gradeFilter}
+          onChange={e => setGradeFilter(e.target.value)}
+        >
+          <option value="all">全グレード</option>
+          <option value="grade">重賞のみ</option>
+          <option value="G1">G1</option>
+          <option value="G2">G2</option>
+          <option value="G3">G3</option>
+        </select>
+
+        {(courseFilter !== 'all' || trackFilter !== 'all' || gradeFilter !== 'all') && (
+          <button
+            className="px-3 py-2 text-xs text-red-400 hover:text-red-300 transition-colors"
+            onClick={() => { setCourseFilter('all'); setTrackFilter('all'); setGradeFilter('all'); }}
+          >
+            フィルタをリセット
+          </button>
+        )}
+
+        <span className="text-sm text-muted ml-auto">
+          {filteredRaces.length}件
+        </span>
       </div>
 
       {loading ? (

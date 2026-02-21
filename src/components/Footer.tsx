@@ -19,6 +19,8 @@ export default function Footer() {
               <li><Link href="/horses" className="hover:text-white transition-colors">馬情報</Link></li>
               <li><Link href="/jockeys" className="hover:text-white transition-colors">騎手情報</Link></li>
               <li><Link href="/predictions" className="hover:text-white transition-colors">AI予想</Link></li>
+              <li><Link href="/calendar" className="hover:text-white transition-colors">カレンダー</Link></li>
+              <li><Link href="/admin" className="hover:text-white transition-colors">データ管理</Link></li>
             </ul>
           </div>
           <div>

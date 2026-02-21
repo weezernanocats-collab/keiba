@@ -1,0 +1,17 @@
+services:
+  keiba:
+    build: .
+    container_name: keiba-master
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # データベースの永続化
+      - keiba-data:/app/data
+    environment:
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+
+volumes:
+  keiba-data:
+    driver: local

@@ -11,6 +11,7 @@ export default function Header() {
     { href: '/horses', label: '馬情報' },
     { href: '/jockeys', label: '騎手情報' },
     { href: '/predictions', label: 'AI予想' },
+    { href: '/calendar', label: 'カレンダー' },
   ];
 
   return (
