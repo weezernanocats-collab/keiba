@@ -25,17 +25,23 @@ import {
   savePrediction,
 } from '@/lib/queries';
 import { generatePrediction } from '@/lib/prediction-engine';
+import { runBulkImport, getBulkImportProgress, abortBulkImport, type BulkImportConfig } from '@/lib/bulk-importer';
 import type { PastPerformance } from '@/types';
 
 // ==================== Types ====================
 
-type SyncType = 'races' | 'race_detail' | 'odds' | 'results' | 'horse' | 'full';
+type SyncType = 'races' | 'race_detail' | 'odds' | 'results' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort';
 
 interface SyncRequest {
   type: SyncType;
   date?: string;
   raceId?: string;
   horseId?: string;
+  // バルクインポート用
+  startDate?: string;
+  endDate?: string;
+  clearExisting?: boolean;
+  maxPastPerformances?: number;
 }
 
 interface SyncLogEntry {
@@ -125,7 +131,7 @@ export async function POST(request: NextRequest) {
   const { type, date, raceId, horseId } = body;
 
   // Validate type
-  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full'];
+  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort'];
   if (!type || !validTypes.includes(type)) {
     return NextResponse.json(
       {
@@ -133,6 +139,46 @@ export async function POST(request: NextRequest) {
       },
       { status: 400 }
     );
+  }
+
+  // バルクインポートの状態確認
+  if (type === 'bulk_status') {
+    const progress = getBulkImportProgress();
+    return NextResponse.json({ progress });
+  }
+
+  // バルクインポートの中断
+  if (type === 'bulk_abort') {
+    abortBulkImport();
+    return NextResponse.json({ message: 'バルクインポートの中断を要求しました' });
+  }
+
+  // バルクインポート開始
+  if (type === 'bulk') {
+    const { startDate, endDate, clearExisting, maxPastPerformances } = body;
+    if (!startDate || !endDate) {
+      return NextResponse.json(
+        { error: 'type="bulk" にはstartDateとendDateが必要です (YYYY-MM-DD)' },
+        { status: 400 }
+      );
+    }
+
+    const config: BulkImportConfig = {
+      startDate,
+      endDate,
+      clearExisting: clearExisting || false,
+      maxPastPerformances: maxPastPerformances || 50,
+    };
+
+    // バックグラウンドで実行開始
+    runBulkImport(config).catch(err => {
+      console.error('バルクインポートエラー:', err);
+    });
+
+    return NextResponse.json({
+      message: 'バルクインポートを開始しました',
+      config,
+    });
   }
 
   // Validate required parameters per type
@@ -492,7 +538,7 @@ async function syncFull(entry: SyncLogEntry, date?: string): Promise<void> {
 
       // Build horse analysis inputs for prediction engine
       const horseInputs = raceData.entries.map((re) => {
-        const pastPerfs = getHorsePastPerformances(re.horseId, 20);
+        const pastPerfs = getHorsePastPerformances(re.horseId, 50);
         const horseData = getHorseById(re.horseId) as { father_name?: string } | null;
         return {
           entry: re,

@@ -189,7 +189,7 @@ function initializeDatabase(db: Database.Database): void {
       FOREIGN KEY (horse_id) REFERENCES horses(id)
     );
 
-    -- インデックス
+    -- 基本インデックス
     CREATE INDEX IF NOT EXISTS idx_races_date ON races(date);
     CREATE INDEX IF NOT EXISTS idx_races_racecourse ON races(racecourse_id);
     CREATE INDEX IF NOT EXISTS idx_race_entries_race ON race_entries(race_id);
@@ -198,6 +198,15 @@ function initializeDatabase(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_odds_race ON odds(race_id);
     CREATE INDEX IF NOT EXISTS idx_predictions_race ON predictions(race_id);
     CREATE INDEX IF NOT EXISTS idx_horse_traits_horse ON horse_traits(horse_id);
+
+    -- バルクデータ向け複合インデックス (種牡馬統計・コース統計・距離統計)
+    CREATE INDEX IF NOT EXISTS idx_past_performances_horse_date ON past_performances(horse_id, date DESC);
+    CREATE INDEX IF NOT EXISTS idx_past_performances_course_track ON past_performances(racecourse_name, track_type);
+    CREATE INDEX IF NOT EXISTS idx_past_performances_distance ON past_performances(track_type, distance);
+    CREATE INDEX IF NOT EXISTS idx_horses_father ON horses(father_name);
+    CREATE INDEX IF NOT EXISTS idx_horses_trainer ON horses(trainer_name);
+    CREATE INDEX IF NOT EXISTS idx_race_entries_jockey ON race_entries(jockey_id);
+    CREATE INDEX IF NOT EXISTS idx_races_status ON races(status, date);
   `);
 }
 

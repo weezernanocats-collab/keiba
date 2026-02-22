@@ -99,7 +99,7 @@ function seededRand(seed: number): number {
 /** プロファイルから過去成績を生成 */
 export function generatePastPerformances(p: HorseProfile): PerfData[] {
   const perfs: PerfData[] = [];
-  const numPerfs = Math.min(p.totalRaces, 15);
+  const numPerfs = Math.min(p.totalRaces, 50);
   const isLocal = LOCAL_COURSES.some(c => p.preferredCourses.includes(c));
   const coursePool = isLocal ? LOCAL_COURSES : CENTRAL_COURSES;
   const jockeyPool = isLocal ? JOCKEYS_LOCAL : JOCKEYS_CENTRAL;

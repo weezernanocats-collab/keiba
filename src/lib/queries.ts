@@ -318,7 +318,7 @@ export function mapPastPerformance(row: any): PastPerformance {
   };
 }
 
-export function getHorsePastPerformances(horseId: string, limit: number = 20) {
+export function getHorsePastPerformances(horseId: string, limit: number = 50) {
   const db = getDatabase();
   const rows = db.prepare(`
     SELECT * FROM past_performances WHERE horse_id = ? ORDER BY date DESC LIMIT ?
@@ -424,4 +424,96 @@ export function getJockeyRecentResults(jockeyId: string, limit: number = 20) {
     ORDER BY r.date DESC
     LIMIT ?
   `).all(jockeyId, limit);
+}
+
+// ==================== 大規模データ向け統計クエリ ====================
+
+/** 種牡馬別統計: コース×馬場×距離レンジ別の成績 */
+export function getSireStats(fatherName: string) {
+  const db = getDatabase();
+  return db.prepare(`
+    SELECT
+      pp.track_type,
+      pp.racecourse_name,
+      CASE
+        WHEN pp.distance <= 1400 THEN '短距離'
+        WHEN pp.distance <= 1800 THEN 'マイル'
+        WHEN pp.distance <= 2200 THEN '中距離'
+        ELSE '長距離'
+      END as distance_category,
+      pp.track_condition,
+      COUNT(*) as total_runs,
+      SUM(CASE WHEN pp.position = 1 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN pp.position <= 3 THEN 1 ELSE 0 END) as top3,
+      ROUND(AVG(CAST(pp.position as REAL) / COALESCE(pp.entries, 16)), 3) as avg_position_ratio,
+      ROUND(AVG(CAST(pp.last_three_furlongs as REAL)), 2) as avg_last_3f
+    FROM past_performances pp
+    JOIN horses h ON pp.horse_id = h.id
+    WHERE h.father_name = ?
+    GROUP BY pp.track_type, pp.racecourse_name, distance_category, pp.track_condition
+    HAVING total_runs >= 3
+    ORDER BY total_runs DESC
+  `).all(fatherName);
+}
+
+/** 種牡馬の全体勝率サマリ */
+export function getSireSummary(fatherName: string) {
+  const db = getDatabase();
+  return db.prepare(`
+    SELECT
+      h.father_name,
+      COUNT(DISTINCT h.id) as num_offspring,
+      COUNT(*) as total_runs,
+      SUM(CASE WHEN pp.position = 1 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN pp.position <= 3 THEN 1 ELSE 0 END) as top3,
+      ROUND(CAST(SUM(CASE WHEN pp.position = 1 THEN 1 ELSE 0 END) as REAL) / COUNT(*), 4) as win_rate,
+      ROUND(CAST(SUM(CASE WHEN pp.position <= 3 THEN 1 ELSE 0 END) as REAL) / COUNT(*), 4) as top3_rate
+    FROM past_performances pp
+    JOIN horses h ON pp.horse_id = h.id
+    WHERE h.father_name = ?
+    GROUP BY h.father_name
+  `).get(fatherName);
+}
+
+/** コース別統計: 競馬場×芝ダート×距離の全馬成績分布 */
+export function getCourseStats(racecourseName: string, trackType: string) {
+  const db = getDatabase();
+  return db.prepare(`
+    SELECT
+      pp.distance,
+      pp.track_condition,
+      COUNT(*) as total_runs,
+      SUM(CASE WHEN pp.position = 1 THEN 1 ELSE 0 END) as wins,
+      ROUND(AVG(CAST(pp.last_three_furlongs as REAL)), 2) as avg_last_3f,
+      ROUND(AVG(CASE WHEN pp.time IS NOT NULL AND pp.time != '' THEN
+        CAST(SUBSTR(pp.time, 1, INSTR(pp.time, ':') - 1) as REAL) * 60 +
+        CAST(SUBSTR(pp.time, INSTR(pp.time, ':') + 1) as REAL)
+      END), 2) as avg_time_seconds
+    FROM past_performances pp
+    WHERE pp.racecourse_name = ? AND pp.track_type = ?
+    GROUP BY pp.distance, pp.track_condition
+    HAVING total_runs >= 5
+    ORDER BY pp.distance, pp.track_condition
+  `).all(racecourseName, trackType);
+}
+
+/** DB全体のデータ量サマリ（バルクインポートの確認用） */
+export function getDataVolumeSummary() {
+  const db = getDatabase();
+  const horses = (db.prepare('SELECT COUNT(*) as c FROM horses').get() as { c: number }).c;
+  const races = (db.prepare('SELECT COUNT(*) as c FROM races').get() as { c: number }).c;
+  const pastPerfs = (db.prepare('SELECT COUNT(*) as c FROM past_performances').get() as { c: number }).c;
+  const entries = (db.prepare('SELECT COUNT(*) as c FROM race_entries').get() as { c: number }).c;
+  const odds = (db.prepare('SELECT COUNT(*) as c FROM odds').get() as { c: number }).c;
+  const predictions = (db.prepare('SELECT COUNT(*) as c FROM predictions').get() as { c: number }).c;
+  const avgPPperHorse = horses > 0
+    ? (db.prepare('SELECT ROUND(AVG(cnt), 1) as avg FROM (SELECT COUNT(*) as cnt FROM past_performances GROUP BY horse_id)').get() as { avg: number })?.avg || 0
+    : 0;
+  const uniqueSires = (db.prepare("SELECT COUNT(DISTINCT father_name) as c FROM horses WHERE father_name IS NOT NULL AND father_name != ''").get() as { c: number }).c;
+  const uniqueCourses = (db.prepare('SELECT COUNT(DISTINCT racecourse_name) as c FROM past_performances').get() as { c: number }).c;
+
+  return {
+    horses, races, pastPerfs, entries, odds, predictions,
+    avgPPperHorse, uniqueSires, uniqueCourses,
+  };
 }

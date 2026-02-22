@@ -209,7 +209,7 @@ function seedPredictions() {
 
     const horseInputs: HorseAnalysisInput[] = entries.map((e: Record<string, unknown>) => {
       const ppRows = db.prepare(
-        'SELECT * FROM past_performances WHERE horse_id = ? ORDER BY date DESC LIMIT 10'
+        'SELECT * FROM past_performances WHERE horse_id = ? ORDER BY date DESC LIMIT 50'
       ).all(e.horse_id as string);
       const pp = ppRows.map(mapPastPerformance);
 

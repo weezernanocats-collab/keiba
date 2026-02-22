@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 
 interface SyncLogEntry {
   id: string;
@@ -26,6 +26,27 @@ interface SyncStatus {
   isRunning: boolean;
 }
 
+interface BulkProgress {
+  phase: string;
+  current: number;
+  total: number;
+  detail: string;
+  stats: {
+    datesProcessed: number;
+    racesScraped: number;
+    entriesScraped: number;
+    horsesScraped: number;
+    pastPerformancesImported: number;
+    oddsScraped: number;
+    resultsScraped: number;
+    predictionsGenerated: number;
+  };
+  errors: string[];
+  isRunning: boolean;
+  startedAt: string;
+  completedAt?: string;
+}
+
 export default function AdminPage() {
   const [syncKey, setSyncKey] = useState('');
   const [status, setStatus] = useState<SyncStatus | null>(null);
@@ -34,6 +55,15 @@ export default function AdminPage() {
   const [syncDate, setSyncDate] = useState(new Date().toISOString().split('T')[0]);
   const [syncRaceId, setSyncRaceId] = useState('');
   const [syncHorseId, setSyncHorseId] = useState('');
+  // バルクインポート用
+  const [bulkStartDate, setBulkStartDate] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 30);
+    return d.toISOString().split('T')[0];
+  });
+  const [bulkEndDate, setBulkEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [bulkClearExisting, setBulkClearExisting] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<BulkProgress | null>(null);
+  const bulkPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const headers = useCallback(() => {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -59,11 +89,11 @@ export default function AdminPage() {
     }
   }, [headers]);
 
-  const triggerSync = useCallback(async (type: string, extraParams?: Record<string, string>) => {
+  const triggerSync = useCallback(async (type: string, extraParams?: Record<string, string | boolean>) => {
     setLoading(true);
     setMessage('');
     try {
-      const body: Record<string, string> = { type };
+      const body: Record<string, string | boolean> = { type };
       if (extraParams) Object.assign(body, extraParams);
 
       const res = await fetch('/api/sync', {
@@ -73,8 +103,7 @@ export default function AdminPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        setMessage(`同期開始: ${data.syncId}`);
-        // Poll status after a bit
+        setMessage(data.message || `同期開始: ${data.syncId || ''}`);
         setTimeout(fetchStatus, 2000);
       } else {
         setMessage(data.error || 'エラーが発生しました');
@@ -85,6 +114,51 @@ export default function AdminPage() {
       setLoading(false);
     }
   }, [headers, fetchStatus]);
+
+  // バルクインポートの進捗ポーリング
+  const pollBulkProgress = useCallback(async () => {
+    try {
+      const res = await fetch('/api/sync', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ type: 'bulk_status' }),
+      });
+      const data = await res.json();
+      if (data.progress) {
+        setBulkProgress(data.progress);
+        if (!data.progress.isRunning && bulkPollRef.current) {
+          clearInterval(bulkPollRef.current);
+          bulkPollRef.current = null;
+        }
+      }
+    } catch {
+      // ignore polling errors
+    }
+  }, [headers]);
+
+  const startBulkImport = useCallback(async () => {
+    await triggerSync('bulk', {
+      startDate: bulkStartDate,
+      endDate: bulkEndDate,
+      clearExisting: bulkClearExisting,
+    });
+    // Start polling
+    if (bulkPollRef.current) clearInterval(bulkPollRef.current);
+    bulkPollRef.current = setInterval(pollBulkProgress, 3000);
+    setTimeout(pollBulkProgress, 1000);
+  }, [triggerSync, bulkStartDate, bulkEndDate, bulkClearExisting, pollBulkProgress]);
+
+  const abortBulkImport = useCallback(async () => {
+    await triggerSync('bulk_abort');
+    setTimeout(pollBulkProgress, 2000);
+  }, [triggerSync, pollBulkProgress]);
+
+  // Clean up polling on unmount
+  useEffect(() => {
+    return () => {
+      if (bulkPollRef.current) clearInterval(bulkPollRef.current);
+    };
+  }, []);
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -112,16 +186,178 @@ export default function AdminPage() {
       </div>
 
       {message && (
-        <div className={`p-3 rounded-lg text-sm ${message.includes('エラー') || message.includes('接続') ? 'bg-red-900/30 text-red-300 border border-red-700/30' : 'bg-green-900/30 text-green-300 border border-green-700/30'}`}>
+        <div className={`p-3 rounded-lg text-sm ${message.includes('エラー') || message.includes('接続') || message.includes('失敗') ? 'bg-red-900/30 text-red-300 border border-red-700/30' : 'bg-green-900/30 text-green-300 border border-green-700/30'}`}>
           {message}
         </div>
       )}
 
-      {/* Sync Actions */}
+      {/* ==================== バルクインポート ==================== */}
+      <div className="bg-card-bg border-2 border-primary/40 rounded-xl p-4">
+        <h3 className="font-bold mb-2 text-lg">バルクインポート（実データ一括取り込み）</h3>
+        <p className="text-sm text-muted mb-4">
+          netkeiba.com から指定期間のレース・馬・過去成績を一括で取り込みます。
+          数百〜数千頭の実データを投入し、種牡馬統計やコース統計を有効にします。
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className="block text-xs text-muted mb-1">開始日</label>
+            <input
+              type="date"
+              value={bulkStartDate}
+              onChange={e => setBulkStartDate(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-card-border rounded-lg bg-gray-800 text-white"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-muted mb-1">終了日</label>
+            <input
+              type="date"
+              value={bulkEndDate}
+              onChange={e => setBulkEndDate(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-card-border rounded-lg bg-gray-800 text-white"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 mb-4">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={bulkClearExisting}
+              onChange={e => setBulkClearExisting(e.target.checked)}
+              className="rounded"
+            />
+            <span>既存データをクリアしてから取り込む</span>
+          </label>
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={startBulkImport}
+            disabled={loading || (bulkProgress?.isRunning ?? false)}
+            className="px-6 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/80 disabled:opacity-50 transition-colors font-medium"
+          >
+            バルクインポート開始
+          </button>
+          {bulkProgress?.isRunning && (
+            <button
+              onClick={abortBulkImport}
+              className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors"
+            >
+              中断
+            </button>
+          )}
+          <button
+            onClick={pollBulkProgress}
+            className="px-4 py-2 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-500 transition-colors"
+          >
+            進捗確認
+          </button>
+        </div>
+
+        {/* バルクインポート進捗表示 */}
+        {bulkProgress && (
+          <div className="mt-4 space-y-3">
+            <div className={`p-3 rounded-lg border ${
+              bulkProgress.isRunning ? 'bg-blue-900/20 border-blue-700/30' :
+              bulkProgress.errors.length > 0 ? 'bg-yellow-900/20 border-yellow-700/30' :
+              'bg-green-900/20 border-green-700/30'
+            }`}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium">{bulkProgress.phase}</span>
+                {bulkProgress.isRunning && bulkProgress.total > 0 && (
+                  <span className="text-xs text-muted">{bulkProgress.current}/{bulkProgress.total}</span>
+                )}
+              </div>
+              <p className="text-xs text-muted mb-2">{bulkProgress.detail}</p>
+
+              {/* Progress bar */}
+              {bulkProgress.isRunning && bulkProgress.total > 0 && (
+                <div className="w-full bg-gray-700 rounded-full h-2 mb-2">
+                  <div
+                    className="bg-primary h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${Math.round((bulkProgress.current / bulkProgress.total) * 100)}%` }}
+                  />
+                </div>
+              )}
+
+              {/* Stats */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                {bulkProgress.stats.datesProcessed > 0 && (
+                  <div className="bg-gray-800/50 rounded p-1.5 text-center">
+                    <div className="font-medium">{bulkProgress.stats.datesProcessed}</div>
+                    <div className="text-muted">日分</div>
+                  </div>
+                )}
+                {bulkProgress.stats.racesScraped > 0 && (
+                  <div className="bg-gray-800/50 rounded p-1.5 text-center">
+                    <div className="font-medium">{bulkProgress.stats.racesScraped}</div>
+                    <div className="text-muted">レース</div>
+                  </div>
+                )}
+                {bulkProgress.stats.horsesScraped > 0 && (
+                  <div className="bg-gray-800/50 rounded p-1.5 text-center">
+                    <div className="font-medium">{bulkProgress.stats.horsesScraped}</div>
+                    <div className="text-muted">馬</div>
+                  </div>
+                )}
+                {bulkProgress.stats.pastPerformancesImported > 0 && (
+                  <div className="bg-gray-800/50 rounded p-1.5 text-center">
+                    <div className="font-medium">{bulkProgress.stats.pastPerformancesImported}</div>
+                    <div className="text-muted">過去成績</div>
+                  </div>
+                )}
+                {bulkProgress.stats.entriesScraped > 0 && (
+                  <div className="bg-gray-800/50 rounded p-1.5 text-center">
+                    <div className="font-medium">{bulkProgress.stats.entriesScraped}</div>
+                    <div className="text-muted">出走馬</div>
+                  </div>
+                )}
+                {bulkProgress.stats.resultsScraped > 0 && (
+                  <div className="bg-gray-800/50 rounded p-1.5 text-center">
+                    <div className="font-medium">{bulkProgress.stats.resultsScraped}</div>
+                    <div className="text-muted">結果</div>
+                  </div>
+                )}
+                {bulkProgress.stats.oddsScraped > 0 && (
+                  <div className="bg-gray-800/50 rounded p-1.5 text-center">
+                    <div className="font-medium">{bulkProgress.stats.oddsScraped}</div>
+                    <div className="text-muted">オッズ</div>
+                  </div>
+                )}
+                {bulkProgress.stats.predictionsGenerated > 0 && (
+                  <div className="bg-gray-800/50 rounded p-1.5 text-center">
+                    <div className="font-medium">{bulkProgress.stats.predictionsGenerated}</div>
+                    <div className="text-muted">予想</div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Errors */}
+            {bulkProgress.errors.length > 0 && (
+              <div className="p-3 rounded-lg bg-red-900/20 border border-red-700/30">
+                <p className="text-xs font-medium text-red-300 mb-1">エラー ({bulkProgress.errors.length}件)</p>
+                <div className="max-h-32 overflow-y-auto">
+                  {bulkProgress.errors.slice(0, 10).map((err, i) => (
+                    <p key={i} className="text-xs text-red-400">{err}</p>
+                  ))}
+                  {bulkProgress.errors.length > 10 && (
+                    <p className="text-xs text-muted">他{bulkProgress.errors.length - 10}件</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ==================== 個別同期アクション ==================== */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Full Sync */}
         <div className="bg-card-bg border border-card-border rounded-xl p-4">
-          <h3 className="font-bold mb-2">フル同期</h3>
+          <h3 className="font-bold mb-2">フル同期（1日分）</h3>
           <p className="text-sm text-muted mb-3">
             指定日のレース一覧、出馬表、オッズ、馬詳細、AI予想を一括取得します。
           </p>

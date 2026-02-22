@@ -304,7 +304,7 @@ function scoreHorse(
 function detectRunningStyle(pp: PastPerformance[]): RunningStyle {
   if (pp.length === 0) return '不明';
 
-  const recent = pp.slice(0, 8);
+  const recent = pp.slice(0, 15);
   let escapeCount = 0;
   let frontCount = 0;
   let stalkerCount = 0;
@@ -653,7 +653,7 @@ function calcRotation(pp: PastPerformance[]): number {
 function calcLastThreeFurlongs(pp: PastPerformance[], trackType: TrackType): number {
   if (pp.length === 0) return 50;
 
-  const recent = pp.slice(0, 8);
+  const recent = pp.slice(0, 15);
   const times: number[] = [];
 
   for (const perf of recent) {
@@ -682,7 +682,7 @@ function calcLastThreeFurlongs(pp: PastPerformance[], trackType: TrackType): num
 function calcConsistency(pp: PastPerformance[]): number {
   if (pp.length < 3) return 50;
 
-  const recent = pp.slice(0, 10);
+  const recent = pp.slice(0, 20);
   const ratios = recent.map(p => p.position / (p.entries || 16));
 
   const mean = ratios.reduce((s, r) => s + r, 0) / ratios.length;
