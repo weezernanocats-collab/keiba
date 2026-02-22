@@ -33,6 +33,7 @@ import {
   savePrediction,
 } from './queries';
 import { generatePrediction } from './prediction-engine';
+import { evaluateAllPendingRaces } from './accuracy-tracker';
 import { getDatabase } from './database';
 import type { PastPerformance } from '@/types';
 
@@ -418,6 +419,16 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
           progress.errors.push(`予想生成失敗 (${detail.id}): ${errMsg(error)}`);
         }
       }
+    }
+
+    // Step 7: 結果確定レースの予想を自動照合
+    progress.phase = '予想照合';
+    progress.detail = '結果確定レースの予想を自動照合中...';
+    const evalResults = evaluateAllPendingRaces();
+    if (evalResults.length > 0) {
+      const wins = evalResults.filter(r => r.winHit).length;
+      const places = evalResults.filter(r => r.placeHit).length;
+      progress.detail = `照合完了: ${evalResults.length}件 (単勝${wins}的中, 複勝${places}的中)`;
     }
 
     return finalize(progress);

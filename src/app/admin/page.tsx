@@ -450,6 +450,12 @@ export default function AdminPage() {
         </div>
       </div>
 
+      {/* ==================== 自動スケジューラー ==================== */}
+      <SchedulerPanel headers={headers} />
+
+      {/* ==================== 的中率ダッシュボード ==================== */}
+      <AccuracyPanel headers={headers} triggerSync={triggerSync} />
+
       {/* Sync Status */}
       {status && (
         <div className="space-y-4">
@@ -500,6 +506,226 @@ export default function AdminPage() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ==================== スケジューラーパネル ====================
+
+interface SchedulerStatus {
+  isRunning: boolean;
+  config: { morningFetchTime: string; oddsFetchTime: string; resultFetchTime: string; nightFetchTime: string };
+  lastRun: string | null;
+  nextScheduled: string | null;
+  recentLogs: { timestamp: string; action: string; detail: string; success: boolean }[];
+}
+
+function SchedulerPanel({ headers }: { headers: () => Record<string, string> }) {
+  const [sched, setSched] = useState<SchedulerStatus | null>(null);
+
+  const fetchScheduler = useCallback(async () => {
+    try {
+      const res = await fetch('/api/scheduler', { headers: headers() });
+      if (res.ok) setSched(await res.json());
+    } catch { /* ignore */ }
+  }, [headers]);
+
+  const schedAction = useCallback(async (action: string, extra?: Record<string, unknown>) => {
+    try {
+      await fetch('/api/scheduler', {
+        method: 'POST', headers: headers(),
+        body: JSON.stringify({ action, ...extra }),
+      });
+      setTimeout(fetchScheduler, 1000);
+    } catch { /* ignore */ }
+  }, [headers, fetchScheduler]);
+
+  return (
+    <div className="bg-card-bg border border-card-border rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-bold text-lg">自動データ更新スケジューラー</h3>
+        <button onClick={fetchScheduler} className="px-3 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors">
+          状態取得
+        </button>
+      </div>
+
+      {!sched ? (
+        <p className="text-sm text-muted">「状態取得」をクリックしてスケジューラーの状態を確認</p>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <span className={`px-2 py-1 rounded text-xs font-medium ${sched.isRunning ? 'bg-green-900/40 text-green-300' : 'bg-gray-700 text-gray-400'}`}>
+              {sched.isRunning ? '稼働中' : '停止中'}
+            </span>
+            {sched.nextScheduled && (
+              <span className="text-xs text-muted">次回: {sched.nextScheduled}</span>
+            )}
+            {sched.lastRun && (
+              <span className="text-xs text-muted">最終: {sched.lastRun}</span>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {!sched.isRunning ? (
+              <button onClick={() => schedAction('start')} className="px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-500 transition-colors">
+                スケジューラー開始
+              </button>
+            ) : (
+              <button onClick={() => schedAction('stop')} className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors">
+                停止
+              </button>
+            )}
+            <button onClick={() => schedAction('run_job', { job: 'morning' })} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors">
+              今すぐ朝取得
+            </button>
+            <button onClick={() => schedAction('run_job', { job: 'odds' })} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors">
+              今すぐオッズ
+            </button>
+            <button onClick={() => schedAction('run_job', { job: 'results' })} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors">
+              今すぐ結果
+            </button>
+          </div>
+
+          <p className="text-xs text-muted">
+            スケジュール: 朝{sched.config.morningFetchTime} / オッズ{sched.config.oddsFetchTime} / 結果{sched.config.resultFetchTime} / 翌日分{sched.config.nightFetchTime}
+          </p>
+
+          {sched.recentLogs.length > 0 && (
+            <div className="max-h-40 overflow-y-auto space-y-1">
+              {sched.recentLogs.slice(0, 10).map((log, i) => (
+                <div key={i} className="flex items-start gap-2 text-xs">
+                  <span className={log.success ? 'text-green-400' : 'text-red-400'}>
+                    {log.success ? '[OK]' : '[NG]'}
+                  </span>
+                  <span className="text-muted">{log.timestamp.slice(11, 19)}</span>
+                  <span className="font-medium">{log.action}</span>
+                  <span className="text-muted truncate">{log.detail}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==================== 的中率パネル ====================
+
+interface AccuracyData {
+  totalEvaluated: number;
+  winHitRate: number;
+  placeHitRate: number;
+  avgTop3Coverage: number;
+  overallRoi: number;
+  totalInvested: number;
+  totalReturned: number;
+  confidenceCalibration: { range: string; count: number; winHitRate: number; placeHitRate: number; avgRoi: number }[];
+  recentTrend: { period: string; count: number; winHitRate: number; placeHitRate: number; roi: number }[];
+}
+
+function AccuracyPanel({ headers, triggerSync }: {
+  headers: () => Record<string, string>;
+  triggerSync: (type: string, extra?: Record<string, string | boolean>) => Promise<void>;
+}) {
+  const [acc, setAcc] = useState<AccuracyData | null>(null);
+
+  const fetchAccuracy = useCallback(async () => {
+    try {
+      const res = await fetch('/api/sync', {
+        method: 'POST', headers: headers(),
+        body: JSON.stringify({ type: 'accuracy' }),
+      });
+      const data = await res.json();
+      if (data.stats) setAcc(data.stats);
+    } catch { /* ignore */ }
+  }, [headers]);
+
+  return (
+    <div className="bg-card-bg border border-card-border rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-bold text-lg">予想的中率ダッシュボード</h3>
+        <div className="flex gap-2">
+          <button onClick={() => triggerSync('evaluate_all')} className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-500 transition-colors">
+            一括照合
+          </button>
+          <button onClick={fetchAccuracy} className="px-3 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors">
+            統計更新
+          </button>
+        </div>
+      </div>
+
+      {!acc ? (
+        <p className="text-sm text-muted">「統計更新」をクリックして的中率統計を取得</p>
+      ) : acc.totalEvaluated === 0 ? (
+        <p className="text-sm text-muted">照合済みレースがありません。結果が確定したレースがあれば「一括照合」を実行してください。</p>
+      ) : (
+        <div className="space-y-4">
+          {/* 全体統計 */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatCard label="照合レース数" value={`${acc.totalEvaluated}`} />
+            <StatCard label="単勝的中率" value={`${acc.winHitRate}%`} color={acc.winHitRate >= 15 ? 'green' : acc.winHitRate >= 8 ? 'yellow' : 'red'} />
+            <StatCard label="複勝的中率" value={`${acc.placeHitRate}%`} color={acc.placeHitRate >= 40 ? 'green' : acc.placeHitRate >= 25 ? 'yellow' : 'red'} />
+            <StatCard label="回収率" value={`${acc.overallRoi}%`} color={acc.overallRoi >= 100 ? 'green' : acc.overallRoi >= 75 ? 'yellow' : 'red'} />
+          </div>
+
+          {/* 信頼度校正 */}
+          {acc.confidenceCalibration.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium mb-2">信頼度別 的中率（校正データ）</h4>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-card-border text-muted">
+                      <th className="py-1 text-left">信頼度帯</th>
+                      <th className="py-1 text-right">件数</th>
+                      <th className="py-1 text-right">単勝的中</th>
+                      <th className="py-1 text-right">複勝的中</th>
+                      <th className="py-1 text-right">ROI</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {acc.confidenceCalibration.map(c => (
+                      <tr key={c.range} className="border-b border-card-border/50">
+                        <td className="py-1.5 font-medium">{c.range}%</td>
+                        <td className="py-1.5 text-right">{c.count}</td>
+                        <td className="py-1.5 text-right">{c.winHitRate}%</td>
+                        <td className="py-1.5 text-right">{c.placeHitRate}%</td>
+                        <td className="py-1.5 text-right">{c.avgRoi}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* トレンド */}
+          {acc.recentTrend.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium mb-2">的中率トレンド</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {acc.recentTrend.map(t => (
+                  <div key={t.period} className="bg-gray-800/50 rounded p-2 text-xs text-center">
+                    <div className="font-medium mb-1">{t.period} ({t.count}件)</div>
+                    <div>単{t.winHitRate}% / 複{t.placeHitRate}% / ROI {t.roi}%</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ label, value, color }: { label: string; value: string; color?: 'green' | 'yellow' | 'red' }) {
+  const colorClass = color === 'green' ? 'text-green-300' : color === 'yellow' ? 'text-yellow-300' : color === 'red' ? 'text-red-300' : 'text-white';
+  return (
+    <div className="bg-gray-800/50 rounded-lg p-3 text-center">
+      <div className={`text-xl font-bold ${colorClass}`}>{value}</div>
+      <div className="text-xs text-muted mt-0.5">{label}</div>
     </div>
   );
 }

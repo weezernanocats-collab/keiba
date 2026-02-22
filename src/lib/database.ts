@@ -189,6 +189,29 @@ function initializeDatabase(db: Database.Database): void {
       FOREIGN KEY (horse_id) REFERENCES horses(id)
     );
 
+    -- 予想的中率追跡
+    CREATE TABLE IF NOT EXISTS prediction_results (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      race_id TEXT NOT NULL,
+      prediction_id INTEGER NOT NULL,
+      evaluated_at TEXT DEFAULT (datetime('now')),
+      -- 本命(1位指名)の実着順
+      top_pick_horse_id TEXT,
+      top_pick_actual_position INTEGER,
+      -- 的中判定
+      win_hit INTEGER DEFAULT 0,          -- 1着的中
+      place_hit INTEGER DEFAULT 0,         -- 3着以内的中
+      top3_picks_hit INTEGER DEFAULT 0,    -- 上位3頭のうち3着以内に入った数
+      -- 信頼度と実績
+      predicted_confidence INTEGER,
+      -- 推奨馬券の回収率
+      bet_investment REAL DEFAULT 0,       -- 推奨馬券の合計投資額
+      bet_return REAL DEFAULT 0,           -- 実際の払戻金
+      bet_roi REAL DEFAULT 0,             -- 回収率 (return / investment)
+      FOREIGN KEY (race_id) REFERENCES races(id),
+      FOREIGN KEY (prediction_id) REFERENCES predictions(id)
+    );
+
     -- 基本インデックス
     CREATE INDEX IF NOT EXISTS idx_races_date ON races(date);
     CREATE INDEX IF NOT EXISTS idx_races_racecourse ON races(racecourse_id);
@@ -207,6 +230,7 @@ function initializeDatabase(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_horses_trainer ON horses(trainer_name);
     CREATE INDEX IF NOT EXISTS idx_race_entries_jockey ON race_entries(jockey_id);
     CREATE INDEX IF NOT EXISTS idx_races_status ON races(status, date);
+    CREATE INDEX IF NOT EXISTS idx_prediction_results_race ON prediction_results(race_id);
   `);
 }
 

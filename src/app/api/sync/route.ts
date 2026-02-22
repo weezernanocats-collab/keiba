@@ -26,11 +26,12 @@ import {
 } from '@/lib/queries';
 import { generatePrediction } from '@/lib/prediction-engine';
 import { runBulkImport, getBulkImportProgress, abortBulkImport, type BulkImportConfig } from '@/lib/bulk-importer';
+import { evaluateRacePrediction, evaluateAllPendingRaces, getAccuracyStats } from '@/lib/accuracy-tracker';
 import type { PastPerformance } from '@/types';
 
 // ==================== Types ====================
 
-type SyncType = 'races' | 'race_detail' | 'odds' | 'results' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort';
+type SyncType = 'races' | 'race_detail' | 'odds' | 'results' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort' | 'accuracy' | 'evaluate_all';
 
 interface SyncRequest {
   type: SyncType;
@@ -131,7 +132,7 @@ export async function POST(request: NextRequest) {
   const { type, date, raceId, horseId } = body;
 
   // Validate type
-  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort'];
+  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'accuracy', 'evaluate_all'];
   if (!type || !validTypes.includes(type)) {
     return NextResponse.json(
       {
@@ -139,6 +140,25 @@ export async function POST(request: NextRequest) {
       },
       { status: 400 }
     );
+  }
+
+  // 的中率統計の取得
+  if (type === 'accuracy') {
+    const stats = getAccuracyStats();
+    return NextResponse.json({ stats });
+  }
+
+  // 未照合レースの一括評価
+  if (type === 'evaluate_all') {
+    const results = evaluateAllPendingRaces();
+    const stats = getAccuracyStats();
+    return NextResponse.json({
+      message: `${results.length}件のレースを照合しました`,
+      evaluated: results.length,
+      wins: results.filter(r => r.winHit).length,
+      places: results.filter(r => r.placeHit).length,
+      stats,
+    });
   }
 
   // バルクインポートの状態確認
@@ -404,9 +424,19 @@ async function syncResults(entry: SyncLogEntry, raceId: string): Promise<Scraped
       id: raceId,
       status: '結果確定',
     });
+
+    // 予想 vs 実結果を自動照合
+    const evalResult = evaluateRacePrediction(raceId);
+    if (evalResult) {
+      const hitStatus = evalResult.winHit ? '単勝的中!' : evalResult.placeHit ? '複勝的中' : '不的中';
+      entry.details = `結果取得完了: ${results.length}頭 [${hitStatus}]`;
+    } else {
+      entry.details = `結果取得完了: ${results.length}頭`;
+    }
+  } else {
+    entry.details = `結果取得完了: ${results.length}頭`;
   }
 
-  entry.details = `結果取得完了: ${results.length}頭`;
   return results;
 }
 
@@ -569,7 +599,15 @@ async function syncFull(entry: SyncLogEntry, date?: string): Promise<void> {
     }
   }
 
-  entry.details = `フル同期完了: ${targetDate} - ${buildStatsSummary(entry.stats)}`;
+  // Step 6: 結果が確定しているレースの予想を自動照合
+  const evalResults = evaluateAllPendingRaces();
+  if (evalResults.length > 0) {
+    const wins = evalResults.filter(r => r.winHit).length;
+    const places = evalResults.filter(r => r.placeHit).length;
+    entry.details = `フル同期完了: ${targetDate} - ${buildStatsSummary(entry.stats)} [照合${evalResults.length}件: 単勝${wins}的中, 複勝${places}的中]`;
+  } else {
+    entry.details = `フル同期完了: ${targetDate} - ${buildStatsSummary(entry.stats)}`;
+  }
 }
 
 // ==================== Type import for Race (used in upsertRace grade cast) ====================
