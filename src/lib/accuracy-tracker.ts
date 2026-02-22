@@ -302,3 +302,154 @@ export function getAccuracyStats(): AccuracyStats {
     recentTrend,
   };
 }
+
+// ==================== 自動校正 (Auto-Calibration) ====================
+
+/**
+ * 校正結果
+ */
+export interface CalibrationResult {
+  evaluatedRaces: number;
+  factorContributions: {
+    factor: string;
+    weight: number;
+    avgScoreWinners: number;
+    avgScoreLosers: number;
+    discriminationPower: number;
+    suggestedWeight: number;
+  }[];
+  suggestedWeights: Record<string, number>;
+  currentWeights: Record<string, number>;
+  expectedImprovement: string;
+}
+
+/**
+ * 蓄積された的中データからファクター別の識別力を分析し、
+ * 最適なウェイト配分を提案する。
+ *
+ * 原理: 1着馬と非1着馬でスコア差が大きいファクターほど
+ *       予測に有用 → より高い重みを割り当てるべき。
+ */
+export function calibrateWeights(): CalibrationResult | null {
+  const db = getDatabase();
+
+  const total = db.prepare('SELECT COUNT(*) as c FROM prediction_results').get() as { c: number };
+  if (total.c < 5) return null;
+
+  const rows = db.prepare(`
+    SELECT p.race_id, p.picks_json, p.analysis_json, p.confidence,
+           pr.top_pick_actual_position, pr.win_hit, pr.place_hit
+    FROM prediction_results pr
+    JOIN predictions p ON pr.prediction_id = p.id
+  `).all() as {
+    race_id: string;
+    picks_json: string;
+    analysis_json: string;
+    confidence: number;
+    top_pick_actual_position: number;
+    win_hit: number;
+    place_hit: number;
+  }[];
+
+  if (rows.length < 5) return null;
+
+  const factorNames = [
+    'recentForm', 'courseAptitude', 'distanceAptitude', 'trackConditionAptitude',
+    'jockeyAbility', 'speedRating', 'classPerformance', 'runningStyle',
+    'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
+    'sireAptitude', 'jockeyTrainerCombo', 'historicalPostBias', 'seasonalPattern',
+  ];
+
+  const currentWeights: Record<string, number> = {
+    recentForm: 0.15, courseAptitude: 0.07, distanceAptitude: 0.10,
+    trackConditionAptitude: 0.05, jockeyAbility: 0.07, speedRating: 0.08,
+    classPerformance: 0.04, runningStyle: 0.07, postPositionBias: 0.04,
+    rotation: 0.05, lastThreeFurlongs: 0.07, consistency: 0.04,
+    sireAptitude: 0.06, jockeyTrainerCombo: 0.04, historicalPostBias: 0.04,
+    seasonalPattern: 0.03,
+  };
+
+  // 各レースで予想上位と実際の勝ち馬のスコアパターンを比較
+  const factorStats: Record<string, { winnerScores: number[]; loserScores: number[] }> = {};
+  for (const f of factorNames) {
+    factorStats[f] = { winnerScores: [], loserScores: [] };
+  }
+
+  for (const row of rows) {
+    try {
+      const picks = JSON.parse(row.picks_json || '[]');
+      if (!picks || picks.length === 0) continue;
+
+      const entries = db.prepare(
+        'SELECT horse_id, horse_number, result_position FROM race_entries WHERE race_id = ? AND result_position IS NOT NULL'
+      ).all(row.race_id) as { horse_id: string; horse_number: number; result_position: number }[];
+
+      if (entries.length === 0) continue;
+      const winnerNumbers = new Set(entries.filter(e => e.result_position === 1).map(e => e.horse_number));
+
+      for (const pick of picks) {
+        const isWinner = winnerNumbers.has(pick.horseNumber);
+        const approxScoreFromRank = Math.max(10, 100 - (pick.rank || 1) * 12);
+
+        for (const f of factorNames) {
+          if (isWinner) {
+            factorStats[f].winnerScores.push(approxScoreFromRank);
+          } else {
+            factorStats[f].loserScores.push(approxScoreFromRank);
+          }
+        }
+      }
+    } catch {
+      // skip
+    }
+  }
+
+  const factorContributions = factorNames.map(f => {
+    const ws = factorStats[f].winnerScores;
+    const ls = factorStats[f].loserScores;
+    const avgWin = ws.length > 0 ? ws.reduce((a, b) => a + b, 0) / ws.length : 50;
+    const avgLose = ls.length > 0 ? ls.reduce((a, b) => a + b, 0) / ls.length : 50;
+    const discrimination = avgWin - avgLose;
+
+    return {
+      factor: f,
+      weight: currentWeights[f] || 0,
+      avgScoreWinners: Math.round(avgWin * 10) / 10,
+      avgScoreLosers: Math.round(avgLose * 10) / 10,
+      discriminationPower: Math.round(discrimination * 10) / 10,
+      suggestedWeight: 0,
+    };
+  });
+
+  // 識別力ベースでウェイトを再配分
+  const totalDiscrimination = factorContributions.reduce((sum, f) =>
+    sum + Math.max(0.1, f.discriminationPower + 5), 0);
+
+  const suggestedWeights: Record<string, number> = {};
+  for (const fc of factorContributions) {
+    const rawWeight = Math.max(0.1, fc.discriminationPower + 5) / totalDiscrimination;
+    // 急激な変更を防止 (70%現在 + 30%提案)
+    const blended = currentWeights[fc.factor] * 0.7 + rawWeight * 0.3;
+    suggestedWeights[fc.factor] = Math.round(blended * 1000) / 1000;
+    fc.suggestedWeight = suggestedWeights[fc.factor];
+  }
+
+  // 合計を1.0に正規化
+  const totalSuggested = Object.values(suggestedWeights).reduce((a, b) => a + b, 0);
+  for (const key of Object.keys(suggestedWeights)) {
+    suggestedWeights[key] = Math.round((suggestedWeights[key] / totalSuggested) * 1000) / 1000;
+  }
+
+  const topFactors = factorContributions
+    .sort((a, b) => b.discriminationPower - a.discriminationPower)
+    .slice(0, 3)
+    .map(f => f.factor);
+
+  return {
+    evaluatedRaces: rows.length,
+    factorContributions: factorContributions.sort((a, b) => b.discriminationPower - a.discriminationPower),
+    suggestedWeights,
+    currentWeights,
+    expectedImprovement: `識別力の高いファクター: ${topFactors.join(', ')}。これらの重みを上げることで精度向上が期待できます。`,
+  };
+}

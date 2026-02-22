@@ -13,6 +13,7 @@ import {
   setHorseTraits, savePrediction, mapPastPerformance,
 } from './queries';
 import { generatePrediction, type HorseAnalysisInput } from './prediction-engine';
+import { evaluateAllPendingRaces } from './accuracy-tracker';
 import { generatePastPerformances } from './seed-helpers';
 import { ALL_HORSES } from './seed-horses';
 import { ALL_JOCKEYS, ALL_RACES, type RaceTemplate } from './seed-jockeys-races';
@@ -41,8 +42,11 @@ export function seedAllData() {
   // オッズ
   seedOdds();
 
-  // AI予想生成
+  // AI予想生成（過去レース含む全レース）
   seedPredictions();
+
+  // 過去レースの予想 vs 実結果を自動照合（的中率ダッシュボード用）
+  evaluateAllPendingRaces();
 }
 
 // ==================== 馬 + 過去成績 ====================
@@ -196,8 +200,8 @@ function seedOdds() {
 function seedPredictions() {
   const db = getDatabase();
 
-  // 出走確定レースに対してAI予想を生成
-  const confirmedRaces = ALL_RACES.filter(r => r.status === '出走確定');
+  // 全レースに対してAI予想を生成（過去レースも含めて的中率検証を可能にする）
+  const confirmedRaces = ALL_RACES.filter(r => r.status === '出走確定' || r.status === '結果確定');
 
   for (const tmpl of confirmedRaces) {
     const now = Date.now();
@@ -209,7 +213,7 @@ function seedPredictions() {
 
     const horseInputs: HorseAnalysisInput[] = entries.map((e: Record<string, unknown>) => {
       const ppRows = db.prepare(
-        'SELECT * FROM past_performances WHERE horse_id = ? ORDER BY date DESC LIMIT 50'
+        'SELECT * FROM past_performances WHERE horse_id = ? ORDER BY date DESC LIMIT 100'
       ).all(e.horse_id as string);
       const pp = ppRows.map(mapPastPerformance);
 

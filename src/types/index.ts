@@ -150,6 +150,7 @@ export interface Prediction {
 
 export interface PredictionPick {
   rank: number;
+  horseId?: string;
   horseNumber: number;
   horseName: string;
   score: number;

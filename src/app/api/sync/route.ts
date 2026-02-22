@@ -26,12 +26,12 @@ import {
 } from '@/lib/queries';
 import { generatePrediction } from '@/lib/prediction-engine';
 import { runBulkImport, getBulkImportProgress, abortBulkImport, type BulkImportConfig } from '@/lib/bulk-importer';
-import { evaluateRacePrediction, evaluateAllPendingRaces, getAccuracyStats } from '@/lib/accuracy-tracker';
+import { evaluateRacePrediction, evaluateAllPendingRaces, getAccuracyStats, calibrateWeights } from '@/lib/accuracy-tracker';
 import type { PastPerformance } from '@/types';
 
 // ==================== Types ====================
 
-type SyncType = 'races' | 'race_detail' | 'odds' | 'results' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort' | 'accuracy' | 'evaluate_all';
+type SyncType = 'races' | 'race_detail' | 'odds' | 'results' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort' | 'accuracy' | 'evaluate_all' | 'calibrate';
 
 interface SyncRequest {
   type: SyncType;
@@ -132,7 +132,7 @@ export async function POST(request: NextRequest) {
   const { type, date, raceId, horseId } = body;
 
   // Validate type
-  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'accuracy', 'evaluate_all'];
+  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'accuracy', 'evaluate_all', 'calibrate'];
   if (!type || !validTypes.includes(type)) {
     return NextResponse.json(
       {
@@ -159,6 +159,17 @@ export async function POST(request: NextRequest) {
       places: results.filter(r => r.placeHit).length,
       stats,
     });
+  }
+
+  // ウェイト自動校正
+  if (type === 'calibrate') {
+    const calibration = calibrateWeights();
+    if (!calibration) {
+      return NextResponse.json({
+        error: '校正に必要なデータが不足しています（最低5レース分の照合済みデータが必要）',
+      }, { status: 400 });
+    }
+    return NextResponse.json({ calibration });
   }
 
   // バルクインポートの状態確認

@@ -241,6 +241,7 @@ export function generatePrediction(
   // トップピック生成
   const topPicks: PredictionPick[] = scoredHorses.slice(0, 6).map((sh, idx) => ({
     rank: idx + 1,
+    horseId: sh.entry.horseId,
     horseNumber: sh.entry.horseNumber,
     horseName: sh.entry.horseName,
     score: Math.round(sh.totalScore * 100) / 100,

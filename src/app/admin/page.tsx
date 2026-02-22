@@ -199,6 +199,34 @@ export default function AdminPage() {
           数百〜数千頭の実データを投入し、種牡馬統計やコース統計を有効にします。
         </p>
 
+        {/* 期間プリセット */}
+        <div className="flex flex-wrap gap-2 mb-3">
+          {[
+            { label: '直近1ヶ月', days: 30 },
+            { label: '直近3ヶ月', days: 90 },
+            { label: '直近6ヶ月', days: 180 },
+            { label: '直近1年 (推奨)', days: 365 },
+            { label: '直近2年', days: 730 },
+          ].map(preset => (
+            <button
+              key={preset.days}
+              onClick={() => {
+                const d = new Date();
+                d.setDate(d.getDate() - preset.days);
+                setBulkStartDate(d.toISOString().split('T')[0]);
+                setBulkEndDate(new Date().toISOString().split('T')[0]);
+              }}
+              className={`px-3 py-1 text-xs rounded-full border transition-colors ${
+                preset.days === 365
+                  ? 'border-primary text-primary hover:bg-primary/20 font-medium'
+                  : 'border-card-border text-muted hover:bg-gray-700'
+              }`}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
           <div>
             <label className="block text-xs text-muted mb-1">開始日</label>
@@ -624,11 +652,20 @@ interface AccuracyData {
   recentTrend: { period: string; count: number; winHitRate: number; placeHitRate: number; roi: number }[];
 }
 
+interface CalibrationData {
+  evaluatedRaces: number;
+  factorContributions: { factor: string; weight: number; avgScoreWinners: number; avgScoreLosers: number; discriminationPower: number; suggestedWeight: number }[];
+  suggestedWeights: Record<string, number>;
+  currentWeights: Record<string, number>;
+  expectedImprovement: string;
+}
+
 function AccuracyPanel({ headers, triggerSync }: {
   headers: () => Record<string, string>;
   triggerSync: (type: string, extra?: Record<string, string | boolean>) => Promise<void>;
 }) {
   const [acc, setAcc] = useState<AccuracyData | null>(null);
+  const [cal, setCal] = useState<CalibrationData | null>(null);
 
   const fetchAccuracy = useCallback(async () => {
     try {
@@ -641,6 +678,17 @@ function AccuracyPanel({ headers, triggerSync }: {
     } catch { /* ignore */ }
   }, [headers]);
 
+  const runCalibration = useCallback(async () => {
+    try {
+      const res = await fetch('/api/sync', {
+        method: 'POST', headers: headers(),
+        body: JSON.stringify({ type: 'calibrate' }),
+      });
+      const data = await res.json();
+      if (data.calibration) setCal(data.calibration);
+    } catch { /* ignore */ }
+  }, [headers]);
+
   return (
     <div className="bg-card-bg border border-card-border rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
@@ -648,6 +696,9 @@ function AccuracyPanel({ headers, triggerSync }: {
         <div className="flex gap-2">
           <button onClick={() => triggerSync('evaluate_all')} className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-500 transition-colors">
             一括照合
+          </button>
+          <button onClick={runCalibration} className="px-3 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-500 transition-colors">
+            ウェイト校正
           </button>
           <button onClick={fetchAccuracy} className="px-3 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors">
             統計更新
@@ -712,6 +763,48 @@ function AccuracyPanel({ headers, triggerSync }: {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* ウェイト自動校正結果 */}
+          {cal && (
+            <div className="border-t border-card-border pt-4">
+              <h4 className="text-sm font-medium mb-2">ウェイト自動校正分析（{cal.evaluatedRaces}レース分析）</h4>
+              <p className="text-xs text-muted mb-3">{cal.expectedImprovement}</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-card-border text-muted">
+                      <th className="py-1 text-left">ファクター</th>
+                      <th className="py-1 text-right">現在</th>
+                      <th className="py-1 text-right">推奨</th>
+                      <th className="py-1 text-right">変更</th>
+                      <th className="py-1 text-right">識別力</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cal.factorContributions.map(fc => {
+                      const diff = fc.suggestedWeight - fc.weight;
+                      const diffColor = diff > 0.005 ? 'text-green-400' : diff < -0.005 ? 'text-red-400' : 'text-gray-500';
+                      return (
+                        <tr key={fc.factor} className="border-b border-card-border/50">
+                          <td className="py-1">{fc.factor}</td>
+                          <td className="py-1 text-right">{(fc.weight * 100).toFixed(1)}%</td>
+                          <td className="py-1 text-right font-medium">{(fc.suggestedWeight * 100).toFixed(1)}%</td>
+                          <td className={`py-1 text-right ${diffColor}`}>
+                            {diff > 0 ? '+' : ''}{(diff * 100).toFixed(1)}%
+                          </td>
+                          <td className="py-1 text-right">{fc.discriminationPower}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-muted mt-2">
+                識別力 = 1着馬の平均スコア - 非1着馬の平均スコア。高いほど予測に有用。
+                推奨値はデータ蓄積に応じて精度が向上します。
+              </p>
             </div>
           )}
         </div>
