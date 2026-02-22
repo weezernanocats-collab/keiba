@@ -1,21 +1,29 @@
 /**
- * AI予想エンジン v2
+ * AI予想エンジン v3
  *
- * 過去の成績データを12の観点から多角的に分析し、レースの予想を生成する。
+ * 過去の成績データを16の観点から多角的に分析し、レースの予想を生成する。
+ * v3では統計ベースの分析ファクターを追加。
  *
  * スコアリング要素と重み:
- *   1. 直近成績        (18%) - 直近5走の着順を重み付け評価
- *   2. コース適性      (10%) - 同競馬場での過去成績
- *   3. 距離適性        (12%) - 同距離帯での過去成績
- *   4. 馬場状態適性    (7%)  - 同馬場状態での成績
- *   5. 騎手能力        (8%)  - 騎手の勝率・複勝率
- *   6. スピード指数    (10%) - タイムベースの速度評価
- *   7. クラス実績      (5%)  - 重賞など上位クラスでの成績
- *   8. 脚質適性        (8%)  - 展開との相性（逃げ/先行/差し/追込）
- *   9. 枠順分析        (5%)  - コース形態に応じた枠の有利不利
- *  10. ローテーション  (5%)  - 前走からの間隔と叩き良化パターン
- *  11. 上がり3F        (8%)  - 末脚の切れ味評価
- *  12. 安定性          (4%)  - 着順のバラつきの少なさ
+ *   === 個体分析 (従来) ===
+ *   1.  直近成績        (15%) - 直近5走の着順を重み付け評価
+ *   2.  コース適性      (7%)  - 同競馬場での過去成績
+ *   3.  距離適性        (10%) - 同距離帯での過去成績
+ *   4.  馬場状態適性    (5%)  - 同馬場状態での成績
+ *   5.  騎手能力        (7%)  - 騎手の勝率・複勝率
+ *   6.  スピード指数    (8%)  - タイムベースの速度評価
+ *   7.  クラス実績      (4%)  - 重賞など上位クラスでの成績
+ *   8.  脚質適性        (7%)  - 展開との相性（逃げ/先行/差し/追込）
+ *   9.  枠順分析        (4%)  - コース形態に応じた枠の有利不利
+ *   10. ローテーション  (5%)  - 前走からの間隔と叩き良化パターン
+ *   11. 上がり3F        (7%)  - 末脚の切れ味評価
+ *   12. 安定性          (4%)  - 着順のバラつきの少なさ
+ *
+ *   === 統計ベース分析 (v3新規) ===
+ *   13. 血統適性        (6%)  - 種牡馬産駒の統計的なコース/距離/馬場適性
+ *   14. 騎手×調教師     (4%)  - コンビの過去成績統計
+ *   15. 統計的枠順バイアス (4%) - 過去データから算出した枠別勝率
+ *   16. 季節パターン    (3%)  - 馬ごとの季節別成績傾向
  */
 
 import type {
@@ -23,20 +31,36 @@ import type {
   RaceEntry, PastPerformance, TrackType, TrackCondition,
 } from '@/types';
 
-// 重み設定
+import {
+  buildRaceContext,
+  calcSireAptitudeScore,
+  calcJockeyTrainerScore,
+  calcHistoricalPostBias,
+  calcSeasonalScore,
+  calcSecondStartScore,
+  type RaceHistoricalContext,
+} from './historical-analyzer';
+
+// 重み設定 (v3: 16ファクター、合計1.00)
 const WEIGHTS = {
-  recentForm: 0.18,
-  courseAptitude: 0.10,
-  distanceAptitude: 0.12,
-  trackConditionAptitude: 0.07,
-  jockeyAbility: 0.08,
-  speedRating: 0.10,
-  classPerformance: 0.05,
-  runningStyle: 0.08,
-  postPositionBias: 0.05,
+  // 個体分析
+  recentForm: 0.15,
+  courseAptitude: 0.07,
+  distanceAptitude: 0.10,
+  trackConditionAptitude: 0.05,
+  jockeyAbility: 0.07,
+  speedRating: 0.08,
+  classPerformance: 0.04,
+  runningStyle: 0.07,
+  postPositionBias: 0.04,
   rotation: 0.05,
-  lastThreeFurlongs: 0.08,
+  lastThreeFurlongs: 0.07,
   consistency: 0.04,
+  // 統計ベース分析
+  sireAptitude: 0.06,
+  jockeyTrainerCombo: 0.04,
+  historicalPostBias: 0.04,
+  seasonalPattern: 0.03,
 };
 
 // 脚質
@@ -47,6 +71,7 @@ interface HorseAnalysisInput {
   pastPerformances: PastPerformance[];
   jockeyWinRate: number;
   jockeyPlaceRate: number;
+  fatherName: string;
 }
 
 interface ScoredHorse {
@@ -55,6 +80,7 @@ interface ScoredHorse {
   scores: Record<string, number>;
   reasons: string[];
   runningStyle: RunningStyle;
+  fatherName: string;
 }
 
 export function generatePrediction(
@@ -69,10 +95,22 @@ export function generatePrediction(
   horses: HorseAnalysisInput[],
 ): Prediction {
   const cond = trackCondition || '良';
+  const month = new Date(date).getMonth() + 1;
 
-  // 各馬をスコアリング（脚質判定込み）
+  // 統計コンテキストを構築（1レースにつき1回）
+  const ctx = buildRaceContext(
+    racecourseName, trackType, distance, month,
+    horses.map(h => ({
+      horseId: h.entry.horseId,
+      fatherName: h.fatherName,
+      jockeyId: h.entry.jockeyId,
+      trainerName: h.entry.trainerName,
+    })),
+  );
+
+  // 各馬をスコアリング
   const scoredHorses = horses.map(h =>
-    scoreHorse(h, trackType, distance, cond, racecourseName, grade, horses.length)
+    scoreHorse(h, trackType, distance, cond, racecourseName, grade, horses.length, ctx, month)
   );
 
   // 展開予想から脚質ボーナスを付与
@@ -91,10 +129,10 @@ export function generatePrediction(
   }));
 
   // レース分析
-  const analysis = analyzeRace(scoredHorses, trackType, distance, cond, racecourseName);
+  const analysis = analyzeRace(scoredHorses, trackType, distance, cond, racecourseName, ctx);
 
   // 信頼度算出
-  const confidence = calculateConfidence(scoredHorses);
+  const confidence = calculateConfidence(scoredHorses, ctx);
 
   // 推奨馬券
   const recommendedBets = generateBetRecommendations(scoredHorses, confidence);
@@ -125,15 +163,19 @@ function scoreHorse(
   racecourseName: string,
   grade: string | undefined,
   fieldSize: number,
+  ctx: RaceHistoricalContext,
+  month: number,
 ): ScoredHorse {
-  const { entry, pastPerformances: pp, jockeyWinRate, jockeyPlaceRate } = input;
+  const { entry, pastPerformances: pp, jockeyWinRate, jockeyPlaceRate, fatherName } = input;
   const reasons: string[] = [];
   const scores: Record<string, number> = {};
 
   // 脚質判定
   const runStyle = detectRunningStyle(pp);
 
-  // 1. 直近成績 (0-100) - 直近5走を減衰加重
+  // ==================== 個体分析 ====================
+
+  // 1. 直近成績 (0-100)
   scores.recentForm = calcRecentFormScore(pp);
   if (scores.recentForm >= 75) reasons.push(`直近成績が優秀（スコア${Math.round(scores.recentForm)}）`);
   else if (scores.recentForm >= 60) reasons.push('直近の調子は悪くない');
@@ -144,7 +186,7 @@ function scoreHorse(
   if (scores.courseAptitude >= 75) reasons.push(`${racecourseName}コースで好成績`);
   else if (scores.courseAptitude <= 35) reasons.push(`${racecourseName}コースは未経験or苦手`);
 
-  // 3. 距離適性 (0-100) - ベスト距離との差を非線形評価
+  // 3. 距離適性 (0-100)
   scores.distanceAptitude = calcDistanceAptitude(pp, distance);
   if (scores.distanceAptitude >= 75) reasons.push(`${distance}m前後がベスト距離`);
   else if (scores.distanceAptitude <= 35) reasons.push('距離適性に不安');
@@ -167,7 +209,7 @@ function scoreHorse(
   scores.classPerformance = calcClassPerformance(pp, grade);
   if (scores.classPerformance >= 75) reasons.push('重賞レベルで好走実績あり');
 
-  // 8. 脚質適性 (0-100) - 展開ボーナスは後で付与
+  // 8. 脚質適性 (0-100)
   scores.runningStyle = calcRunningStyleBase(runStyle, distance);
   if (runStyle === '逃げ' && distance <= 1400) reasons.push('逃げ馬で短距離向き');
   if (runStyle === '差し' && distance >= 1800) reasons.push('差し脚質で中長距離向き');
@@ -178,7 +220,7 @@ function scoreHorse(
   if (scores.postPositionBias >= 75) reasons.push('枠順が有利');
   else if (scores.postPositionBias <= 30) reasons.push('外枠で不利');
 
-  // 10. ローテーション (0-100) - 前走からの間隔
+  // 10. ローテーション (0-100)
   scores.rotation = calcRotation(pp);
   if (scores.rotation >= 75) reasons.push('理想的なローテーション');
   else if (scores.rotation <= 30) reasons.push('間隔が空きすぎorタイトすぎ');
@@ -188,10 +230,63 @@ function scoreHorse(
   if (scores.lastThreeFurlongs >= 80) reasons.push('末脚が鋭く上がり最速級');
   else if (scores.lastThreeFurlongs >= 65) reasons.push('末脚はまずまず');
 
-  // 12. 安定性 (0-100) - 着順のバラつき
+  // 12. 安定性 (0-100)
   scores.consistency = calcConsistency(pp);
   if (scores.consistency >= 75) reasons.push('着順が安定しており堅実');
   else if (scores.consistency <= 30) reasons.push('ムラのある走りで計算しづらい');
+
+  // ==================== 統計ベース分析 (v3) ====================
+
+  // 13. 血統適性 (0-100)
+  const sireStats = ctx.sireStatsMap.get(fatherName);
+  scores.sireAptitude = calcSireAptitudeScore(sireStats, trackType, distance, trackCondition);
+  if (sireStats && scores.sireAptitude >= 70) {
+    const trackLabel = trackType === '芝' ? '芝' : 'ダート';
+    reasons.push(`父${fatherName}産駒は${trackLabel}${distance}m適性が高い（統計）`);
+  } else if (sireStats && scores.sireAptitude <= 35) {
+    reasons.push(`父${fatherName}産駒のこの条件成績は低調（統計）`);
+  }
+
+  // 14. 騎手×調教師コンボ (0-100)
+  const comboKey = `${entry.jockeyId}__${entry.trainerName}`;
+  const combo = ctx.jockeyTrainerMap.get(comboKey);
+  scores.jockeyTrainerCombo = calcJockeyTrainerScore(combo);
+  if (combo && combo.totalRaces >= 5 && scores.jockeyTrainerCombo >= 70) {
+    reasons.push(`${entry.jockeyName}×${entry.trainerName}コンビ好相性（勝率${Math.round(combo.winRate * 100)}%）`);
+  }
+
+  // 15. 統計的枠順バイアス (0-100)
+  scores.historicalPostBias = calcHistoricalPostBias(ctx.courseDistStats, entry.postPosition);
+  if (ctx.courseDistStats && ctx.courseDistStats.totalRaces >= 30) {
+    if (scores.historicalPostBias >= 70) reasons.push(`${racecourseName}${distance}mでこの枠は統計的に好成績`);
+    else if (scores.historicalPostBias <= 35) reasons.push(`${racecourseName}${distance}mでこの枠は統計的に不利`);
+  }
+
+  // 16. 季節パターン (0-100)
+  const seasonal = ctx.seasonalMap.get(entry.horseId);
+  scores.seasonalPattern = calcSeasonalScore(seasonal, month);
+  if (seasonal && scores.seasonalPattern >= 70) {
+    reasons.push(`${month}月の成績が良い（季節パターン）`);
+  } else if (seasonal && scores.seasonalPattern <= 35) {
+    reasons.push(`${month}月は成績が振るわない傾向`);
+  }
+
+  // 叩き良化ボーナス（ローテーションスコアに加算）
+  const secondStartBonus = ctx.secondStartMap.get(entry.horseId);
+  if (secondStartBonus && pp.length >= 2) {
+    const lastDate = pp[0]?.date;
+    const prevDate = pp[1]?.date;
+    if (lastDate && prevDate) {
+      const daysSinceLast = Math.floor((Date.now() - new Date(lastDate).getTime()) / (1000 * 60 * 60 * 24));
+      const daysBetweenLastTwo = Math.floor((new Date(lastDate).getTime() - new Date(prevDate).getTime()) / (1000 * 60 * 60 * 24));
+      const isSecondStart = daysBetweenLastTwo >= 60 && daysSinceLast <= 42;
+      const bonus = calcSecondStartScore(secondStartBonus, daysSinceLast, isSecondStart);
+      if (isSecondStart && bonus > 55) {
+        scores.rotation = Math.min(100, scores.rotation + (bonus - 50) * 0.5);
+        reasons.push('叩き2走目で良化パターン（統計）');
+      }
+    }
+  }
 
   // 総合スコア
   let totalScore = 0;
@@ -201,7 +296,7 @@ function scoreHorse(
 
   if (reasons.length === 0) reasons.push('特筆すべき要素なし');
 
-  return { entry, totalScore, scores, reasons, runningStyle: runStyle };
+  return { entry, totalScore, scores, reasons, runningStyle: runStyle, fatherName };
 }
 
 // ==================== 脚質判定 ====================
@@ -241,14 +336,13 @@ function detectRunningStyle(pp: PastPerformance[]): RunningStyle {
 }
 
 function calcRunningStyleBase(style: RunningStyle, distance: number): number {
-  // 脚質×距離の基本スコア
   if (style === '不明') return 50;
 
   if (distance <= 1200) {
     if (style === '逃げ') return 75;
     if (style === '先行') return 70;
     if (style === '差し') return 50;
-    return 35; // 追込
+    return 35;
   }
   if (distance <= 1600) {
     if (style === '逃げ') return 65;
@@ -262,7 +356,6 @@ function calcRunningStyleBase(style: RunningStyle, distance: number): number {
     if (style === '差し') return 70;
     return 55;
   }
-  // 2400m以上
   if (style === '逃げ') return 50;
   if (style === '先行') return 60;
   if (style === '差し') return 70;
@@ -272,12 +365,10 @@ function calcRunningStyleBase(style: RunningStyle, distance: number): number {
 // ==================== 展開予想ボーナス ====================
 
 function applyPaceBonus(horses: ScoredHorse[], distance: number): void {
-  // 逃げ馬・先行馬の数でペースを予想
   const escapers = horses.filter(h => h.runningStyle === '逃げ').length;
   const frontRunners = horses.filter(h => h.runningStyle === '先行').length;
   const forwardTotal = escapers + frontRunners;
 
-  // ペース判定
   let paceType: 'ハイ' | 'ミドル' | 'スロー';
   if (forwardTotal >= Math.ceil(horses.length * 0.5)) {
     paceType = 'ハイ';
@@ -287,7 +378,6 @@ function applyPaceBonus(horses: ScoredHorse[], distance: number): void {
     paceType = 'ミドル';
   }
 
-  // ペースに応じた脚質ボーナス
   const bonus: Record<RunningStyle, number> = {
     '逃げ': 0, '先行': 0, '差し': 0, '追込': 0, '不明': 0,
   };
@@ -298,13 +388,12 @@ function applyPaceBonus(horses: ScoredHorse[], distance: number): void {
     bonus['差し'] = 3;
     bonus['追込'] = 5;
   } else if (paceType === 'スロー') {
-    bonus['逃げ'] = escapers <= 1 ? 6 : 3;  // 逃げ1頭なら大有利
+    bonus['逃げ'] = escapers <= 1 ? 6 : 3;
     bonus['先行'] = 3;
     bonus['差し'] = -2;
     bonus['追込'] = -5;
   }
 
-  // 距離が短いほど前有利を強調
   const distFactor = distance <= 1400 ? 1.3 : distance <= 1800 ? 1.0 : 0.8;
 
   for (const horse of horses) {
@@ -332,14 +421,12 @@ function calcRecentFormScore(pp: PastPerformance[]): number {
     score += posScore * w;
   });
 
-  // 連勝ボーナス
   const winStreak = countWinStreak(pp);
   if (winStreak >= 3) score += 10;
   else if (winStreak >= 2) score += 5;
 
-  // 前走大敗からの巻き返しパターン
   if (pp.length >= 2 && pp[0].position <= 3 && pp[1].position >= 8) {
-    score += 3; // 立て直し成功
+    score += 3;
   }
 
   return Math.min(100, score);
@@ -362,7 +449,6 @@ function calcCourseAptitude(pp: PastPerformance[], racecourseName: string): numb
     return sum + p.position / (p.entries || 16);
   }, 0) / courseRaces.length;
 
-  // 勝率ボーナス
   const wins = courseRaces.filter(p => p.position === 1).length;
   const winBonus = wins > 0 ? Math.min(15, wins * 5) : 0;
 
@@ -372,14 +458,12 @@ function calcCourseAptitude(pp: PastPerformance[], racecourseName: string): numb
 function calcDistanceAptitude(pp: PastPerformance[], targetDistance: number): number {
   if (pp.length === 0) return 50;
 
-  // 距離帯ごとに集計
   const exact = pp.filter(p => Math.abs(p.distance - targetDistance) <= 100);
   const near = pp.filter(p => Math.abs(p.distance - targetDistance) <= 200);
   const wide = pp.filter(p => Math.abs(p.distance - targetDistance) <= 400);
 
-  if (wide.length === 0) return 35; // 完全に未経験距離
+  if (wide.length === 0) return 35;
 
-  // 近い距離帯ほど重視
   let score = 0;
   let totalWeight = 0;
 
@@ -407,8 +491,6 @@ function calcTrackConditionAptitude(pp: PastPerformance[], trackType: TrackType,
   if (relevantRaces.length === 0) return 50;
 
   const sameCondition = relevantRaces.filter(p => p.trackCondition === condition);
-
-  // 道悪系はグルーピング（重+不良、良+稍重）
   const isHeavy = condition === '重' || condition === '不良';
   const heavyRaces = relevantRaces.filter(p => p.trackCondition === '重' || p.trackCondition === '不良');
 
@@ -423,7 +505,6 @@ function calcTrackConditionAptitude(pp: PastPerformance[], trackType: TrackType,
 }
 
 function calcJockeyScore(winRate: number, placeRate: number): number {
-  // 勝率を主軸、複勝率でベースアップ
   const score = (winRate * 100) * 2.5 + (placeRate * 100) * 1.2;
   return Math.min(100, Math.max(10, score));
 }
@@ -439,26 +520,20 @@ function calcSpeedRating(pp: PastPerformance[], trackType: TrackType, distance: 
 
   if (relevantRaces.length === 0) return 50;
 
-  // 標準タイム（秒）のテーブル
   const standardTimes: Record<string, Record<number, number>> = {
     '芝': { 1000: 56.0, 1200: 69.0, 1400: 82.0, 1600: 95.0, 1800: 108.5, 2000: 121.0, 2200: 134.0, 2400: 147.0, 2500: 153.0, 3000: 183.0, 3200: 196.0, 3600: 222.0 },
     'ダート': { 1000: 59.0, 1200: 72.0, 1400: 84.0, 1600: 97.0, 1700: 104.0, 1800: 111.0, 2000: 125.0, 2100: 131.0 },
     '障害': { 3000: 210.0, 3200: 225.0, 3300: 232.0, 3570: 252.0, 3930: 280.0, 4250: 305.0 },
   };
 
-  // スピード指数を計算
   const ratings = relevantRaces.map(p => {
     const seconds = timeToSeconds(p.time);
     if (seconds <= 0) return 0;
 
-    // 距離に応じた標準タイムを補間
     const stdTime = interpolateStandardTime(standardTimes[trackType] || {}, p.distance);
     if (stdTime <= 0) return 50;
 
-    // 馬場差補正
     const condAdj = getConditionAdjustment(p.trackCondition, trackType);
-
-    // スピード指数 = 基準値 + (標準タイム - 実タイム) × 距離補正 + 馬場差
     const timeDiff = stdTime - seconds;
     const rating = 50 + timeDiff * (1000 / p.distance) * 20 + condAdj;
 
@@ -467,7 +542,6 @@ function calcSpeedRating(pp: PastPerformance[], trackType: TrackType, distance: 
 
   if (ratings.length === 0) return 50;
 
-  // ベスト3の平均（安定した能力指標）
   ratings.sort((a, b) => b - a);
   const top3 = ratings.slice(0, 3);
   return top3.reduce((s, r) => s + r, 0) / top3.length;
@@ -477,17 +551,14 @@ function interpolateStandardTime(table: Record<number, number>, distance: number
   const distances = Object.keys(table).map(Number).sort((a, b) => a - b);
   if (distances.length === 0) return 0;
 
-  // 完全一致
   if (table[distance] !== undefined) return table[distance];
 
-  // 範囲外
   if (distance <= distances[0]) return table[distances[0]] * (distance / distances[0]);
   if (distance >= distances[distances.length - 1]) {
     const last = distances[distances.length - 1];
     return table[last] * (distance / last);
   }
 
-  // 線形補間
   for (let i = 0; i < distances.length - 1; i++) {
     if (distance >= distances[i] && distance <= distances[i + 1]) {
       const ratio = (distance - distances[i]) / (distances[i + 1] - distances[i]);
@@ -529,14 +600,11 @@ function calcClassPerformance(pp: PastPerformance[], _grade: string | undefined)
   return 40;
 }
 
-// ==================== 新要素 ====================
-
 function calcPostPositionBias(post: number, fieldSize: number, distance: number, trackType: TrackType, racecourseName: string): number {
   if (fieldSize === 0) return 50;
 
-  const posRatio = post / Math.ceil(fieldSize / 2); // 1-8枠中の位置
+  const posRatio = post / Math.ceil(fieldSize / 2);
 
-  // コースごとの枠有利・不利テーブル
   const biasMap: Record<string, Record<string, number>> = {
     '東京': { '芝_inner': 60, '芝_outer': 50, 'ダート_inner': 55, 'ダート_outer': 50 },
     '中山': { '芝_inner': 70, '芝_outer': 40, 'ダート_inner': 65, 'ダート_outer': 45 },
@@ -554,12 +622,10 @@ function calcPostPositionBias(post: number, fieldSize: number, distance: number,
   const courseBias = biasMap[racecourseName]?.[key];
 
   if (courseBias !== undefined) {
-    // 距離が短いほど枠の影響大
     const distFactor = distance <= 1400 ? 1.2 : distance >= 2400 ? 0.7 : 1.0;
     return Math.min(100, Math.max(10, courseBias * distFactor));
   }
 
-  // データがないコースはデフォルト
   return isInner ? 55 : 48;
 }
 
@@ -573,19 +639,15 @@ function calcRotation(pp: PastPerformance[]): number {
   const today = new Date();
   const daysSinceLast = Math.floor((today.getTime() - lastRaceDate.getTime()) / (1000 * 60 * 60 * 24));
 
-  // 理想的な間隔: 3-8週（21-56日）
-  if (daysSinceLast < 10) return 25;  // 連闘は厳しい
-  if (daysSinceLast < 14) return 45;  // 中1週
-  if (daysSinceLast < 21) return 60;  // 中2週
-  if (daysSinceLast <= 35) return 80;  // 中3-4週（理想）
-  if (daysSinceLast <= 56) return 75;  // 中5-8週
-  if (daysSinceLast <= 84) return 60;  // 中9-12週
-  if (daysSinceLast <= 120) return 45; // 中13-17週
-  if (daysSinceLast <= 180) return 35; // 半年ぶり
-  return 20; // 長期休養明け
-
-  // 叩き良化パターン: 前走が休み明けで凡走→今回は叩き2走目
-  // (上記return文で既にreturnされるため、ここは到達しない)
+  if (daysSinceLast < 10) return 25;
+  if (daysSinceLast < 14) return 45;
+  if (daysSinceLast < 21) return 60;
+  if (daysSinceLast <= 35) return 80;
+  if (daysSinceLast <= 56) return 75;
+  if (daysSinceLast <= 84) return 60;
+  if (daysSinceLast <= 120) return 45;
+  if (daysSinceLast <= 180) return 35;
+  return 20;
 }
 
 function calcLastThreeFurlongs(pp: PastPerformance[], trackType: TrackType): number {
@@ -603,17 +665,14 @@ function calcLastThreeFurlongs(pp: PastPerformance[], trackType: TrackType): num
 
   if (times.length === 0) return 50;
 
-  // ベスト上がりとここ3走の平均で評価
   const best = Math.min(...times);
   const recentAvg = times.slice(0, 3).reduce((s, t) => s + t, 0) / Math.min(3, times.length);
 
-  // 基準タイム
   const baseline = trackType === '芝' ? 34.5 : 36.5;
 
   const bestDiff = baseline - best;
   const avgDiff = baseline - recentAvg;
 
-  // ベスト50%、平均50%で評価
   const bestScore = 50 + bestDiff * 10;
   const avgScore = 50 + avgDiff * 8;
 
@@ -626,12 +685,10 @@ function calcConsistency(pp: PastPerformance[]): number {
   const recent = pp.slice(0, 10);
   const ratios = recent.map(p => p.position / (p.entries || 16));
 
-  // 着順比率の標準偏差
   const mean = ratios.reduce((s, r) => s + r, 0) / ratios.length;
   const variance = ratios.reduce((s, r) => s + (r - mean) ** 2, 0) / ratios.length;
   const stdDev = Math.sqrt(variance);
 
-  // 標準偏差が小さい＝安定
   if (stdDev <= 0.10) return 90;
   if (stdDev <= 0.15) return 75;
   if (stdDev <= 0.20) return 60;
@@ -641,11 +698,16 @@ function calcConsistency(pp: PastPerformance[]): number {
 
 // ==================== レース分析 ====================
 
-function analyzeRace(scoredHorses: ScoredHorse[], trackType: TrackType, distance: number, condition: TrackCondition, racecourseName: string): RaceAnalysis {
-  // 馬場バイアス
+function analyzeRace(
+  scoredHorses: ScoredHorse[],
+  trackType: TrackType,
+  distance: number,
+  condition: TrackCondition,
+  racecourseName: string,
+  ctx: RaceHistoricalContext,
+): RaceAnalysis {
   let trackBias = `${racecourseName}${trackType}${distance}m`;
 
-  // コース形態に基づく詳細分析
   const courseInfo = getCourseCharacteristics(racecourseName, trackType, distance);
   if (condition === '重' || condition === '不良') {
     trackBias += `（${condition}馬場）- ${courseInfo}。道悪で内枠有利の傾向が強まる可能性あり。パワー型の馬に注目。`;
@@ -655,7 +717,22 @@ function analyzeRace(scoredHorses: ScoredHorse[], trackType: TrackType, distance
     trackBias += `（${condition}馬場）- ${courseInfo}。`;
   }
 
-  // ペース分析（詳細版）
+  // 統計情報を分析に追加
+  if (ctx.courseDistStats && ctx.courseDistStats.totalRaces >= 20) {
+    const stats = ctx.courseDistStats;
+    if (stats.frontRunnerRate >= 0.6) {
+      trackBias += ` 過去データでは先行馬の勝率が高い（${Math.round(stats.frontRunnerRate * 100)}%）。`;
+    } else if (stats.frontRunnerRate <= 0.3) {
+      trackBias += ` 過去データでは差し・追込が決まりやすいコース。`;
+    }
+
+    if (Math.abs(stats.innerFrameWinRate - stats.outerFrameWinRate) > 0.03) {
+      const biasDir = stats.innerFrameWinRate > stats.outerFrameWinRate ? '内枠' : '外枠';
+      trackBias += ` 統計上は${biasDir}有利。`;
+    }
+  }
+
+  // ペース分析
   const escapers = scoredHorses.filter(h => h.runningStyle === '逃げ');
   const frontRunners = scoredHorses.filter(h => h.runningStyle === '先行');
   const stalkers = scoredHorses.filter(h => h.runningStyle === '差し');
@@ -680,7 +757,21 @@ function analyzeRace(scoredHorses: ScoredHorse[], trackType: TrackType, distance
 
   if (condition === '重' || condition === '不良') keyFactors.push('道悪適性が勝敗を分ける。パワー型が台頭しやすい');
 
-  // 上がり3F上位馬に注目
+  // 血統傾向
+  const sireAnalysis: string[] = [];
+  for (const [sire, stats] of ctx.sireStatsMap.entries()) {
+    if (stats.totalRaces >= 10) {
+      const trackStats = trackType === '芝' ? stats.turfStats : stats.dirtStats;
+      if (trackStats.winRate >= 0.20) {
+        const horses = scoredHorses.filter(h => h.fatherName === sire);
+        if (horses.length > 0) {
+          sireAnalysis.push(`${sire}産駒（${horses.map(h => h.entry.horseName).join('、')}）はこの条件で好成績`);
+        }
+      }
+    }
+  }
+  if (sireAnalysis.length > 0) keyFactors.push(`【血統注目】${sireAnalysis.join('。')}`);
+
   const fastFinishers = scoredHorses.filter(h => h.scores.lastThreeFurlongs >= 70);
   if (fastFinishers.length > 0) {
     keyFactors.push(`上がり3F上位: ${fastFinishers.slice(0, 3).map(h => h.entry.horseName).join('、')}`);
@@ -745,7 +836,7 @@ function getCourseCharacteristics(course: string, trackType: TrackType, distance
 
 // ==================== 信頼度 ====================
 
-function calculateConfidence(scoredHorses: ScoredHorse[]): number {
+function calculateConfidence(scoredHorses: ScoredHorse[], ctx: RaceHistoricalContext): number {
   if (scoredHorses.length < 3) return 25;
 
   const gap1_2 = scoredHorses[0].totalScore - scoredHorses[1].totalScore;
@@ -753,7 +844,6 @@ function calculateConfidence(scoredHorses: ScoredHorse[]): number {
 
   let confidence = 35;
 
-  // スコア差
   if (gap1_2 > 10) confidence += 20;
   else if (gap1_2 > 7) confidence += 15;
   else if (gap1_2 > 4) confidence += 8;
@@ -763,15 +853,18 @@ function calculateConfidence(scoredHorses: ScoredHorse[]): number {
   else if (gap1_3 > 10) confidence += 10;
   else if (gap1_3 > 6) confidence += 5;
 
-  // データの充実度
   const avgNon50 = scoredHorses.reduce((sum, sh) =>
     sum + Object.values(sh.scores).filter(s => s !== 50).length, 0
   ) / scoredHorses.length;
-  if (avgNon50 >= 8) confidence += 10;
+  if (avgNon50 >= 10) confidence += 12;
+  else if (avgNon50 >= 8) confidence += 8;
   else if (avgNon50 >= 5) confidence += 5;
 
-  // 本命馬の安定性ボーナス
   if (scoredHorses[0].scores.consistency >= 70) confidence += 5;
+
+  // 統計データの充実度ボーナス
+  if (ctx.courseDistStats && ctx.courseDistStats.totalRaces >= 30) confidence += 5;
+  if (ctx.sireStatsMap.size >= 3) confidence += 3;
 
   return Math.min(92, Math.max(15, confidence));
 }
@@ -788,7 +881,6 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
   const fourth = scoredHorses[3];
   const gap12 = top.totalScore - second.totalScore;
 
-  // 単勝（本命が抜けている場合）
   if (gap12 > 5 && confidence >= 50) {
     bets.push({
       type: '単勝',
@@ -798,7 +890,6 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
     });
   }
 
-  // 複勝（安定重視）
   bets.push({
     type: '複勝',
     selections: [top.entry.horseNumber],
@@ -806,7 +897,6 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
     expectedValue: calcExpectedValue(top, scoredHorses) * 0.7,
   });
 
-  // 馬連
   bets.push({
     type: '馬連',
     selections: [top.entry.horseNumber, second.entry.horseNumber],
@@ -814,7 +904,6 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
     expectedValue: (calcExpectedValue(top, scoredHorses) + calcExpectedValue(second, scoredHorses)) / 2,
   });
 
-  // ワイド（本命と穴馬の組み合わせ）
   if (third.totalScore > 40) {
     bets.push({
       type: 'ワイド',
@@ -824,7 +913,6 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
     });
   }
 
-  // 三連複
   if (fourth && third.totalScore - fourth.totalScore > 2) {
     bets.push({
       type: '三連複',
@@ -834,7 +922,6 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
     });
   }
 
-  // 馬単（軸が明確な場合）
   if (gap12 > 7 && confidence >= 55) {
     bets.push({
       type: '馬単',
@@ -844,7 +931,6 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
     });
   }
 
-  // 三連単（高信頼度の場合のみ）
   if (gap12 > 8 && confidence >= 65 && fourth && third.totalScore - fourth.totalScore > 3) {
     bets.push({
       type: '三連単',
@@ -894,6 +980,7 @@ function generateSummary(topPicks: PredictionPick[], analysis: RaceAnalysis, rac
 
   parts.push('');
   parts.push(`AI信頼度: ${confidence}%`);
+  parts.push('※統計分析v3: 16ファクター分析（血統・騎手×調教師・季節パターン含む）');
 
   return parts.join('\n');
 }

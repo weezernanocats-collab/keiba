@@ -20,6 +20,7 @@ import {
   upsertHorse,
   insertPastPerformance,
   getHorsePastPerformances,
+  getHorseById,
   getRaceById,
   savePrediction,
 } from '@/lib/queries';
@@ -492,11 +493,13 @@ async function syncFull(entry: SyncLogEntry, date?: string): Promise<void> {
       // Build horse analysis inputs for prediction engine
       const horseInputs = raceData.entries.map((re) => {
         const pastPerfs = getHorsePastPerformances(re.horseId, 20);
+        const horseData = getHorseById(re.horseId) as { father_name?: string } | null;
         return {
           entry: re,
           pastPerformances: pastPerfs,
           jockeyWinRate: 0.08, // default if jockey stats not available
           jockeyPlaceRate: 0.20,
+          fatherName: horseData?.father_name || '',
         };
       });
 
