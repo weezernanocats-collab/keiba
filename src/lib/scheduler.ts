@@ -271,7 +271,7 @@ async function executeMorningFetch(date: string): Promise<void> {
         const raceData = getRaceById(detail.id);
         if (!raceData?.entries?.length) continue;
         const horseInputs = raceData.entries.map((re: import('@/types').RaceEntry) => {
-          const pastPerfs = getHorsePastPerformances(re.horseId, 50);
+          const pastPerfs = getHorsePastPerformances(re.horseId, 100);
           const horseData = getHorseById(re.horseId) as { father_name?: string } | null;
           return {
             entry: re, pastPerformances: pastPerfs,

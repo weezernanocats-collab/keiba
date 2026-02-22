@@ -568,7 +568,7 @@ async function syncFull(entry: SyncLogEntry, date?: string): Promise<void> {
 
       // Build horse analysis inputs for prediction engine
       const horseInputs = raceData.entries.map((re) => {
-        const pastPerfs = getHorsePastPerformances(re.horseId, 50);
+        const pastPerfs = getHorsePastPerformances(re.horseId, 100);
         const horseData = getHorseById(re.horseId) as { father_name?: string } | null;
         return {
           entry: re,

@@ -318,7 +318,7 @@ export function mapPastPerformance(row: any): PastPerformance {
   };
 }
 
-export function getHorsePastPerformances(horseId: string, limit: number = 50) {
+export function getHorsePastPerformances(horseId: string, limit: number = 100) {
   const db = getDatabase();
   const rows = db.prepare(`
     SELECT * FROM past_performances WHERE horse_id = ? ORDER BY date DESC LIMIT ?

@@ -140,7 +140,8 @@ function getCourseDistanceStats(
     AND entries > 0
   `).all(racecourseName, trackType, distance - tolerance, distance + tolerance);
 
-  if (rows.length < 10) return null;
+  // v4: 閾値を10→3に緩和（少ないデータでも部分的に活用、重み調整はエンジン側で行う）
+  if (rows.length < 3) return null;
 
   // 枠番別勝率
   const postMap: Record<number, { races: number; wins: number }> = {};
@@ -205,7 +206,8 @@ function getSireStats(sireName: string): SireStats | null {
     AND pp.entries > 0
   `).all(sireName);
 
-  if (rows.length < 5) return null;
+  // v4: 閾値を5→2に緩和（少ないデータでも部分的に活用）
+  if (rows.length < 2) return null;
 
   let wins = 0, places = 0;
   const turfR = { races: 0, wins: 0 };
@@ -274,7 +276,8 @@ function getJockeyTrainerCombo(jockeyId: string, trainerName: string): JockeyTra
     AND pp.entries > 0
   `).all(jockeyId, trainerName);
 
-  if (rows.length < 3) return null;
+  // v4: 閾値を3→1に緩和
+  if (rows.length < 1) return null;
 
   let wins = 0, places = 0;
   for (const r of rows) {
@@ -305,7 +308,8 @@ function getHorseSeasonalStats(horseId: string): SeasonalStats[] {
     AND entries > 0
   `).all(horseId);
 
-  if (rows.length < 3) return [];
+  // v4: 閾値を3→1に緩和
+  if (rows.length < 1) return [];
 
   const monthMap: Record<number, { races: number; wins: number; places: number }> = {};
   for (const r of rows) {
@@ -440,7 +444,8 @@ export function calcHistoricalPostBias(
   stats: CourseDistanceStats | null,
   postPosition: number,
 ): number {
-  if (!stats || stats.totalRaces < 20) return 50;
+  // v4: 閾値を20→5に緩和（重み調整はエンジン側で行う）
+  if (!stats || stats.totalRaces < 5) return 50;
 
   const postData = stats.postPositionWinRate[postPosition];
   if (!postData || postData.races < 3) {

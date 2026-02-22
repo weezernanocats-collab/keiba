@@ -105,7 +105,7 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
 
   abortRequested = false;
   const rateLimitMs = config.rateLimitMs ?? 1200;
-  const maxPP = config.maxPastPerformances ?? 50;
+  const maxPP = config.maxPastPerformances ?? 100;
 
   const progress: BulkImportProgress = {
     phase: '初期化',

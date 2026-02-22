@@ -1,8 +1,13 @@
 /**
- * AI予想エンジン v3
+ * AI予想エンジン v4
  *
  * 過去の成績データを16の観点から多角的に分析し、レースの予想を生成する。
- * v3では統計ベースの分析ファクターを追加。
+ * v4: ベイズ推定フォールバック + 動的ウェイト調整 + データ充実度ベース信頼度
+ *
+ * v4の改善点:
+ *   - データ不足時に「50点デフォルト」ではなく母集団事前分布を使用
+ *   - データ充実度に応じてファクター重みを動的に再配分
+ *   - 信頼度計算にデータ量・カバレッジを組み込み
  *
  * スコアリング要素と重み:
  *   === 個体分析 (従来) ===
@@ -62,6 +67,120 @@ const WEIGHTS = {
   historicalPostBias: 0.04,
   seasonalPattern: 0.03,
 };
+
+// ==================== v4: データ充実度 & ベイズ推定 ====================
+
+/**
+ * 各ファクターのデータ充実度 (0.0〜1.0)
+ * 0.0 = データなし（全て事前分布）, 1.0 = 十分なデータあり（観測値のみ）
+ */
+interface DataReliability {
+  factor: string;
+  reliability: number; // 0.0-1.0
+  dataPoints: number;  // このファクター計算に使われたデータ点数
+}
+
+/**
+ * 母集団の事前分布 (ベイズ推定のprior)
+ * データ不足時にデフォルト50ではなくこれを使う
+ *
+ * 例: コース適性でそのコースの成績が0走の場合
+ *   旧: 50 (情報なし)
+ *   新: 全馬の平均コース適性スコアをpriorとして、
+ *       reliability に応じて posterior = prior * (1-r) + observed * r
+ */
+const POPULATION_PRIORS: Record<string, number> = {
+  recentForm: 45,          // 平均的な馬は若干下位寄り
+  courseAptitude: 48,       // 未経験コースはやや不利
+  distanceAptitude: 45,    // 距離未経験は不利寄り
+  trackConditionAptitude: 48,
+  jockeyAbility: 40,       // 騎手データなし → 平均以下
+  speedRating: 45,         // タイムなし → やや不利
+  classPerformance: 42,    // 重賞未経験は不利
+  runningStyle: 50,        // 脚質は中立
+  postPositionBias: 50,    // 枠順は中立
+  rotation: 50,            // ローテは中立
+  lastThreeFurlongs: 45,   // 上がり3Fデータなし → やや不利
+  consistency: 45,         // 走数少 → 安定感不明は不利寄り
+  sireAptitude: 50,        // 血統は中立prior
+  jockeyTrainerCombo: 50,  // コンボは中立prior
+  historicalPostBias: 50,  // 枠バイアスは中立
+  seasonalPattern: 50,     // 季節は中立
+};
+
+/**
+ * ファクターごとのデータ充実度を計算し、信頼度を返す
+ * reliability = min(dataPoints / requiredPoints, 1.0)
+ */
+function calcFactorReliability(factor: string, dataPoints: number): number {
+  // 各ファクターで「十分」とみなすデータ点数
+  const requiredPoints: Record<string, number> = {
+    recentForm: 5,
+    courseAptitude: 3,
+    distanceAptitude: 3,
+    trackConditionAptitude: 2,
+    jockeyAbility: 1,       // 騎手率は常に1 or 0
+    speedRating: 3,
+    classPerformance: 2,
+    runningStyle: 5,
+    postPositionBias: 1,    // 常に利用可能
+    rotation: 1,            // 前走があれば利用可能
+    lastThreeFurlongs: 3,
+    consistency: 5,
+    sireAptitude: 10,
+    jockeyTrainerCombo: 5,
+    historicalPostBias: 20,
+    seasonalPattern: 6,
+  };
+  const req = requiredPoints[factor] || 5;
+  return Math.min(1.0, dataPoints / req);
+}
+
+/**
+ * ベイズ推定: prior と observed を reliability で混合
+ */
+function bayesianScore(factor: string, observedScore: number, dataPoints: number): { score: number; reliability: number } {
+  const reliability = calcFactorReliability(factor, dataPoints);
+  const prior = POPULATION_PRIORS[factor] || 50;
+  const score = prior * (1 - reliability) + observedScore * reliability;
+  return { score, reliability };
+}
+
+/**
+ * 動的ウェイト調整: データ不足ファクターの重みを下げ、充実ファクターに再配分
+ */
+function adjustWeights(reliabilities: DataReliability[]): Record<string, number> {
+  const adjusted: Record<string, number> = { ...WEIGHTS };
+
+  // 各ファクターの有効重み = 基本重み × reliability
+  let totalEffective = 0;
+  let totalBase = 0;
+  for (const { factor, reliability } of reliabilities) {
+    const base = WEIGHTS[factor as keyof typeof WEIGHTS] || 0;
+    // reliability < 0.3 のファクターは重みを大きく減らす
+    const effective = base * Math.max(0.2, reliability);
+    adjusted[factor] = effective;
+    totalEffective += effective;
+    totalBase += base;
+  }
+
+  // 残った重みを reliability >= 0.5 のファクターに比例配分
+  if (totalEffective < totalBase * 0.99) {
+    const surplus = totalBase - totalEffective;
+    const reliableFactors = reliabilities.filter(r => r.reliability >= 0.5);
+    const reliableTotal = reliableFactors.reduce((s, r) =>
+      s + (WEIGHTS[r.factor as keyof typeof WEIGHTS] || 0), 0);
+
+    if (reliableTotal > 0) {
+      for (const { factor } of reliableFactors) {
+        const base = WEIGHTS[factor as keyof typeof WEIGHTS] || 0;
+        adjusted[factor] += surplus * (base / reliableTotal);
+      }
+    }
+  }
+
+  return adjusted;
+}
 
 // 脚質
 type RunningStyle = '逃げ' | '先行' | '差し' | '追込' | '不明';
@@ -288,13 +407,65 @@ function scoreHorse(
     }
   }
 
-  // 総合スコア
+  // ==================== v4: ベイズ推定 + 動的ウェイト ====================
+
+  // 各ファクターのデータ充実度を計算
+  const reliabilities: DataReliability[] = [];
+  const countCourse = pp.filter(p => p.racecourseName === racecourseName).length;
+  const countDistWide = pp.filter(p => Math.abs(p.distance - distance) <= 400).length;
+  const countTrackCond = pp.filter(p => p.trackType === trackType).length;
+  const countSpeedRelevant = pp.filter(p => p.trackType === trackType && Math.abs(p.distance - distance) <= 200 && p.time).length;
+  const countGrade = pp.filter(p => p.raceName.includes('G1') || p.raceName.includes('G2') || p.raceName.includes('G3') || p.raceName.includes('ステークス')).length;
+  const countL3F = pp.slice(0, 15).filter(p => p.lastThreeFurlongs && parseFloat(p.lastThreeFurlongs) > 0).length;
+
+  const jtComboKey = `${entry.jockeyId}__${entry.trainerName}`;
+  const comboData = ctx.jockeyTrainerMap.get(jtComboKey);
+  const sireData = ctx.sireStatsMap.get(fatherName);
+  const seasonalData = ctx.seasonalMap.get(entry.horseId);
+
+  reliabilities.push(
+    { factor: 'recentForm', reliability: calcFactorReliability('recentForm', pp.length), dataPoints: pp.length },
+    { factor: 'courseAptitude', reliability: calcFactorReliability('courseAptitude', countCourse), dataPoints: countCourse },
+    { factor: 'distanceAptitude', reliability: calcFactorReliability('distanceAptitude', countDistWide), dataPoints: countDistWide },
+    { factor: 'trackConditionAptitude', reliability: calcFactorReliability('trackConditionAptitude', countTrackCond), dataPoints: countTrackCond },
+    { factor: 'jockeyAbility', reliability: jockeyWinRate > 0 ? 1.0 : 0.0, dataPoints: jockeyWinRate > 0 ? 1 : 0 },
+    { factor: 'speedRating', reliability: calcFactorReliability('speedRating', countSpeedRelevant), dataPoints: countSpeedRelevant },
+    { factor: 'classPerformance', reliability: calcFactorReliability('classPerformance', countGrade), dataPoints: countGrade },
+    { factor: 'runningStyle', reliability: calcFactorReliability('runningStyle', pp.length), dataPoints: pp.length },
+    { factor: 'postPositionBias', reliability: 1.0, dataPoints: 1 },
+    { factor: 'rotation', reliability: pp.length > 0 ? 1.0 : 0.0, dataPoints: pp.length > 0 ? 1 : 0 },
+    { factor: 'lastThreeFurlongs', reliability: calcFactorReliability('lastThreeFurlongs', countL3F), dataPoints: countL3F },
+    { factor: 'consistency', reliability: calcFactorReliability('consistency', pp.length), dataPoints: pp.length },
+    { factor: 'sireAptitude', reliability: calcFactorReliability('sireAptitude', sireData?.totalRaces || 0), dataPoints: sireData?.totalRaces || 0 },
+    { factor: 'jockeyTrainerCombo', reliability: calcFactorReliability('jockeyTrainerCombo', comboData?.totalRaces || 0), dataPoints: comboData?.totalRaces || 0 },
+    { factor: 'historicalPostBias', reliability: calcFactorReliability('historicalPostBias', ctx.courseDistStats?.totalRaces || 0), dataPoints: ctx.courseDistStats?.totalRaces || 0 },
+    { factor: 'seasonalPattern', reliability: calcFactorReliability('seasonalPattern', seasonalData?.reduce((s, m) => s + m.races, 0) || 0), dataPoints: seasonalData?.reduce((s, m) => s + m.races, 0) || 0 },
+  );
+
+  // ベイズ推定でスコアを補正
+  for (const rel of reliabilities) {
+    const raw = scores[rel.factor];
+    if (raw !== undefined) {
+      const { score: bayesian } = bayesianScore(rel.factor, raw, rel.dataPoints);
+      scores[rel.factor] = bayesian;
+    }
+  }
+
+  // 動的ウェイト調整
+  const dynWeights = adjustWeights(reliabilities);
+
+  // 総合スコア (動的ウェイト使用)
   let totalScore = 0;
-  for (const [key, weight] of Object.entries(WEIGHTS)) {
+  for (const [key, weight] of Object.entries(dynWeights)) {
     totalScore += (scores[key] || 50) * weight;
   }
 
   if (reasons.length === 0) reasons.push('特筆すべき要素なし');
+
+  // データ充実度を記録 (信頼度計算で使用)
+  const avgReliability = reliabilities.reduce((s, r) => s + r.reliability, 0) / reliabilities.length;
+  scores._dataReliability = avgReliability * 100;
+  scores._totalDataPoints = reliabilities.reduce((s, r) => s + r.dataPoints, 0);
 
   return { entry, totalScore, scores, reasons, runningStyle: runStyle, fatherName };
 }
@@ -837,36 +1008,57 @@ function getCourseCharacteristics(course: string, trackType: TrackType, distance
 // ==================== 信頼度 ====================
 
 function calculateConfidence(scoredHorses: ScoredHorse[], ctx: RaceHistoricalContext): number {
-  if (scoredHorses.length < 3) return 25;
+  if (scoredHorses.length < 3) return 15;
 
   const gap1_2 = scoredHorses[0].totalScore - scoredHorses[1].totalScore;
   const gap1_3 = scoredHorses[0].totalScore - scoredHorses[2].totalScore;
 
-  let confidence = 35;
+  // === 予測の分離度 (最大40pt) ===
+  let separation = 0;
+  if (gap1_2 > 10) separation += 20;
+  else if (gap1_2 > 7) separation += 15;
+  else if (gap1_2 > 4) separation += 8;
+  else separation -= 5;
 
-  if (gap1_2 > 10) confidence += 20;
-  else if (gap1_2 > 7) confidence += 15;
-  else if (gap1_2 > 4) confidence += 8;
-  else confidence -= 5;
+  if (gap1_3 > 15) separation += 15;
+  else if (gap1_3 > 10) separation += 10;
+  else if (gap1_3 > 6) separation += 5;
 
-  if (gap1_3 > 15) confidence += 15;
-  else if (gap1_3 > 10) confidence += 10;
-  else if (gap1_3 > 6) confidence += 5;
+  if (scoredHorses[0].scores.consistency >= 70) separation += 5;
 
-  const avgNon50 = scoredHorses.reduce((sum, sh) =>
-    sum + Object.values(sh.scores).filter(s => s !== 50).length, 0
+  // === データ充実度 (最大35pt) ===
+  // 全馬平均のデータ信頼度
+  const avgDataReliability = scoredHorses.reduce((sum, sh) =>
+    sum + (sh.scores._dataReliability || 0), 0
   ) / scoredHorses.length;
-  if (avgNon50 >= 10) confidence += 12;
-  else if (avgNon50 >= 8) confidence += 8;
-  else if (avgNon50 >= 5) confidence += 5;
 
-  if (scoredHorses[0].scores.consistency >= 70) confidence += 5;
+  // 平均データ点数
+  const avgDataPoints = scoredHorses.reduce((sum, sh) =>
+    sum + (sh.scores._totalDataPoints || 0), 0
+  ) / scoredHorses.length;
 
-  // 統計データの充実度ボーナス
-  if (ctx.courseDistStats && ctx.courseDistStats.totalRaces >= 30) confidence += 5;
-  if (ctx.sireStatsMap.size >= 3) confidence += 3;
+  let dataScore = 0;
+  // データ信頼度 (0-100) → 最大20pt
+  dataScore += Math.min(20, avgDataReliability * 0.25);
 
-  return Math.min(92, Math.max(15, confidence));
+  // 平均データ点数 → 最大15pt
+  if (avgDataPoints >= 50) dataScore += 15;
+  else if (avgDataPoints >= 30) dataScore += 12;
+  else if (avgDataPoints >= 15) dataScore += 8;
+  else if (avgDataPoints >= 5) dataScore += 4;
+  else dataScore -= 5; // データ不足でペナルティ
+
+  // === 統計データの充実度 (最大15pt) ===
+  let statScore = 0;
+  if (ctx.courseDistStats && ctx.courseDistStats.totalRaces >= 30) statScore += 5;
+  else if (ctx.courseDistStats && ctx.courseDistStats.totalRaces >= 10) statScore += 2;
+  if (ctx.sireStatsMap.size >= 5) statScore += 4;
+  else if (ctx.sireStatsMap.size >= 2) statScore += 2;
+  if (ctx.jockeyTrainerMap.size >= 3) statScore += 3;
+  if (ctx.seasonalMap.size >= 3) statScore += 3;
+
+  const confidence = 20 + separation + dataScore + statScore;
+  return Math.min(92, Math.max(10, Math.round(confidence)));
 }
 
 // ==================== 推奨馬券 ====================
