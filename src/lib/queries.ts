@@ -409,7 +409,26 @@ export function getDashboardStats() {
   const upcomingRaces = (db.prepare("SELECT COUNT(*) as count FROM races WHERE date >= date('now') AND status IN ('予定', '出走確定')").get() as { count: number }).count;
   const totalPredictions = (db.prepare('SELECT COUNT(*) as count FROM predictions').get() as { count: number }).count;
 
-  return { totalHorses, totalJockeys, totalRaces, upcomingRaces, totalPredictions };
+  // 的中率統計
+  const predResults = db.prepare('SELECT COUNT(*) as c FROM prediction_results').get() as { c: number };
+  const accuracyData = predResults.c > 0 ? db.prepare(`
+    SELECT
+      COUNT(*) as total_evaluated,
+      ROUND(AVG(win_hit) * 100, 1) as win_hit_rate,
+      ROUND(AVG(place_hit) * 100, 1) as place_hit_rate,
+      ROUND(AVG(CAST(top3_picks_hit as REAL) / 3.0) * 100, 1) as top3_coverage
+    FROM prediction_results
+  `).get() as { total_evaluated: number; win_hit_rate: number; place_hit_rate: number; top3_coverage: number } : null;
+
+  return {
+    totalHorses, totalJockeys, totalRaces, upcomingRaces, totalPredictions,
+    accuracy: accuracyData ? {
+      totalEvaluated: accuracyData.total_evaluated,
+      winHitRate: accuracyData.win_hit_rate,
+      placeHitRate: accuracyData.place_hit_rate,
+      top3Coverage: accuracyData.top3_coverage,
+    } : null,
+  };
 }
 
 // ==================== 騎手成績（レース別） ====================

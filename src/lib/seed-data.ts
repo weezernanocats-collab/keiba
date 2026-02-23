@@ -17,6 +17,10 @@ import { evaluateAllPendingRaces } from './accuracy-tracker';
 import { generatePastPerformances } from './seed-helpers';
 import { ALL_HORSES } from './seed-horses';
 import { ALL_JOCKEYS, ALL_RACES, type RaceTemplate } from './seed-jockeys-races';
+import { generatePastRaces } from './seed-race-generator';
+
+// 手動定義レース + 自動生成50レースを結合
+const COMBINED_RACES: RaceTemplate[] = [...ALL_RACES, ...generatePastRaces(50)];
 
 // ==================== メインエントリ ====================
 
@@ -38,6 +42,9 @@ export function seedAllData() {
 
   // レースデータ（過去＋未来）
   seedRaces();
+
+  // 生成レースの結果を過去成績DBにも反映 (予想の入力データを充実させる)
+  seedGeneratedRacePerformances();
 
   // オッズ
   seedOdds();
@@ -102,7 +109,7 @@ function seedJockeys() {
 function seedRaces() {
   const now = Date.now();
 
-  for (const tmpl of ALL_RACES) {
+  for (const tmpl of COMBINED_RACES) {
     const date = new Date(now + tmpl.daysFromNow * 86400000);
     const dateStr = date.toISOString().split('T')[0];
 
@@ -157,6 +164,69 @@ function seedRaceEntries(tmpl: RaceTemplate, _dateStr: string) {
   });
 }
 
+// ==================== 生成レース結果 → 過去成績変換 ====================
+
+function seedGeneratedRacePerformances() {
+  const now = Date.now();
+  const horseMap = new Map(ALL_HORSES.map(h => [h.id, h]));
+
+  // 過去レースのみ、古い順にソート (古いレースの結果が先に past_performances に入る)
+  const pastRaces = COMBINED_RACES
+    .filter(r => r.status === '結果確定')
+    .sort((a, b) => a.daysFromNow - b.daysFromNow); // daysFromNow は負の値 → 小さい方が古い
+
+  for (const tmpl of pastRaces) {
+    const date = new Date(now + tmpl.daysFromNow * 86400000);
+    const dateStr = date.toISOString().split('T')[0];
+
+    for (const e of tmpl.entries) {
+      if (!e.resultPosition) continue;
+      const horse = horseMap.get(e.horseId);
+      if (!horse) continue;
+
+      const jockey = ALL_JOCKEYS.find(j => j.id === e.jockeyId);
+      const horseNumber = tmpl.entries.indexOf(e) + 1;
+      const fieldSize = tmpl.entries.length;
+
+      // 能力ベースの上がり3F
+      const baseFurlong = tmpl.trackType === '芝' ? 34.5 : 36.5;
+      const l3f = baseFurlong - (horse.ability - 70) * 0.1 + (e.resultPosition - 1) * 0.2
+        + (horse.consistency * 5 * (Math.sin(tmpl.daysFromNow) * 0.5 + 0.5));
+
+      // コーナー通過順位 (脚質ベース)
+      const styleToCorner = { '逃げ': 1, '先行': 3, '差し': 6, '追込': 10 };
+      const baseCorner = styleToCorner[horse.style] || 5;
+      const corner = Math.min(fieldSize, Math.max(1, baseCorner + Math.floor(Math.sin(tmpl.daysFromNow * 7) * 2)));
+      const cornerStr = `${corner}-${corner}-${Math.min(fieldSize, corner + 1)}-${e.resultPosition}`;
+
+      insertPastPerformance(e.horseId, {
+        date: dateStr,
+        raceName: tmpl.name,
+        racecourseName: tmpl.racecourseName,
+        trackType: tmpl.trackType,
+        distance: tmpl.distance,
+        trackCondition: tmpl.trackCondition || '良',
+        weather: tmpl.weather || '晴',
+        entries: fieldSize,
+        postPosition: Math.min(8, Math.ceil(horseNumber / 2)),
+        horseNumber,
+        position: e.resultPosition,
+        jockeyName: jockey?.name || '',
+        handicapWeight: e.handicapWeight,
+        weight: horse.baseWeight + Math.floor(Math.sin(tmpl.daysFromNow * 3) * 6),
+        weightChange: Math.floor(Math.sin(tmpl.daysFromNow * 5) * 4),
+        time: generateResultTime(tmpl.trackType, tmpl.distance, e.resultPosition, fieldSize),
+        margin: e.resultPosition === 1 ? '' : ['クビ', 'ハナ', 'アタマ', '1/2', '1', '1 1/2', '2'][Math.min(e.resultPosition - 2, 6)],
+        lastThreeFurlongs: l3f.toFixed(1),
+        cornerPositions: cornerStr,
+        odds: Math.max(1.1, 2 + (90 - horse.ability) * 0.5 + Math.abs(Math.sin(tmpl.daysFromNow * 11)) * 5),
+        popularity: Math.min(fieldSize, Math.max(1, Math.ceil(fieldSize * (1 - horse.ability / 100)))),
+        prize: e.resultPosition <= 3 ? (e.resultPosition === 1 ? 5000 : e.resultPosition === 2 ? 2000 : 1000) : 0,
+      });
+    }
+  }
+}
+
 function generateResultTime(trackType: string, distance: number, position: number, fieldSize: number): string {
   const basePace = trackType === '芝' ? 16.5 : 15.8;
   let totalSec = distance / basePace;
@@ -173,7 +243,7 @@ function generateResultTime(trackType: string, distance: number, position: numbe
 
 function seedOdds() {
   // 出走確定レースにのみオッズを設定
-  const confirmedRaces = ALL_RACES.filter(r => r.status === '出走確定');
+  const confirmedRaces = COMBINED_RACES.filter(r => r.status === '出走確定');
 
   for (const race of confirmedRaces) {
     const horseMap = new Map(ALL_HORSES.map(h => [h.id, h]));
@@ -201,7 +271,7 @@ function seedPredictions() {
   const db = getDatabase();
 
   // 全レースに対してAI予想を生成（過去レースも含めて的中率検証を可能にする）
-  const confirmedRaces = ALL_RACES.filter(r => r.status === '出走確定' || r.status === '結果確定');
+  const confirmedRaces = COMBINED_RACES.filter(r => r.status === '出走確定' || r.status === '結果確定');
 
   for (const tmpl of confirmedRaces) {
     const now = Date.now();

@@ -46,26 +46,26 @@ import {
   type RaceHistoricalContext,
 } from './historical-analyzer';
 
-// 重み設定 (v3: 16ファクター、合計1.00)
+// 重み設定 (v4.1: 的中率最適化 — 直近成績・距離・スピードの重みを増加)
 const WEIGHTS = {
-  // 個体分析
-  recentForm: 0.15,
-  courseAptitude: 0.07,
-  distanceAptitude: 0.10,
-  trackConditionAptitude: 0.05,
-  jockeyAbility: 0.07,
-  speedRating: 0.08,
+  // 個体分析 (直近・距離・速度の重み強化)
+  recentForm: 0.18,
+  courseAptitude: 0.06,
+  distanceAptitude: 0.12,
+  trackConditionAptitude: 0.04,
+  jockeyAbility: 0.06,
+  speedRating: 0.10,
   classPerformance: 0.04,
-  runningStyle: 0.07,
-  postPositionBias: 0.04,
-  rotation: 0.05,
-  lastThreeFurlongs: 0.07,
-  consistency: 0.04,
+  runningStyle: 0.05,
+  postPositionBias: 0.03,
+  rotation: 0.04,
+  lastThreeFurlongs: 0.08,
+  consistency: 0.05,
   // 統計ベース分析
-  sireAptitude: 0.06,
-  jockeyTrainerCombo: 0.04,
-  historicalPostBias: 0.04,
-  seasonalPattern: 0.03,
+  sireAptitude: 0.05,
+  jockeyTrainerCombo: 0.03,
+  historicalPostBias: 0.03,
+  seasonalPattern: 0.04,
 };
 
 // ==================== v4: データ充実度 & ベイズ推定 ====================
