@@ -7,7 +7,11 @@ let db: Database.Database | null = null;
 export function getDatabase(): Database.Database {
   if (db) return db;
 
-  const dataDir = path.join(process.cwd(), 'data');
+  // Vercel(サーバーレス)では/tmpに配置、ローカルではdata/に配置
+  const isVercel = process.env.VERCEL === '1';
+  const dataDir = isVercel
+    ? '/tmp'
+    : path.join(process.cwd(), 'data');
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
   }
