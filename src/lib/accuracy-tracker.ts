@@ -11,7 +11,7 @@
  *   - 信頼度校正: confidence別の実際の的中率
  */
 
-import { getDatabase } from './database';
+import { dbAll, dbGet, dbRun } from './database';
 
 // ==================== 型定義 ====================
 
@@ -62,26 +62,27 @@ export interface AccuracyStats {
  * レース結果確定時に呼び出す。
  * 該当レースの予想と実結果を照合し、prediction_results に記録する。
  */
-export function evaluateRacePrediction(raceId: string): PredictionResult | null {
-  const db = getDatabase();
-
+export async function evaluateRacePrediction(raceId: string): Promise<PredictionResult | null> {
   // 既に評価済みなら再評価しない
-  const existing = db.prepare(
-    'SELECT id FROM prediction_results WHERE race_id = ?'
-  ).get(raceId);
+  const existing = await dbGet<{ id: number }>(
+    'SELECT id FROM prediction_results WHERE race_id = ?',
+    [raceId]
+  );
   if (existing) return null;
 
   // 予想を取得
-  const prediction = db.prepare(
-    'SELECT id, confidence, picks_json, bets_json FROM predictions WHERE race_id = ? ORDER BY generated_at DESC LIMIT 1'
-  ).get(raceId) as { id: number; confidence: number; picks_json: string; bets_json: string } | undefined;
+  const prediction = await dbGet<{ id: number; confidence: number; picks_json: string; bets_json: string }>(
+    'SELECT id, confidence, picks_json, bets_json FROM predictions WHERE race_id = ? ORDER BY generated_at DESC LIMIT 1',
+    [raceId]
+  );
 
   if (!prediction) return null;
 
   // レース結果を取得
-  const results = db.prepare(
-    'SELECT horse_id, horse_number, result_position FROM race_entries WHERE race_id = ? AND result_position IS NOT NULL ORDER BY result_position'
-  ).all(raceId) as { horse_id: string; horse_number: number; result_position: number }[];
+  const results = await dbAll<{ horse_id: string; horse_number: number; result_position: number }>(
+    'SELECT horse_id, horse_number, result_position FROM race_entries WHERE race_id = ? AND result_position IS NOT NULL ORDER BY result_position',
+    [raceId]
+  );
 
   if (results.length === 0) return null;
 
@@ -150,17 +151,17 @@ export function evaluateRacePrediction(raceId: string): PredictionResult | null 
   const betRoi = betInvestment > 0 ? betReturn / betInvestment : 0;
 
   // DB に記録
-  db.prepare(`
+  await dbRun(`
     INSERT INTO prediction_results
       (race_id, prediction_id, top_pick_horse_id, top_pick_actual_position,
        win_hit, place_hit, top3_picks_hit, predicted_confidence,
        bet_investment, bet_return, bet_roi)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `, [
     raceId, prediction.id, topPick.horseId, topPickActualPosition,
     winHit ? 1 : 0, placeHit ? 1 : 0, top3PicksHit, prediction.confidence,
     betInvestment, betReturn, betRoi,
-  );
+  ]);
 
   return {
     raceId,
@@ -181,22 +182,20 @@ export function evaluateRacePrediction(raceId: string): PredictionResult | null 
  * 結果が確定した全レースを一括照合する。
  * sync/結果取り込み後に呼ぶ。
  */
-export function evaluateAllPendingRaces(): PredictionResult[] {
-  const db = getDatabase();
-
+export async function evaluateAllPendingRaces(): Promise<PredictionResult[]> {
   // 予想があり、結果が確定しているが、まだ評価していないレース
-  const pendingRaces = db.prepare(`
+  const pendingRaces = await dbAll<{ race_id: string }>(`
     SELECT DISTINCT p.race_id
     FROM predictions p
     JOIN races r ON p.race_id = r.id
     LEFT JOIN prediction_results pr ON p.race_id = pr.race_id
     WHERE r.status = '結果確定'
     AND pr.id IS NULL
-  `).all() as { race_id: string }[];
+  `);
 
   const results: PredictionResult[] = [];
   for (const { race_id } of pendingRaces) {
-    const result = evaluateRacePrediction(race_id);
+    const result = await evaluateRacePrediction(race_id);
     if (result) results.push(result);
   }
   return results;
@@ -207,11 +206,9 @@ export function evaluateAllPendingRaces(): PredictionResult[] {
 /**
  * 的中率の全体統計と信頼度校正データを取得する。
  */
-export function getAccuracyStats(): AccuracyStats {
-  const db = getDatabase();
-
-  const total = db.prepare('SELECT COUNT(*) as c FROM prediction_results').get() as { c: number };
-  const totalEvaluated = total.c;
+export async function getAccuracyStats(): Promise<AccuracyStats> {
+  const total = await dbGet<{ c: number }>('SELECT COUNT(*) as c FROM prediction_results');
+  const totalEvaluated = total?.c ?? 0;
 
   if (totalEvaluated === 0) {
     return {
@@ -223,7 +220,7 @@ export function getAccuracyStats(): AccuracyStats {
   }
 
   // 全体集計
-  const agg = db.prepare(`
+  const agg = await dbGet<Record<string, number>>(`
     SELECT
       ROUND(AVG(win_hit) * 100, 1) as win_hit_rate,
       ROUND(AVG(place_hit) * 100, 1) as place_hit_rate,
@@ -232,14 +229,23 @@ export function getAccuracyStats(): AccuracyStats {
       SUM(bet_investment) as total_invested,
       SUM(bet_return) as total_returned
     FROM prediction_results
-  `).get() as Record<string, number>;
+  `);
+
+  if (!agg) {
+    return {
+      totalEvaluated: 0,
+      winHitRate: 0, placeHitRate: 0, avgTop3Coverage: 0,
+      avgRoi: 0, totalInvested: 0, totalReturned: 0, overallRoi: 0,
+      confidenceCalibration: [], recentTrend: [],
+    };
+  }
 
   const overallRoi = agg.total_invested > 0
     ? Math.round((agg.total_returned / agg.total_invested) * 1000) / 10
     : 0;
 
   // 信頼度帯別の校正
-  const calibration = db.prepare(`
+  const calibration = await dbAll<{ range_label: string; cnt: number; win_rate: number; place_rate: number; roi: number }>(`
     SELECT
       CASE
         WHEN predicted_confidence >= 80 THEN '80-100'
@@ -254,11 +260,11 @@ export function getAccuracyStats(): AccuracyStats {
     FROM prediction_results
     GROUP BY range_label
     ORDER BY range_label DESC
-  `).all() as { range_label: string; cnt: number; win_rate: number; place_rate: number; roi: number }[];
+  `);
 
   // 直近トレンド (最新30件、60件、全件)
-  const trendQuery = (limit: number, label: string) => {
-    const row = db.prepare(`
+  const trendQuery = async (limit: number, label: string) => {
+    const row = await dbGet<{ cnt: number; win_rate: number; place_rate: number; roi: number }>(`
       SELECT
         COUNT(*) as cnt,
         ROUND(AVG(win_hit) * 100, 1) as win_rate,
@@ -267,21 +273,21 @@ export function getAccuracyStats(): AccuracyStats {
           THEN ROUND(SUM(bet_return) / SUM(bet_investment) * 100, 1)
           ELSE 0 END as roi
       FROM (SELECT * FROM prediction_results ORDER BY evaluated_at DESC LIMIT ?)
-    `).get(limit) as { cnt: number; win_rate: number; place_rate: number; roi: number };
+    `, [limit]);
     return {
       period: label,
-      count: row.cnt,
-      winHitRate: row.win_rate,
-      placeHitRate: row.place_rate,
-      roi: row.roi,
+      count: row?.cnt ?? 0,
+      winHitRate: row?.win_rate ?? 0,
+      placeHitRate: row?.place_rate ?? 0,
+      roi: row?.roi ?? 0,
     };
   };
 
-  const recentTrend = [
+  const recentTrend = (await Promise.all([
     trendQuery(30, '直近30件'),
     trendQuery(100, '直近100件'),
     trendQuery(999999, '全期間'),
-  ].filter(t => t.count > 0);
+  ])).filter(t => t.count > 0);
 
   return {
     totalEvaluated,
@@ -330,18 +336,11 @@ export interface CalibrationResult {
  * 原理: 1着馬と非1着馬でスコア差が大きいファクターほど
  *       予測に有用 → より高い重みを割り当てるべき。
  */
-export function calibrateWeights(): CalibrationResult | null {
-  const db = getDatabase();
+export async function calibrateWeights(): Promise<CalibrationResult | null> {
+  const total = await dbGet<{ c: number }>('SELECT COUNT(*) as c FROM prediction_results');
+  if (!total || total.c < 5) return null;
 
-  const total = db.prepare('SELECT COUNT(*) as c FROM prediction_results').get() as { c: number };
-  if (total.c < 5) return null;
-
-  const rows = db.prepare(`
-    SELECT p.race_id, p.picks_json, p.analysis_json, p.confidence,
-           pr.top_pick_actual_position, pr.win_hit, pr.place_hit
-    FROM prediction_results pr
-    JOIN predictions p ON pr.prediction_id = p.id
-  `).all() as {
+  const rows = await dbAll<{
     race_id: string;
     picks_json: string;
     analysis_json: string;
@@ -349,7 +348,12 @@ export function calibrateWeights(): CalibrationResult | null {
     top_pick_actual_position: number;
     win_hit: number;
     place_hit: number;
-  }[];
+  }>(`
+    SELECT p.race_id, p.picks_json, p.analysis_json, p.confidence,
+           pr.top_pick_actual_position, pr.win_hit, pr.place_hit
+    FROM prediction_results pr
+    JOIN predictions p ON pr.prediction_id = p.id
+  `);
 
   if (rows.length < 5) return null;
 
@@ -380,9 +384,10 @@ export function calibrateWeights(): CalibrationResult | null {
       const picks = JSON.parse(row.picks_json || '[]');
       if (!picks || picks.length === 0) continue;
 
-      const entries = db.prepare(
-        'SELECT horse_id, horse_number, result_position FROM race_entries WHERE race_id = ? AND result_position IS NOT NULL'
-      ).all(row.race_id) as { horse_id: string; horse_number: number; result_position: number }[];
+      const entries = await dbAll<{ horse_id: string; horse_number: number; result_position: number }>(
+        'SELECT horse_id, horse_number, result_position FROM race_entries WHERE race_id = ? AND result_position IS NOT NULL',
+        [row.race_id]
+      );
 
       if (entries.length === 0) continue;
       const winnerNumbers = new Set(entries.filter(e => e.result_position === 1).map(e => e.horse_number));

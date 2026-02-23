@@ -7,15 +7,15 @@ export async function GET(
   { params }: { params: Promise<{ jockeyId: string }> }
 ) {
   try {
-    seedAllData();
+    await seedAllData();
     const { jockeyId } = await params;
-    const jockey = getJockeyById(jockeyId);
+    const jockey = await getJockeyById(jockeyId);
 
     if (!jockey) {
       return NextResponse.json({ error: '騎手が見つかりません' }, { status: 404 });
     }
 
-    const recentResults = getJockeyRecentResults(jockeyId, 20);
+    const recentResults = await getJockeyRecentResults(jockeyId, 20);
 
     return NextResponse.json({ jockey, recentResults });
   } catch (error) {

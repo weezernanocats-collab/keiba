@@ -4,7 +4,7 @@ import { seedAllData } from '@/lib/seed-data';
 
 export async function GET(request: NextRequest) {
   try {
-    seedAllData();
+    await seedAllData();
 
     const { searchParams } = request.nextUrl;
     const date = searchParams.get('date');
@@ -13,27 +13,27 @@ export async function GET(request: NextRequest) {
     const type = searchParams.get('type'); // upcoming | results
 
     if (type === 'upcoming') {
-      const races = getUpcomingRaces(50);
+      const races = await getUpcomingRaces(50);
       return NextResponse.json({ races });
     }
 
     if (type === 'results') {
-      const races = getRecentResults(50);
+      const races = await getRecentResults(50);
       return NextResponse.json({ races });
     }
 
     if (date) {
-      const races = getRacesByDate(date);
+      const races = await getRacesByDate(date);
       return NextResponse.json({ races });
     }
 
     if (startDate && endDate) {
-      const races = getRacesByDateRange(startDate, endDate);
+      const races = await getRacesByDateRange(startDate, endDate);
       return NextResponse.json({ races });
     }
 
     // デフォルト: 今後のレース
-    const races = getUpcomingRaces(50);
+    const races = await getUpcomingRaces(50);
     return NextResponse.json({ races });
   } catch (error) {
     console.error('レースAPI エラー:', error);

@@ -7,9 +7,9 @@ export async function GET(
   { params }: { params: Promise<{ raceId: string }> }
 ) {
   try {
-    seedAllData();
+    await seedAllData();
     const { raceId } = await params;
-    const race = getRaceById(raceId);
+    const race = await getRaceById(raceId);
 
     if (!race) {
       return NextResponse.json({ error: 'レースが見つかりません' }, { status: 404 });

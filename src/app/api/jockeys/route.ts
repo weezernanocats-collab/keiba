@@ -4,7 +4,7 @@ import { seedAllData } from '@/lib/seed-data';
 
 export async function GET(request: NextRequest) {
   try {
-    seedAllData();
+    await seedAllData();
 
     const { searchParams } = request.nextUrl;
     const query = searchParams.get('q');
@@ -12,11 +12,11 @@ export async function GET(request: NextRequest) {
     const offset = parseInt(searchParams.get('offset') || '0');
 
     if (query) {
-      const jockeys = searchJockeys(query, limit);
+      const jockeys = await searchJockeys(query, limit);
       return NextResponse.json({ jockeys });
     }
 
-    const jockeys = getAllJockeys(limit, offset);
+    const jockeys = await getAllJockeys(limit, offset);
     return NextResponse.json({ jockeys });
   } catch (error) {
     console.error('騎手API エラー:', error);

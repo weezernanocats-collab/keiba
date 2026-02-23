@@ -149,14 +149,14 @@ export async function POST(request: NextRequest) {
 
   // 的中率統計の取得
   if (type === 'accuracy') {
-    const stats = getAccuracyStats();
+    const stats = await getAccuracyStats();
     return NextResponse.json({ stats });
   }
 
   // 未照合レースの一括評価
   if (type === 'evaluate_all') {
-    const results = evaluateAllPendingRaces();
-    const stats = getAccuracyStats();
+    const results = await evaluateAllPendingRaces();
+    const stats = await getAccuracyStats();
     return NextResponse.json({
       message: `${results.length}件のレースを照合しました`,
       evaluated: results.length,
@@ -168,7 +168,7 @@ export async function POST(request: NextRequest) {
 
   // ウェイト自動校正
   if (type === 'calibrate') {
-    const calibration = calibrateWeights();
+    const calibration = await calibrateWeights();
     if (!calibration) {
       return NextResponse.json({
         error: '校正に必要なデータが不足しています（最低5レース分の照合済みデータが必要）',
@@ -354,7 +354,7 @@ async function syncRaceList(entry: SyncLogEntry, date?: string): Promise<Scraped
   const races: ScrapedRace[] = await scrapeRaceList(targetDate);
 
   for (const race of races) {
-    upsertRace({
+    await upsertRace({
       id: race.id,
       name: race.name,
       date: race.date,
@@ -377,7 +377,7 @@ async function syncRaceDetail(entry: SyncLogEntry, raceId: string): Promise<Scra
   const detail: ScrapedRaceDetail = await scrapeRaceCard(raceId);
 
   // Update race with full details
-  upsertRace({
+  await upsertRace({
     id: detail.id,
     name: detail.name,
     racecourseName: detail.racecourseName,
@@ -394,7 +394,7 @@ async function syncRaceDetail(entry: SyncLogEntry, raceId: string): Promise<Scra
 
   // Upsert each entry
   for (const e of detail.entries) {
-    upsertRaceEntry(raceId, {
+    await upsertRaceEntry(raceId, {
       postPosition: e.postPosition,
       horseNumber: e.horseNumber,
       horseId: e.horseId,
@@ -422,13 +422,13 @@ async function syncOdds(entry: SyncLogEntry, raceId: string): Promise<ScrapedOdd
 
   // Upsert win odds
   for (const w of odds.win) {
-    upsertOdds(raceId, '単勝', [w.horseNumber], w.odds);
+    await upsertOdds(raceId, '単勝', [w.horseNumber], w.odds);
     entry.stats.oddsScraped++;
   }
 
   // Upsert place odds
   for (const p of odds.place) {
-    upsertOdds(raceId, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
+    await upsertOdds(raceId, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
     entry.stats.oddsScraped++;
   }
 
@@ -444,7 +444,7 @@ async function syncResults(entry: SyncLogEntry, raceId: string): Promise<Scraped
   const results: ScrapedResult[] = await scrapeRaceResult(raceId);
 
   for (const r of results) {
-    upsertRaceEntry(raceId, {
+    await upsertRaceEntry(raceId, {
       horseNumber: r.horseNumber,
       horseName: r.horseName,
       result: {
@@ -460,13 +460,13 @@ async function syncResults(entry: SyncLogEntry, raceId: string): Promise<Scraped
 
   // Update race status
   if (results.length > 0) {
-    upsertRace({
+    await upsertRace({
       id: raceId,
       status: '結果確定',
     });
 
     // 予想 vs 実結果を自動照合
-    const evalResult = evaluateRacePrediction(raceId);
+    const evalResult = await evaluateRacePrediction(raceId);
     if (evalResult) {
       const hitStatus = evalResult.winHit ? '単勝的中!' : evalResult.placeHit ? '複勝的中' : '不的中';
       entry.details = `結果取得完了: ${results.length}頭 [${hitStatus}]`;
@@ -493,7 +493,7 @@ async function syncHorseDetail(entry: SyncLogEntry, horseId: string): Promise<Sc
   }
 
   // Upsert horse basic info
-  upsertHorse({
+  await upsertHorse({
     id: horse.id,
     name: horse.name,
     birthDate: horse.birthDate,
@@ -505,12 +505,12 @@ async function syncHorseDetail(entry: SyncLogEntry, horseId: string): Promise<Sc
   entry.stats.horsesScraped++;
 
   // Insert past performances (only new ones)
-  const existingPerfs = getHorsePastPerformances(horse.id, 100);
+  const existingPerfs = await getHorsePastPerformances(horse.id, 100);
   const existingDates = new Set(existingPerfs.map((p: PastPerformance) => p.date));
 
   for (const perf of horse.pastPerformances) {
     if (!existingDates.has(perf.date)) {
-      insertPastPerformance(horse.id, {
+      await insertPastPerformance(horse.id, {
         date: perf.date,
         racecourseName: perf.racecourseName,
         raceName: perf.raceName,
@@ -603,23 +603,24 @@ async function syncFull(entry: SyncLogEntry, date?: string): Promise<void> {
   entry.details = `[5/5] AI予想を生成中`;
   for (const detail of raceDetails) {
     try {
-      const raceData = getRaceById(detail.id);
+      const raceData = await getRaceById(detail.id);
       if (!raceData || !raceData.entries || raceData.entries.length === 0) continue;
 
       // Build horse analysis inputs for prediction engine
-      const horseInputs = raceData.entries.map((re) => {
-        const pastPerfs = getHorsePastPerformances(re.horseId, 100);
-        const horseData = getHorseById(re.horseId) as { father_name?: string } | null;
-        return {
+      const horseInputs = [];
+      for (const re of raceData.entries) {
+        const pastPerfs = await getHorsePastPerformances(re.horseId, 100);
+        const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
+        horseInputs.push({
           entry: re,
           pastPerformances: pastPerfs,
           jockeyWinRate: 0.08, // default if jockey stats not available
           jockeyPlaceRate: 0.20,
           fatherName: horseData?.father_name || '',
-        };
-      });
+        });
+      }
 
-      const prediction = generatePrediction(
+      const prediction = await generatePrediction(
         detail.id,
         detail.name,
         targetDate,
@@ -631,7 +632,7 @@ async function syncFull(entry: SyncLogEntry, date?: string): Promise<void> {
         horseInputs,
       );
 
-      savePrediction(prediction);
+      await savePrediction(prediction);
       entry.stats.predictionsGenerated++;
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -640,7 +641,7 @@ async function syncFull(entry: SyncLogEntry, date?: string): Promise<void> {
   }
 
   // Step 6: 結果が確定しているレースの予想を自動照合
-  const evalResults = evaluateAllPendingRaces();
+  const evalResults = await evaluateAllPendingRaces();
   if (evalResults.length > 0) {
     const wins = evalResults.filter(r => r.winHit).length;
     const places = evalResults.filter(r => r.placeHit).length;

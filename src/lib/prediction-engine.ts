@@ -202,7 +202,7 @@ interface ScoredHorse {
   fatherName: string;
 }
 
-export function generatePrediction(
+export async function generatePrediction(
   raceId: string,
   raceName: string,
   date: string,
@@ -212,12 +212,12 @@ export function generatePrediction(
   racecourseName: string,
   grade: string | undefined,
   horses: HorseAnalysisInput[],
-): Prediction {
+): Promise<Prediction> {
   const cond = trackCondition || '良';
   const month = new Date(date).getMonth() + 1;
 
   // 統計コンテキストを構築（1レースにつき1回）
-  const ctx = buildRaceContext(
+  const ctx = await buildRaceContext(
     racecourseName, trackType, distance, month,
     horses.map(h => ({
       horseId: h.entry.horseId,

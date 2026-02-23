@@ -7,15 +7,15 @@ export async function GET(
   { params }: { params: Promise<{ raceId: string }> }
 ) {
   try {
-    seedAllData();
+    await seedAllData();
     const { raceId } = await params;
 
-    const race = getRaceById(raceId);
+    const race = await getRaceById(raceId);
     if (!race) {
       return NextResponse.json({ error: 'レースが見つかりません' }, { status: 404 });
     }
 
-    const prediction = getPredictionByRaceId(raceId);
+    const prediction = await getPredictionByRaceId(raceId);
 
     if (!prediction) {
       return NextResponse.json({ error: '予想がまだ生成されていません' }, { status: 404 });

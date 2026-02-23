@@ -4,8 +4,8 @@ import { seedAllData } from '@/lib/seed-data';
 
 export async function GET() {
   try {
-    seedAllData();
-    const stats = getDashboardStats();
+    await seedAllData();
+    const stats = await getDashboardStats();
     return NextResponse.json(stats);
   } catch (error) {
     console.error('統計API エラー:', error);

@@ -12,7 +12,7 @@
  *   5. 叩き良化パターン（休み明け→2走目の成績変化）
  */
 
-import { getDatabase } from './database';
+import { dbAll, dbGet } from './database';
 
 // ==================== 型定義 ====================
 
@@ -79,19 +79,19 @@ export interface RaceHistoricalContext {
  * レース条件に基づいて統計コンテキストを一括構築する。
  * 予測エンジンから1レースにつき1回だけ呼ぶ。
  */
-export function buildRaceContext(
+export async function buildRaceContext(
   racecourseName: string,
   trackType: string,
   distance: number,
   month: number,
   horses: { horseId: string; fatherName: string; jockeyId: string; trainerName: string }[],
-): RaceHistoricalContext {
-  const courseDistStats = getCourseDistanceStats(racecourseName, trackType, distance);
+): Promise<RaceHistoricalContext> {
+  const courseDistStats = await getCourseDistanceStats(racecourseName, trackType, distance);
 
   const sireStatsMap = new Map<string, SireStats>();
   const uniqueSires = [...new Set(horses.map(h => h.fatherName).filter(Boolean))];
   for (const sire of uniqueSires) {
-    const stats = getSireStats(sire);
+    const stats = await getSireStats(sire);
     if (stats) sireStatsMap.set(sire, stats);
   }
 
@@ -100,7 +100,7 @@ export function buildRaceContext(
     if (h.jockeyId && h.trainerName) {
       const key = `${h.jockeyId}__${h.trainerName}`;
       if (!jockeyTrainerMap.has(key)) {
-        const combo = getJockeyTrainerCombo(h.jockeyId, h.trainerName);
+        const combo = await getJockeyTrainerCombo(h.jockeyId, h.trainerName);
         if (combo) jockeyTrainerMap.set(key, combo);
       }
     }
@@ -108,13 +108,13 @@ export function buildRaceContext(
 
   const seasonalMap = new Map<string, SeasonalStats[]>();
   for (const h of horses) {
-    const stats = getHorseSeasonalStats(h.horseId);
+    const stats = await getHorseSeasonalStats(h.horseId);
     if (stats.length > 0) seasonalMap.set(h.horseId, stats);
   }
 
   const secondStartMap = new Map<string, SecondStartBonus | null>();
   for (const h of horses) {
-    secondStartMap.set(h.horseId, getSecondStartBonus(h.horseId));
+    secondStartMap.set(h.horseId, await getSecondStartBonus(h.horseId));
   }
 
   return { courseDistStats, sireStatsMap, jockeyTrainerMap, seasonalMap, secondStartMap };
@@ -122,23 +122,22 @@ export function buildRaceContext(
 
 // ==================== 個別統計関数 ====================
 
-function getCourseDistanceStats(
+async function getCourseDistanceStats(
   racecourseName: string,
   trackType: string,
   distance: number,
-): CourseDistanceStats | null {
-  const db = getDatabase();
+): Promise<CourseDistanceStats | null> {
   const tolerance = 100;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows: any[] = db.prepare(`
+  const rows: any[] = await dbAll(`
     SELECT post_position, position, entries, last_three_furlongs, corner_positions
     FROM past_performances
     WHERE racecourse_name = ?
     AND track_type = ?
     AND distance BETWEEN ? AND ?
     AND entries > 0
-  `).all(racecourseName, trackType, distance - tolerance, distance + tolerance);
+  `, [racecourseName, trackType, distance - tolerance, distance + tolerance]);
 
   // v4: 閾値を10→3に緩和（少ないデータでも部分的に活用、重み調整はエンジン側で行う）
   if (rows.length < 3) return null;
@@ -194,17 +193,15 @@ function getCourseDistanceStats(
   };
 }
 
-function getSireStats(sireName: string): SireStats | null {
-  const db = getDatabase();
-
+async function getSireStats(sireName: string): Promise<SireStats | null> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows: any[] = db.prepare(`
+  const rows: any[] = await dbAll(`
     SELECT pp.track_type, pp.distance, pp.track_condition, pp.position, pp.entries
     FROM past_performances pp
     JOIN horses h ON pp.horse_id = h.id
     WHERE h.father_name = ?
     AND pp.entries > 0
-  `).all(sireName);
+  `, [sireName]);
 
   // v4: 閾値を5→2に緩和（少ないデータでも部分的に活用）
   if (rows.length < 2) return null;
@@ -261,20 +258,18 @@ function getSireStats(sireName: string): SireStats | null {
   };
 }
 
-function getJockeyTrainerCombo(jockeyId: string, trainerName: string): JockeyTrainerCombo | null {
-  const db = getDatabase();
-
+async function getJockeyTrainerCombo(jockeyId: string, trainerName: string): Promise<JockeyTrainerCombo | null> {
   // race_entries + races テーブルから結果確定レースのコンボ成績を集計
   // ただし、past_performances にも jockey_name と trainer_name (horsesから) があるので活用
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows: any[] = db.prepare(`
+  const rows: any[] = await dbAll(`
     SELECT pp.position, pp.entries
     FROM past_performances pp
     JOIN horses h ON pp.horse_id = h.id
     WHERE pp.jockey_name = (SELECT name FROM jockeys WHERE id = ?)
     AND h.trainer_name = ?
     AND pp.entries > 0
-  `).all(jockeyId, trainerName);
+  `, [jockeyId, trainerName]);
 
   // v4: 閾値を3→1に緩和
   if (rows.length < 1) return null;
@@ -294,11 +289,9 @@ function getJockeyTrainerCombo(jockeyId: string, trainerName: string): JockeyTra
   };
 }
 
-function getHorseSeasonalStats(horseId: string): SeasonalStats[] {
-  const db = getDatabase();
-
+async function getHorseSeasonalStats(horseId: string): Promise<SeasonalStats[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows: any[] = db.prepare(`
+  const rows: any[] = await dbAll(`
     SELECT
       CAST(substr(date, 6, 2) AS INTEGER) as month,
       position, entries
@@ -306,7 +299,7 @@ function getHorseSeasonalStats(horseId: string): SeasonalStats[] {
     WHERE horse_id = ?
     AND date IS NOT NULL
     AND entries > 0
-  `).all(horseId);
+  `, [horseId]);
 
   // v4: 閾値を3→1に緩和
   if (rows.length < 1) return [];
@@ -335,17 +328,15 @@ function getHorseSeasonalStats(horseId: string): SeasonalStats[] {
  * 叩き良化パターン分析
  * 60日以上の休み明け初戦 vs 2戦目の成績差を計算
  */
-function getSecondStartBonus(horseId: string): SecondStartBonus | null {
-  const db = getDatabase();
-
+async function getSecondStartBonus(horseId: string): Promise<SecondStartBonus | null> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows: any[] = db.prepare(`
+  const rows: any[] = await dbAll(`
     SELECT date, position, entries
     FROM past_performances
     WHERE horse_id = ?
     AND entries > 0
     ORDER BY date ASC
-  `).all(horseId);
+  `, [horseId]);
 
   if (rows.length < 4) return null;
 

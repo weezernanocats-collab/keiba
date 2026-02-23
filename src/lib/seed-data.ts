@@ -5,7 +5,7 @@
  * 統計分析v3対応のAI予想を生成する。
  */
 
-import { getDatabase } from './database';
+import { dbGet, dbAll, dbBatch } from './database';
 import { RACECOURSES } from '@/types';
 import {
   seedRacecourses, upsertHorse, upsertJockey, upsertRace,
@@ -24,44 +24,43 @@ const COMBINED_RACES: RaceTemplate[] = [...ALL_RACES, ...generatePastRaces(50)];
 
 // ==================== メインエントリ ====================
 
-export function seedAllData() {
-  const db = getDatabase();
-
+export async function seedAllData() {
   // 既にデータがあれば何もしない
-  const count = (db.prepare('SELECT COUNT(*) as c FROM horses').get() as { c: number }).c;
+  const row = await dbGet<{ c: number }>('SELECT COUNT(*) as c FROM horses');
+  const count = row?.c ?? 0;
   if (count > 0) return;
 
   // 競馬場マスタ
-  seedRacecourses(RACECOURSES);
+  await seedRacecourses(RACECOURSES);
 
   // 馬データ + 過去成績
-  seedHorsesAndPerformances();
+  await seedHorsesAndPerformances();
 
   // 騎手データ
-  seedJockeys();
+  await seedJockeys();
 
   // レースデータ（過去＋未来）
-  seedRaces();
+  await seedRaces();
 
   // 生成レースの結果を過去成績DBにも反映 (予想の入力データを充実させる)
-  seedGeneratedRacePerformances();
+  await seedGeneratedRacePerformances();
 
   // オッズ
-  seedOdds();
+  await seedOdds();
 
   // AI予想生成（過去レース含む全レース）
-  seedPredictions();
+  await seedPredictions();
 
   // 過去レースの予想 vs 実結果を自動照合（的中率ダッシュボード用）
-  evaluateAllPendingRaces();
+  await evaluateAllPendingRaces();
 }
 
 // ==================== 馬 + 過去成績 ====================
 
-function seedHorsesAndPerformances() {
+async function seedHorsesAndPerformances() {
   for (const p of ALL_HORSES) {
     // 馬本体
-    upsertHorse({
+    await upsertHorse({
       id: p.id,
       name: p.name,
       age: p.age,
@@ -86,34 +85,34 @@ function seedHorsesAndPerformances() {
     });
 
     // 強み・弱み
-    setHorseTraits(p.id, p.strengths, p.weaknesses);
+    await setHorseTraits(p.id, p.strengths, p.weaknesses);
 
     // プロファイルから過去成績を自動生成
     const perfs = generatePastPerformances(p);
     for (const perf of perfs) {
-      insertPastPerformance(p.id, perf);
+      await insertPastPerformance(p.id, perf);
     }
   }
 }
 
 // ==================== 騎手 ====================
 
-function seedJockeys() {
+async function seedJockeys() {
   for (const j of ALL_JOCKEYS) {
-    upsertJockey(j);
+    await upsertJockey(j);
   }
 }
 
 // ==================== レース ====================
 
-function seedRaces() {
+async function seedRaces() {
   const now = Date.now();
 
   for (const tmpl of COMBINED_RACES) {
     const date = new Date(now + tmpl.daysFromNow * 86400000);
     const dateStr = date.toISOString().split('T')[0];
 
-    upsertRace({
+    await upsertRace({
       id: tmpl.id,
       name: tmpl.name,
       date: dateStr,
@@ -129,22 +128,23 @@ function seedRaces() {
     });
 
     // 出走馬を登録
-    seedRaceEntries(tmpl, dateStr);
+    await seedRaceEntries(tmpl, dateStr);
   }
 }
 
-function seedRaceEntries(tmpl: RaceTemplate, _dateStr: string) {
+async function seedRaceEntries(tmpl: RaceTemplate, _dateStr: string) {
   const horseMap = new Map(ALL_HORSES.map(h => [h.id, h]));
 
-  tmpl.entries.forEach((e, idx) => {
+  for (let idx = 0; idx < tmpl.entries.length; idx++) {
+    const e = tmpl.entries[idx];
     const horse = horseMap.get(e.horseId);
-    if (!horse) return;
+    if (!horse) continue;
 
     const jockey = ALL_JOCKEYS.find(j => j.id === e.jockeyId);
     const horseNumber = idx + 1;
     const postPosition = Math.min(8, Math.ceil(horseNumber / 2));
 
-    upsertRaceEntry(tmpl.id, {
+    await upsertRaceEntry(tmpl.id, {
       postPosition,
       horseNumber,
       horseId: horse.id,
@@ -161,12 +161,12 @@ function seedRaceEntries(tmpl: RaceTemplate, _dateStr: string) {
         margin: e.resultPosition === 1 ? '' : ['クビ', 'ハナ', 'アタマ', '1/2', '1', '1 1/2', '2'][Math.min(e.resultPosition - 2, 6)],
       } : undefined,
     });
-  });
+  }
 }
 
 // ==================== 生成レース結果 → 過去成績変換 ====================
 
-function seedGeneratedRacePerformances() {
+async function seedGeneratedRacePerformances() {
   const now = Date.now();
   const horseMap = new Map(ALL_HORSES.map(h => [h.id, h]));
 
@@ -199,7 +199,7 @@ function seedGeneratedRacePerformances() {
       const corner = Math.min(fieldSize, Math.max(1, baseCorner + Math.floor(Math.sin(tmpl.daysFromNow * 7) * 2)));
       const cornerStr = `${corner}-${corner}-${Math.min(fieldSize, corner + 1)}-${e.resultPosition}`;
 
-      insertPastPerformance(e.horseId, {
+      await insertPastPerformance(e.horseId, {
         date: dateStr,
         raceName: tmpl.name,
         racecourseName: tmpl.racecourseName,
@@ -241,7 +241,7 @@ function generateResultTime(trackType: string, distance: number, position: numbe
 
 // ==================== オッズ ====================
 
-function seedOdds() {
+async function seedOdds() {
   // 出走確定レースにのみオッズを設定
   const confirmedRaces = COMBINED_RACES.filter(r => r.status === '出走確定');
 
@@ -259,17 +259,15 @@ function seedOdds() {
     for (const a of abilities) {
       const diff = maxAbility - a.ability;
       const odds = Math.round((2.0 + diff * 0.8 + Math.random() * 3) * 10) / 10;
-      upsertOdds(race.id, '単勝', [a.horseNumber], odds);
-      upsertOdds(race.id, '複勝', [a.horseNumber], odds * 0.4, odds * 0.3, odds * 0.5);
+      await upsertOdds(race.id, '単勝', [a.horseNumber], odds);
+      await upsertOdds(race.id, '複勝', [a.horseNumber], odds * 0.4, odds * 0.3, odds * 0.5);
     }
   }
 }
 
 // ==================== AI予想 ====================
 
-function seedPredictions() {
-  const db = getDatabase();
-
+async function seedPredictions() {
   // 全レースに対してAI予想を生成（過去レースも含めて的中率検証を可能にする）
   const confirmedRaces = COMBINED_RACES.filter(r => r.status === '出走確定' || r.status === '結果確定');
 
@@ -278,23 +276,30 @@ function seedPredictions() {
     const dateStr = new Date(now + tmpl.daysFromNow * 86400000).toISOString().split('T')[0];
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const entries = db.prepare('SELECT * FROM race_entries WHERE race_id = ?').all(tmpl.id) as any[];
+    const entries = await dbAll<any>('SELECT * FROM race_entries WHERE race_id = ?', [tmpl.id]);
     if (entries.length === 0) continue;
 
-    const horseInputs: HorseAnalysisInput[] = entries.map((e: Record<string, unknown>) => {
-      const ppRows = db.prepare(
-        'SELECT * FROM past_performances WHERE horse_id = ? ORDER BY date DESC LIMIT 100'
-      ).all(e.horse_id as string);
+    const horseInputs: HorseAnalysisInput[] = [];
+
+    for (const e of entries) {
+      const ppRows = await dbAll(
+        'SELECT * FROM past_performances WHERE horse_id = ? ORDER BY date DESC LIMIT 100',
+        [e.horse_id as string]
+      );
       const pp = ppRows.map(mapPastPerformance);
 
-      const jockey = db.prepare('SELECT * FROM jockeys WHERE id = ?').get(e.jockey_id as string) as
-        { win_rate: number; place_rate: number } | undefined;
+      const jockey = await dbGet<{ win_rate: number; place_rate: number }>(
+        'SELECT * FROM jockeys WHERE id = ?',
+        [e.jockey_id as string]
+      );
 
       // 馬テーブルから父名を取得 (統計分析v3で必要)
-      const horse = db.prepare('SELECT father_name FROM horses WHERE id = ?').get(e.horse_id as string) as
-        { father_name: string } | undefined;
+      const horse = await dbGet<{ father_name: string }>(
+        'SELECT father_name FROM horses WHERE id = ?',
+        [e.horse_id as string]
+      );
 
-      return {
+      horseInputs.push({
         entry: {
           postPosition: e.post_position as number,
           horseNumber: e.horse_number as number,
@@ -313,16 +318,16 @@ function seedPredictions() {
         jockeyWinRate: jockey?.win_rate || 0.10,
         jockeyPlaceRate: jockey?.place_rate || 0.30,
         fatherName: horse?.father_name || '',
-      };
-    });
+      });
+    }
 
     if (horseInputs.length > 0) {
-      const prediction = generatePrediction(
+      const prediction = await generatePrediction(
         tmpl.id, tmpl.name, dateStr,
         tmpl.trackType, tmpl.distance, tmpl.trackCondition || '良',
         tmpl.racecourseName, tmpl.grade, horseInputs,
       );
-      savePrediction(prediction);
+      await savePrediction(prediction);
     }
   }
 }

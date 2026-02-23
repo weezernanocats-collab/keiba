@@ -34,7 +34,7 @@ import {
 } from './queries';
 import { generatePrediction } from './prediction-engine';
 import { evaluateAllPendingRaces } from './accuracy-tracker';
-import { getDatabase } from './database';
+import { dbAll, dbGet, dbRun, dbExec } from './database';
 import type { PastPerformance } from '@/types';
 
 // ==================== 型定義 ====================
@@ -134,7 +134,7 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
     if (config.clearExisting) {
       progress.phase = '既存データクリア';
       progress.detail = 'シードデータを削除中...';
-      clearAllData();
+      await clearAllData();
     }
 
     // 日付リストを生成
@@ -156,7 +156,7 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
       try {
         const races = await scrapeRaceList(date);
         for (const race of races) {
-          upsertRace({
+          await upsertRace({
             id: race.id,
             name: race.name,
             date: race.date,
@@ -192,7 +192,7 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
 
       try {
         const detail = await scrapeRaceCard(race.id);
-        upsertRace({
+        await upsertRace({
           id: detail.id,
           name: detail.name,
           racecourseName: detail.racecourseName,
@@ -207,7 +207,7 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
         });
 
         for (const e of detail.entries) {
-          upsertRaceEntry(race.id, {
+          await upsertRaceEntry(race.id, {
             postPosition: e.postPosition,
             horseNumber: e.horseNumber,
             horseId: e.horseId,
@@ -256,7 +256,7 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
         try {
           const horse = await scrapeHorseDetail(hid);
           if (horse) {
-            upsertHorse({
+            await upsertHorse({
               id: horse.id,
               name: horse.name,
               birthDate: horse.birthDate,
@@ -268,7 +268,7 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
             progress.stats.horsesScraped++;
 
             // 過去成績の取り込み (重複排除、最大maxPP件)
-            const imported = importHorsePastPerformances(horse, maxPP);
+            const imported = await importHorsePastPerformances(horse, maxPP);
             progress.stats.pastPerformancesImported += imported;
 
             progress.detail = `${horse.name}: 過去成績${imported}件取り込み (${i + 1}/${horseIdList.length})`;
@@ -302,7 +302,7 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
         try {
           const results = await scrapeRaceResult(race.id);
           for (const r of results) {
-            upsertRaceEntry(race.id, {
+            await upsertRaceEntry(race.id, {
               horseNumber: r.horseNumber,
               horseName: r.horseName,
               result: {
@@ -316,7 +316,7 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
             progress.stats.resultsScraped++;
           }
           if (results.length > 0) {
-            upsertRace({ id: race.id, status: '結果確定' });
+            await upsertRace({ id: race.id, status: '結果確定' });
           }
         } catch (error) {
           progress.errors.push(`結果取得失敗 (${race.id}): ${errMsg(error)}`);
@@ -347,11 +347,11 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
         try {
           const odds = await scrapeOdds(race.id);
           for (const w of odds.win) {
-            upsertOdds(race.id, '単勝', [w.horseNumber], w.odds);
+            await upsertOdds(race.id, '単勝', [w.horseNumber], w.odds);
             progress.stats.oddsScraped++;
           }
           for (const p of odds.place) {
-            upsertOdds(race.id, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
+            await upsertOdds(race.id, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
             progress.stats.oddsScraped++;
           }
         } catch (error) {
@@ -384,24 +384,26 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
         progress.detail = `${detail.name} の予想を生成中 (${i + 1}/${targetRaces.length})`;
 
         try {
-          const raceData = getRaceById(detail.id);
+          const raceData = await getRaceById(detail.id);
           if (!raceData || !raceData.entries || raceData.entries.length === 0) continue;
 
-          const horseInputs = raceData.entries.map((re: import('@/types').RaceEntry) => {
-            const pastPerfs = getHorsePastPerformances(re.horseId, maxPP);
-            const horseData = getHorseById(re.horseId) as { father_name?: string } | null;
-            return {
-              entry: re,
-              pastPerformances: pastPerfs,
-              jockeyWinRate: 0.10,
-              jockeyPlaceRate: 0.25,
-              fatherName: horseData?.father_name || '',
-            };
-          });
+          const horseInputs = await Promise.all(
+            raceData.entries.map(async (re: import('@/types').RaceEntry) => {
+              const pastPerfs = await getHorsePastPerformances(re.horseId, maxPP);
+              const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
+              return {
+                entry: re,
+                pastPerformances: pastPerfs,
+                jockeyWinRate: 0.10,
+                jockeyPlaceRate: 0.25,
+                fatherName: horseData?.father_name || '',
+              };
+            })
+          );
 
           if (horseInputs.length > 0) {
             const race = allRaces.find(r => r.id === detail.id);
-            const prediction = generatePrediction(
+            const prediction = await generatePrediction(
               detail.id,
               detail.name,
               race?.date || today,
@@ -412,7 +414,7 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
               detail.grade,
               horseInputs,
             );
-            savePrediction(prediction);
+            await savePrediction(prediction);
             progress.stats.predictionsGenerated++;
           }
         } catch (error) {
@@ -424,7 +426,7 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
     // Step 7: 結果確定レースの予想を自動照合
     progress.phase = '予想照合';
     progress.detail = '結果確定レースの予想を自動照合中...';
-    const evalResults = evaluateAllPendingRaces();
+    const evalResults = await evaluateAllPendingRaces();
     if (evalResults.length > 0) {
       const wins = evalResults.filter(r => r.winHit).length;
       const places = evalResults.filter(r => r.placeHit).length;
@@ -441,8 +443,8 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
 
 // ==================== ヘルパー ====================
 
-function importHorsePastPerformances(horse: ScrapedHorseDetail, maxPP: number): number {
-  const existingPerfs = getHorsePastPerformances(horse.id, 200);
+async function importHorsePastPerformances(horse: ScrapedHorseDetail, maxPP: number): Promise<number> {
+  const existingPerfs = await getHorsePastPerformances(horse.id, 200);
   const existingDates = new Set(existingPerfs.map((p: PastPerformance) => `${p.date}_${p.racecourseName}_${p.raceName}`));
 
   let imported = 0;
@@ -453,7 +455,7 @@ function importHorsePastPerformances(horse: ScrapedHorseDetail, maxPP: number): 
     const key = `${perf.date}_${perf.racecourseName}_${perf.raceName}`;
     if (existingDates.has(key)) continue;
 
-    insertPastPerformance(horse.id, {
+    await insertPastPerformance(horse.id, {
       date: perf.date,
       racecourseName: perf.racecourseName,
       raceName: perf.raceName,
@@ -481,9 +483,8 @@ function importHorsePastPerformances(horse: ScrapedHorseDetail, maxPP: number): 
   return imported;
 }
 
-function clearAllData(): void {
-  const db = getDatabase();
-  db.exec(`
+async function clearAllData(): Promise<void> {
+  await dbExec(`
     DELETE FROM predictions;
     DELETE FROM odds;
     DELETE FROM race_entries;
@@ -626,7 +627,7 @@ async function processChunkPhase(
 ): Promise<void> {
   switch (state.phase) {
     case 'init': {
-      if (state.config.clearExisting) clearAllData();
+      if (state.config.clearExisting) await clearAllData();
       state.remainingDates = generateDateRange(state.config.startDate, state.config.endDate);
       state.totalDates = state.remainingDates.length;
       state.phase = 'dates';
@@ -640,11 +641,10 @@ async function processChunkPhase(
         const date = state.remainingDates.shift()!;
         try {
           const races = await scrapeRaceList(date);
-          const db = getDatabase();
           for (const race of races) {
-            const exists = db.prepare('SELECT id FROM races WHERE id = ?').get(race.id);
+            const exists = await dbGet<{ id: string }>('SELECT id FROM races WHERE id = ?', [race.id]);
             if (!exists) {
-              upsertRace({
+              await upsertRace({
                 id: race.id,
                 name: race.name,
                 date: race.date,
@@ -668,10 +668,10 @@ async function processChunkPhase(
 
     case 'race_details': {
       state.phaseLabel = '出馬表取得';
-      const db = getDatabase();
-      const unprocessed = db.prepare(
-        "SELECT id, name FROM races WHERE status = '予定' AND date BETWEEN ? AND ? ORDER BY date"
-      ).all(state.config.startDate, state.config.endDate) as { id: string; name: string }[];
+      const unprocessed = await dbAll<{ id: string; name: string }>(
+        "SELECT id, name FROM races WHERE status = '予定' AND date BETWEEN ? AND ? ORDER BY date",
+        [state.config.startDate, state.config.endDate]
+      );
 
       state.phaseRemaining = unprocessed.length;
 
@@ -684,7 +684,7 @@ async function processChunkPhase(
         if (!hasTime()) return;
         try {
           const detail = await scrapeRaceCard(race.id);
-          upsertRace({
+          await upsertRace({
             id: detail.id,
             name: detail.name,
             racecourseName: detail.racecourseName,
@@ -698,7 +698,7 @@ async function processChunkPhase(
             status: '出走確定',
           });
           for (const e of detail.entries) {
-            upsertRaceEntry(race.id, {
+            await upsertRaceEntry(race.id, {
               postPosition: e.postPosition,
               horseNumber: e.horseNumber,
               horseId: e.horseId,
@@ -716,30 +716,30 @@ async function processChunkPhase(
           state.phaseRemaining--;
         } catch (error) {
           addError(`出馬表取得失敗 (${race.id}): ${errMsg(error)}`);
-          try { upsertRace({ id: race.id, status: '出走確定' }); } catch { /* skip */ }
+          try { await upsertRace({ id: race.id, status: '出走確定' }); } catch { /* skip */ }
           state.phaseRemaining--;
         }
         await sleep(CHUNK_RATE_LIMIT_MS);
       }
 
       // 残りを再確認
-      const remaining = db.prepare(
-        "SELECT COUNT(*) as c FROM races WHERE status = '予定' AND date BETWEEN ? AND ?"
-      ).get(state.config.startDate, state.config.endDate) as { c: number };
-      state.phaseRemaining = remaining.c;
-      if (remaining.c === 0) state.phase = 'horses';
+      const remaining = await dbGet<{ c: number }>(
+        "SELECT COUNT(*) as c FROM races WHERE status = '予定' AND date BETWEEN ? AND ?",
+        [state.config.startDate, state.config.endDate]
+      );
+      state.phaseRemaining = remaining?.c ?? 0;
+      if ((remaining?.c ?? 0) === 0) state.phase = 'horses';
       return;
     }
 
     case 'horses': {
       state.phaseLabel = '馬詳細・過去成績取得';
-      const db = getDatabase();
-      const unprocessed = db.prepare(`
-        SELECT DISTINCT re.horse_id
+      const unprocessed = await dbAll<{ horse_id: string }>(
+        `SELECT DISTINCT re.horse_id
         FROM race_entries re
         LEFT JOIN horses h ON re.horse_id = h.id
-        WHERE h.id IS NULL
-      `).all() as { horse_id: string }[];
+        WHERE h.id IS NULL`
+      );
 
       state.phaseRemaining = unprocessed.length;
 
@@ -753,7 +753,7 @@ async function processChunkPhase(
         try {
           const horse = await scrapeHorseDetail(horse_id);
           if (horse) {
-            upsertHorse({
+            await upsertHorse({
               id: horse.id,
               name: horse.name,
               birthDate: horse.birthDate,
@@ -763,25 +763,26 @@ async function processChunkPhase(
               ownerName: horse.ownerName,
             });
             state.stats.horsesScraped++;
-            const imported = importHorsePastPerformances(horse, 100);
+            const imported = await importHorsePastPerformances(horse, 100);
             state.stats.pastPerformancesImported += imported;
           }
         } catch (error) {
           addError(`馬詳細取得失敗 (${horse_id}): ${errMsg(error)}`);
           // プレースホルダーを挿入してリトライを防ぐ
-          try { upsertHorse({ id: horse_id, name: '取得失敗' }); } catch { /* skip */ }
+          try { await upsertHorse({ id: horse_id, name: '取得失敗' }); } catch { /* skip */ }
         }
         state.phaseRemaining--;
         await sleep(CHUNK_RATE_LIMIT_MS);
       }
 
       // 残りを再確認
-      const remainingCount = (db.prepare(`
-        SELECT COUNT(DISTINCT re.horse_id) as c
+      const remainingRow = await dbGet<{ c: number }>(
+        `SELECT COUNT(DISTINCT re.horse_id) as c
         FROM race_entries re
         LEFT JOIN horses h ON re.horse_id = h.id
-        WHERE h.id IS NULL
-      `).get() as { c: number }).c;
+        WHERE h.id IS NULL`
+      );
+      const remainingCount = remainingRow?.c ?? 0;
       state.phaseRemaining = remainingCount;
       if (remainingCount === 0) state.phase = 'results';
       return;
@@ -789,11 +790,11 @@ async function processChunkPhase(
 
     case 'results': {
       state.phaseLabel = 'レース結果取得';
-      const db = getDatabase();
       const today = new Date().toISOString().split('T')[0];
-      const unprocessed = db.prepare(
-        "SELECT id FROM races WHERE status = '出走確定' AND date < ? AND date BETWEEN ? AND ? ORDER BY date"
-      ).all(today, state.config.startDate, state.config.endDate) as { id: string }[];
+      const unprocessed = await dbAll<{ id: string }>(
+        "SELECT id FROM races WHERE status = '出走確定' AND date < ? AND date BETWEEN ? AND ? ORDER BY date",
+        [today, state.config.startDate, state.config.endDate]
+      );
 
       state.phaseRemaining = unprocessed.length;
 
@@ -807,7 +808,7 @@ async function processChunkPhase(
         try {
           const results = await scrapeRaceResult(race.id);
           for (const r of results) {
-            upsertRaceEntry(race.id, {
+            await upsertRaceEntry(race.id, {
               horseNumber: r.horseNumber,
               horseName: r.horseName,
               result: {
@@ -820,19 +821,21 @@ async function processChunkPhase(
             });
             state.stats.resultsScraped++;
           }
-          upsertRace({ id: race.id, status: '結果確定' });
+          await upsertRace({ id: race.id, status: '結果確定' });
         } catch (error) {
           addError(`結果取得失敗 (${race.id}): ${errMsg(error)}`);
-          try { upsertRace({ id: race.id, status: '結果確定' }); } catch { /* skip */ }
+          try { await upsertRace({ id: race.id, status: '結果確定' }); } catch { /* skip */ }
         }
         state.phaseRemaining--;
         await sleep(CHUNK_RATE_LIMIT_MS);
       }
 
       // 残りを再確認
-      const remainingCount = (db.prepare(
-        "SELECT COUNT(*) as c FROM races WHERE status = '出走確定' AND date < ? AND date BETWEEN ? AND ?"
-      ).get(today, state.config.startDate, state.config.endDate) as { c: number }).c;
+      const remainingRow = await dbGet<{ c: number }>(
+        "SELECT COUNT(*) as c FROM races WHERE status = '出走確定' AND date < ? AND date BETWEEN ? AND ?",
+        [today, state.config.startDate, state.config.endDate]
+      );
+      const remainingCount = remainingRow?.c ?? 0;
       state.phaseRemaining = remainingCount;
       if (remainingCount === 0) state.phase = 'predictions';
       return;
@@ -840,20 +843,20 @@ async function processChunkPhase(
 
     case 'predictions': {
       state.phaseLabel = 'AI予想生成';
-      const db = getDatabase();
       const today = new Date().toISOString().split('T')[0];
-      const unprocessed = db.prepare(`
-        SELECT DISTINCT r.id, r.name, r.date, r.track_type, r.distance,
+      const unprocessed = await dbAll<{
+        id: string; name: string; date: string; track_type: string;
+        distance: number; track_condition: string; racecourse_name: string; grade: string;
+      }>(
+        `SELECT DISTINCT r.id, r.name, r.date, r.track_type, r.distance,
                r.track_condition, r.racecourse_name, r.grade
         FROM races r
         LEFT JOIN predictions p ON r.id = p.race_id
         WHERE p.id IS NULL AND r.date >= ?
         AND r.status IN ('出走確定', '結果確定')
-        AND r.date BETWEEN ? AND ?
-      `).all(today, state.config.startDate, state.config.endDate) as {
-        id: string; name: string; date: string; track_type: string;
-        distance: number; track_condition: string; racecourse_name: string; grade: string;
-      }[];
+        AND r.date BETWEEN ? AND ?`,
+        [today, state.config.startDate, state.config.endDate]
+      );
 
       state.phaseRemaining = unprocessed.length;
 
@@ -865,32 +868,34 @@ async function processChunkPhase(
       for (const race of unprocessed) {
         if (!hasTime()) return;
         try {
-          const raceData = getRaceById(race.id);
+          const raceData = await getRaceById(race.id);
           if (!raceData?.entries?.length) {
             state.phaseRemaining--;
             continue;
           }
 
-          const horseInputs = raceData.entries.map((re: import('@/types').RaceEntry) => {
-            const pastPerfs = getHorsePastPerformances(re.horseId, 100);
-            const horseData = getHorseById(re.horseId) as { father_name?: string } | null;
-            return {
-              entry: re,
-              pastPerformances: pastPerfs,
-              jockeyWinRate: 0.10,
-              jockeyPlaceRate: 0.25,
-              fatherName: horseData?.father_name || '',
-            };
-          });
+          const horseInputs = await Promise.all(
+            raceData.entries.map(async (re: import('@/types').RaceEntry) => {
+              const pastPerfs = await getHorsePastPerformances(re.horseId, 100);
+              const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
+              return {
+                entry: re,
+                pastPerformances: pastPerfs,
+                jockeyWinRate: 0.10,
+                jockeyPlaceRate: 0.25,
+                fatherName: horseData?.father_name || '',
+              };
+            })
+          );
 
           if (horseInputs.length > 0) {
-            const prediction = generatePrediction(
+            const prediction = await generatePrediction(
               race.id, race.name, race.date,
               race.track_type as '芝' | 'ダート' | '障害', race.distance,
               race.track_condition as '良' | '稍重' | '重' | '不良' | undefined, race.racecourse_name, race.grade,
               horseInputs,
             );
-            savePrediction(prediction);
+            await savePrediction(prediction);
             state.stats.predictionsGenerated++;
           }
         } catch (error) {
@@ -899,14 +904,16 @@ async function processChunkPhase(
         state.phaseRemaining--;
       }
 
-      const remainingCount = (db.prepare(`
-        SELECT COUNT(DISTINCT r.id) as c
+      const remainingRow = await dbGet<{ c: number }>(
+        `SELECT COUNT(DISTINCT r.id) as c
         FROM races r
         LEFT JOIN predictions p ON r.id = p.race_id
         WHERE p.id IS NULL AND r.date >= ?
         AND r.status IN ('出走確定', '結果確定')
-        AND r.date BETWEEN ? AND ?
-      `).get(today, state.config.startDate, state.config.endDate) as { c: number }).c;
+        AND r.date BETWEEN ? AND ?`,
+        [today, state.config.startDate, state.config.endDate]
+      );
+      const remainingCount = remainingRow?.c ?? 0;
       state.phaseRemaining = remainingCount;
       if (remainingCount === 0) state.phase = 'evaluate';
       return;
@@ -914,7 +921,7 @@ async function processChunkPhase(
 
     case 'evaluate': {
       state.phaseLabel = '予想照合';
-      evaluateAllPendingRaces();
+      await evaluateAllPendingRaces();
       state.phase = 'done';
       state.completedAt = new Date().toISOString();
       state.phaseLabel = '完了';

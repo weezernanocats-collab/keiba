@@ -7,15 +7,15 @@ export async function GET(
   { params }: { params: Promise<{ horseId: string }> }
 ) {
   try {
-    seedAllData();
+    await seedAllData();
     const { horseId } = await params;
-    const horse = getHorseById(horseId);
+    const horse = await getHorseById(horseId);
 
     if (!horse) {
       return NextResponse.json({ error: '馬が見つかりません' }, { status: 404 });
     }
 
-    const pastPerformances = getHorsePastPerformances(horseId, 20);
+    const pastPerformances = await getHorsePastPerformances(horseId, 20);
 
     return NextResponse.json({ horse, pastPerformances });
   } catch (error) {

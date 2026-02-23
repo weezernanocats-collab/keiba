@@ -34,7 +34,7 @@ import {
 } from './queries';
 import { generatePrediction } from './prediction-engine';
 import { evaluateAllPendingRaces } from './accuracy-tracker';
-import { getDatabase } from './database';
+import { dbAll } from './database';
 import type { PastPerformance } from '@/types';
 
 // ==================== 型定義 ====================
@@ -191,7 +191,7 @@ async function executeMorningFetch(date: string): Promise<void> {
     // 1. レース一覧
     const races = await scrapeRaceList(date);
     for (const race of races) {
-      upsertRace({
+      await upsertRace({
         id: race.id, name: race.name, date: race.date,
         racecourseName: race.racecourseName, raceNumber: race.raceNumber,
         status: '予定',
@@ -206,7 +206,7 @@ async function executeMorningFetch(date: string): Promise<void> {
       try {
         const detail = await scrapeRaceCard(race.id);
         raceDetails.push(detail);
-        upsertRace({
+        await upsertRace({
           id: detail.id, name: detail.name, racecourseName: detail.racecourseName,
           racecourseId: detail.racecourseId, trackType: detail.trackType,
           distance: detail.distance, trackCondition: detail.trackCondition,
@@ -215,7 +215,7 @@ async function executeMorningFetch(date: string): Promise<void> {
           status: '出走確定',
         });
         for (const e of detail.entries) {
-          upsertRaceEntry(race.id, {
+          await upsertRaceEntry(race.id, {
             postPosition: e.postPosition, horseNumber: e.horseNumber,
             horseId: e.horseId, horseName: e.horseName,
             age: e.age, sex: e.sex, jockeyId: e.jockeyId,
@@ -238,17 +238,17 @@ async function executeMorningFetch(date: string): Promise<void> {
       try {
         const horse = await scrapeHorseDetail(hid);
         if (horse) {
-          upsertHorse({
+          await upsertHorse({
             id: horse.id, name: horse.name, birthDate: horse.birthDate,
             fatherName: horse.fatherName, motherName: horse.motherName,
             trainerName: horse.trainerName, ownerName: horse.ownerName,
           });
-          const existingPerfs = getHorsePastPerformances(horse.id, 200);
+          const existingPerfs = await getHorsePastPerformances(horse.id, 200);
           const existingKeys = new Set(existingPerfs.map((p: PastPerformance) => `${p.date}_${p.raceName}`));
           for (const perf of horse.pastPerformances.slice(0, 50)) {
             const key = `${perf.date}_${perf.raceName}`;
             if (existingKeys.has(key)) continue;
-            insertPastPerformance(horse.id, {
+            await insertPastPerformance(horse.id, {
               date: perf.date, racecourseName: perf.racecourseName, raceName: perf.raceName,
               trackType: perf.trackType, distance: perf.distance, trackCondition: perf.trackCondition,
               entries: perf.entries, postPosition: perf.postPosition, horseNumber: perf.horseNumber,
@@ -268,22 +268,23 @@ async function executeMorningFetch(date: string): Promise<void> {
     // 4. AI予想生成
     for (const detail of raceDetails) {
       try {
-        const raceData = getRaceById(detail.id);
+        const raceData = await getRaceById(detail.id);
         if (!raceData?.entries?.length) continue;
-        const horseInputs = raceData.entries.map((re: import('@/types').RaceEntry) => {
-          const pastPerfs = getHorsePastPerformances(re.horseId, 100);
-          const horseData = getHorseById(re.horseId) as { father_name?: string } | null;
-          return {
+        const horseInputs = [];
+        for (const re of raceData.entries as import('@/types').RaceEntry[]) {
+          const pastPerfs = await getHorsePastPerformances(re.horseId, 100);
+          const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
+          horseInputs.push({
             entry: re, pastPerformances: pastPerfs,
             jockeyWinRate: 0.10, jockeyPlaceRate: 0.25,
             fatherName: horseData?.father_name || '',
-          };
-        });
-        const prediction = generatePrediction(
+          });
+        }
+        const prediction = await generatePrediction(
           detail.id, detail.name, date, detail.trackType, detail.distance,
           detail.trackCondition, detail.racecourseName, detail.grade, horseInputs,
         );
-        savePrediction(prediction);
+        await savePrediction(prediction);
       } catch (error) {
         addLog('予想生成失敗', `${detail.id}: ${errMsg(error)}`, false);
       }
@@ -300,20 +301,20 @@ async function executeOddsFetch(date: string): Promise<void> {
   lastRunTime = new Date().toISOString();
 
   try {
-    const db = getDatabase();
-    const races = db.prepare(
-      "SELECT id, name FROM races WHERE date = ? AND status IN ('予定', '出走確定')"
-    ).all(date) as { id: string; name: string }[];
+    const races = await dbAll<{ id: string; name: string }>(
+      "SELECT id, name FROM races WHERE date = ? AND status IN ('予定', '出走確定')",
+      [date]
+    );
 
     let count = 0;
     for (const race of races) {
       try {
         const odds = await scrapeOdds(race.id);
         for (const w of odds.win) {
-          upsertOdds(race.id, '単勝', [w.horseNumber], w.odds);
+          await upsertOdds(race.id, '単勝', [w.horseNumber], w.odds);
         }
         for (const p of odds.place) {
-          upsertOdds(race.id, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
+          await upsertOdds(race.id, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
         }
         count++;
       } catch (error) {
@@ -333,17 +334,17 @@ async function executeResultFetch(date: string): Promise<void> {
   lastRunTime = new Date().toISOString();
 
   try {
-    const db = getDatabase();
-    const races = db.prepare(
-      "SELECT id, name FROM races WHERE date = ? AND status != '結果確定'"
-    ).all(date) as { id: string; name: string }[];
+    const races = await dbAll<{ id: string; name: string }>(
+      "SELECT id, name FROM races WHERE date = ? AND status != '結果確定'",
+      [date]
+    );
 
     let resultCount = 0;
     for (const race of races) {
       try {
         const results = await scrapeRaceResult(race.id);
         for (const r of results) {
-          upsertRaceEntry(race.id, {
+          await upsertRaceEntry(race.id, {
             horseNumber: r.horseNumber, horseName: r.horseName,
             result: {
               position: r.position, time: r.time, margin: r.margin,
@@ -352,7 +353,7 @@ async function executeResultFetch(date: string): Promise<void> {
           });
         }
         if (results.length > 0) {
-          upsertRace({ id: race.id, status: '結果確定' });
+          await upsertRace({ id: race.id, status: '結果確定' });
           resultCount++;
         }
       } catch (error) {
@@ -362,7 +363,7 @@ async function executeResultFetch(date: string): Promise<void> {
     }
 
     // 予想 vs 実結果の自動照合
-    const evalResults = evaluateAllPendingRaces();
+    const evalResults = await evaluateAllPendingRaces();
     const wins = evalResults.filter(r => r.winHit).length;
     const places = evalResults.filter(r => r.placeHit).length;
 
