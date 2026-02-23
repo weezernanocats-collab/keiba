@@ -25,13 +25,16 @@ import {
   savePrediction,
 } from '@/lib/queries';
 import { generatePrediction } from '@/lib/prediction-engine';
-import { runBulkImport, getBulkImportProgress, abortBulkImport, type BulkImportConfig } from '@/lib/bulk-importer';
+import { runBulkImport, getBulkImportProgress, abortBulkImport, type BulkImportConfig, runBulkChunk, createInitialChunkedState, type BulkChunkedState } from '@/lib/bulk-importer';
 import { evaluateRacePrediction, evaluateAllPendingRaces, getAccuracyStats, calibrateWeights } from '@/lib/accuracy-tracker';
 import type { PastPerformance } from '@/types';
 
+// Vercelのサーバーレス関数タイムアウトを60秒に設定
+export const maxDuration = 60;
+
 // ==================== Types ====================
 
-type SyncType = 'races' | 'race_detail' | 'odds' | 'results' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort' | 'accuracy' | 'evaluate_all' | 'calibrate';
+type SyncType = 'races' | 'race_detail' | 'odds' | 'results' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort' | 'bulk_chunked' | 'accuracy' | 'evaluate_all' | 'calibrate';
 
 interface SyncRequest {
   type: SyncType;
@@ -43,6 +46,8 @@ interface SyncRequest {
   endDate?: string;
   clearExisting?: boolean;
   maxPastPerformances?: number;
+  // チャンクバルクインポート用
+  state?: BulkChunkedState;
 }
 
 interface SyncLogEntry {
@@ -132,7 +137,7 @@ export async function POST(request: NextRequest) {
   const { type, date, raceId, horseId } = body;
 
   // Validate type
-  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'accuracy', 'evaluate_all', 'calibrate'];
+  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'bulk_chunked', 'accuracy', 'evaluate_all', 'calibrate'];
   if (!type || !validTypes.includes(type)) {
     return NextResponse.json(
       {
@@ -184,7 +189,31 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: 'バルクインポートの中断を要求しました' });
   }
 
-  // バルクインポート開始
+  // チャンクバルクインポート（Vercel対応）
+  if (type === 'bulk_chunked') {
+    let state: BulkChunkedState;
+    if (body.state) {
+      state = body.state;
+    } else {
+      const { startDate, endDate, clearExisting } = body;
+      if (!startDate || !endDate) {
+        return NextResponse.json(
+          { error: 'startDateとendDateが必要です (YYYY-MM-DD)' },
+          { status: 400 }
+        );
+      }
+      state = createInitialChunkedState({
+        startDate,
+        endDate,
+        clearExisting: clearExisting || false,
+      });
+    }
+
+    const updatedState = await runBulkChunk(state);
+    return NextResponse.json({ state: updatedState });
+  }
+
+  // バルクインポート開始（従来方式 - ローカル/Docker向け）
   if (type === 'bulk') {
     const { startDate, endDate, clearExisting, maxPastPerformances } = body;
     if (!startDate || !endDate) {

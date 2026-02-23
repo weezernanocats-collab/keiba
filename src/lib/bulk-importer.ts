@@ -540,3 +540,389 @@ function buildSummary(s: BulkImportStats): string {
   if (s.predictionsGenerated > 0) parts.push(`予想${s.predictionsGenerated}件`);
   return parts.join('、') || 'データなし';
 }
+
+// ==================== チャンク処理（Vercel対応） ====================
+//
+// Vercelのサーバーレス関数はタイムアウト制限（Hobby: 60秒）があるため、
+// 長時間のバルクインポートを小さなチャンクに分割して処理する。
+// フロントエンドが繰り返しAPIを呼び出し、各呼び出しで50秒以内の処理を行う。
+
+export type ChunkedPhase = 'init' | 'dates' | 'race_details' | 'horses' | 'results' | 'predictions' | 'evaluate' | 'done';
+
+export interface BulkChunkedState {
+  phase: ChunkedPhase;
+  config: {
+    startDate: string;
+    endDate: string;
+    clearExisting: boolean;
+  };
+  remainingDates: string[];
+  totalDates: number;
+  stats: BulkImportStats;
+  errors: string[];
+  startedAt: string;
+  completedAt?: string;
+  phaseLabel: string;
+  phaseRemaining: number;
+}
+
+const CHUNK_TIME_BUDGET_MS = 50_000; // 50秒（Vercel 60秒制限に余裕を持たせる）
+const CHUNK_RATE_LIMIT_MS = 1200;
+const MAX_CHUNK_ERRORS = 100;
+
+export function createInitialChunkedState(config: {
+  startDate: string;
+  endDate: string;
+  clearExisting: boolean;
+}): BulkChunkedState {
+  return {
+    phase: 'init',
+    config,
+    remainingDates: [],
+    totalDates: 0,
+    stats: {
+      datesProcessed: 0,
+      racesScraped: 0,
+      entriesScraped: 0,
+      horsesScraped: 0,
+      pastPerformancesImported: 0,
+      oddsScraped: 0,
+      resultsScraped: 0,
+      predictionsGenerated: 0,
+    },
+    errors: [],
+    startedAt: new Date().toISOString(),
+    phaseLabel: '初期化',
+    phaseRemaining: 0,
+  };
+}
+
+export async function runBulkChunk(state: BulkChunkedState): Promise<BulkChunkedState> {
+  const startTime = Date.now();
+  const hasTime = () => (Date.now() - startTime) < CHUNK_TIME_BUDGET_MS;
+  const addError = (msg: string) => {
+    if (state.errors.length < MAX_CHUNK_ERRORS) state.errors.push(msg);
+  };
+
+  try {
+    // 現在のフェーズを処理し、完了したら次のフェーズへ自動遷移
+    while (state.phase !== 'done' && hasTime()) {
+      const prevPhase = state.phase;
+      await processChunkPhase(state, hasTime, addError);
+      // フェーズが変わらなければ = まだ処理中 → クライアントに返す
+      if (state.phase === prevPhase) break;
+    }
+  } catch (error) {
+    addError(`致命的エラー: ${errMsg(error)}`);
+  }
+
+  return state;
+}
+
+async function processChunkPhase(
+  state: BulkChunkedState,
+  hasTime: () => boolean,
+  addError: (msg: string) => void,
+): Promise<void> {
+  switch (state.phase) {
+    case 'init': {
+      if (state.config.clearExisting) clearAllData();
+      state.remainingDates = generateDateRange(state.config.startDate, state.config.endDate);
+      state.totalDates = state.remainingDates.length;
+      state.phase = 'dates';
+      return;
+    }
+
+    case 'dates': {
+      state.phaseLabel = 'レース一覧取得';
+
+      while (state.remainingDates.length > 0 && hasTime()) {
+        const date = state.remainingDates.shift()!;
+        try {
+          const races = await scrapeRaceList(date);
+          const db = getDatabase();
+          for (const race of races) {
+            const exists = db.prepare('SELECT id FROM races WHERE id = ?').get(race.id);
+            if (!exists) {
+              upsertRace({
+                id: race.id,
+                name: race.name,
+                date: race.date,
+                racecourseName: race.racecourseName,
+                raceNumber: race.raceNumber,
+                status: '予定',
+              });
+            }
+          }
+          state.stats.datesProcessed++;
+        } catch (error) {
+          addError(`レース一覧取得失敗 (${date}): ${errMsg(error)}`);
+        }
+        await sleep(CHUNK_RATE_LIMIT_MS);
+      }
+
+      state.phaseRemaining = state.remainingDates.length;
+      if (state.remainingDates.length === 0) state.phase = 'race_details';
+      return;
+    }
+
+    case 'race_details': {
+      state.phaseLabel = '出馬表取得';
+      const db = getDatabase();
+      const unprocessed = db.prepare(
+        "SELECT id, name FROM races WHERE status = '予定' AND date BETWEEN ? AND ? ORDER BY date"
+      ).all(state.config.startDate, state.config.endDate) as { id: string; name: string }[];
+
+      state.phaseRemaining = unprocessed.length;
+
+      if (unprocessed.length === 0) {
+        state.phase = 'horses';
+        return;
+      }
+
+      for (const race of unprocessed) {
+        if (!hasTime()) return;
+        try {
+          const detail = await scrapeRaceCard(race.id);
+          upsertRace({
+            id: detail.id,
+            name: detail.name,
+            racecourseName: detail.racecourseName,
+            racecourseId: detail.racecourseId,
+            trackType: detail.trackType,
+            distance: detail.distance,
+            trackCondition: detail.trackCondition,
+            weather: detail.weather,
+            time: detail.time,
+            grade: detail.grade as import('@/types').Race['grade'],
+            status: '出走確定',
+          });
+          for (const e of detail.entries) {
+            upsertRaceEntry(race.id, {
+              postPosition: e.postPosition,
+              horseNumber: e.horseNumber,
+              horseId: e.horseId,
+              horseName: e.horseName,
+              age: e.age,
+              sex: e.sex,
+              jockeyId: e.jockeyId,
+              jockeyName: e.jockeyName,
+              trainerName: e.trainerName,
+              handicapWeight: e.handicapWeight,
+            });
+            state.stats.entriesScraped++;
+          }
+          state.stats.racesScraped++;
+          state.phaseRemaining--;
+        } catch (error) {
+          addError(`出馬表取得失敗 (${race.id}): ${errMsg(error)}`);
+          try { upsertRace({ id: race.id, status: '出走確定' }); } catch { /* skip */ }
+          state.phaseRemaining--;
+        }
+        await sleep(CHUNK_RATE_LIMIT_MS);
+      }
+
+      // 残りを再確認
+      const remaining = db.prepare(
+        "SELECT COUNT(*) as c FROM races WHERE status = '予定' AND date BETWEEN ? AND ?"
+      ).get(state.config.startDate, state.config.endDate) as { c: number };
+      state.phaseRemaining = remaining.c;
+      if (remaining.c === 0) state.phase = 'horses';
+      return;
+    }
+
+    case 'horses': {
+      state.phaseLabel = '馬詳細・過去成績取得';
+      const db = getDatabase();
+      const unprocessed = db.prepare(`
+        SELECT DISTINCT re.horse_id
+        FROM race_entries re
+        LEFT JOIN horses h ON re.horse_id = h.id
+        WHERE h.id IS NULL
+      `).all() as { horse_id: string }[];
+
+      state.phaseRemaining = unprocessed.length;
+
+      if (unprocessed.length === 0) {
+        state.phase = 'results';
+        return;
+      }
+
+      for (const { horse_id } of unprocessed) {
+        if (!hasTime()) return;
+        try {
+          const horse = await scrapeHorseDetail(horse_id);
+          if (horse) {
+            upsertHorse({
+              id: horse.id,
+              name: horse.name,
+              birthDate: horse.birthDate,
+              fatherName: horse.fatherName,
+              motherName: horse.motherName,
+              trainerName: horse.trainerName,
+              ownerName: horse.ownerName,
+            });
+            state.stats.horsesScraped++;
+            const imported = importHorsePastPerformances(horse, 100);
+            state.stats.pastPerformancesImported += imported;
+          }
+        } catch (error) {
+          addError(`馬詳細取得失敗 (${horse_id}): ${errMsg(error)}`);
+          // プレースホルダーを挿入してリトライを防ぐ
+          try { upsertHorse({ id: horse_id, name: '取得失敗' }); } catch { /* skip */ }
+        }
+        state.phaseRemaining--;
+        await sleep(CHUNK_RATE_LIMIT_MS);
+      }
+
+      // 残りを再確認
+      const remainingCount = (db.prepare(`
+        SELECT COUNT(DISTINCT re.horse_id) as c
+        FROM race_entries re
+        LEFT JOIN horses h ON re.horse_id = h.id
+        WHERE h.id IS NULL
+      `).get() as { c: number }).c;
+      state.phaseRemaining = remainingCount;
+      if (remainingCount === 0) state.phase = 'results';
+      return;
+    }
+
+    case 'results': {
+      state.phaseLabel = 'レース結果取得';
+      const db = getDatabase();
+      const today = new Date().toISOString().split('T')[0];
+      const unprocessed = db.prepare(
+        "SELECT id FROM races WHERE status = '出走確定' AND date < ? AND date BETWEEN ? AND ? ORDER BY date"
+      ).all(today, state.config.startDate, state.config.endDate) as { id: string }[];
+
+      state.phaseRemaining = unprocessed.length;
+
+      if (unprocessed.length === 0) {
+        state.phase = 'predictions';
+        return;
+      }
+
+      for (const race of unprocessed) {
+        if (!hasTime()) return;
+        try {
+          const results = await scrapeRaceResult(race.id);
+          for (const r of results) {
+            upsertRaceEntry(race.id, {
+              horseNumber: r.horseNumber,
+              horseName: r.horseName,
+              result: {
+                position: r.position,
+                time: r.time,
+                margin: r.margin,
+                lastThreeFurlongs: r.lastThreeFurlongs,
+                cornerPositions: r.cornerPositions,
+              },
+            });
+            state.stats.resultsScraped++;
+          }
+          upsertRace({ id: race.id, status: '結果確定' });
+        } catch (error) {
+          addError(`結果取得失敗 (${race.id}): ${errMsg(error)}`);
+          try { upsertRace({ id: race.id, status: '結果確定' }); } catch { /* skip */ }
+        }
+        state.phaseRemaining--;
+        await sleep(CHUNK_RATE_LIMIT_MS);
+      }
+
+      // 残りを再確認
+      const remainingCount = (db.prepare(
+        "SELECT COUNT(*) as c FROM races WHERE status = '出走確定' AND date < ? AND date BETWEEN ? AND ?"
+      ).get(today, state.config.startDate, state.config.endDate) as { c: number }).c;
+      state.phaseRemaining = remainingCount;
+      if (remainingCount === 0) state.phase = 'predictions';
+      return;
+    }
+
+    case 'predictions': {
+      state.phaseLabel = 'AI予想生成';
+      const db = getDatabase();
+      const today = new Date().toISOString().split('T')[0];
+      const unprocessed = db.prepare(`
+        SELECT DISTINCT r.id, r.name, r.date, r.track_type, r.distance,
+               r.track_condition, r.racecourse_name, r.grade
+        FROM races r
+        LEFT JOIN predictions p ON r.id = p.race_id
+        WHERE p.id IS NULL AND r.date >= ?
+        AND r.status IN ('出走確定', '結果確定')
+        AND r.date BETWEEN ? AND ?
+      `).all(today, state.config.startDate, state.config.endDate) as {
+        id: string; name: string; date: string; track_type: string;
+        distance: number; track_condition: string; racecourse_name: string; grade: string;
+      }[];
+
+      state.phaseRemaining = unprocessed.length;
+
+      if (unprocessed.length === 0) {
+        state.phase = 'evaluate';
+        return;
+      }
+
+      for (const race of unprocessed) {
+        if (!hasTime()) return;
+        try {
+          const raceData = getRaceById(race.id);
+          if (!raceData?.entries?.length) {
+            state.phaseRemaining--;
+            continue;
+          }
+
+          const horseInputs = raceData.entries.map((re: import('@/types').RaceEntry) => {
+            const pastPerfs = getHorsePastPerformances(re.horseId, 100);
+            const horseData = getHorseById(re.horseId) as { father_name?: string } | null;
+            return {
+              entry: re,
+              pastPerformances: pastPerfs,
+              jockeyWinRate: 0.10,
+              jockeyPlaceRate: 0.25,
+              fatherName: horseData?.father_name || '',
+            };
+          });
+
+          if (horseInputs.length > 0) {
+            const prediction = generatePrediction(
+              race.id, race.name, race.date,
+              race.track_type as '芝' | 'ダート' | '障害', race.distance,
+              race.track_condition as '良' | '稍重' | '重' | '不良' | undefined, race.racecourse_name, race.grade,
+              horseInputs,
+            );
+            savePrediction(prediction);
+            state.stats.predictionsGenerated++;
+          }
+        } catch (error) {
+          addError(`予想生成失敗 (${race.id}): ${errMsg(error)}`);
+        }
+        state.phaseRemaining--;
+      }
+
+      const remainingCount = (db.prepare(`
+        SELECT COUNT(DISTINCT r.id) as c
+        FROM races r
+        LEFT JOIN predictions p ON r.id = p.race_id
+        WHERE p.id IS NULL AND r.date >= ?
+        AND r.status IN ('出走確定', '結果確定')
+        AND r.date BETWEEN ? AND ?
+      `).get(today, state.config.startDate, state.config.endDate) as { c: number }).c;
+      state.phaseRemaining = remainingCount;
+      if (remainingCount === 0) state.phase = 'evaluate';
+      return;
+    }
+
+    case 'evaluate': {
+      state.phaseLabel = '予想照合';
+      evaluateAllPendingRaces();
+      state.phase = 'done';
+      state.completedAt = new Date().toISOString();
+      state.phaseLabel = '完了';
+      state.phaseRemaining = 0;
+      return;
+    }
+
+    case 'done':
+      return;
+  }
+}

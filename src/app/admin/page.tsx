@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 
 interface SyncLogEntry {
   id: string;
@@ -63,7 +63,8 @@ export default function AdminPage() {
   const [bulkEndDate, setBulkEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [bulkClearExisting, setBulkClearExisting] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<BulkProgress | null>(null);
-  const bulkPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const abortChunkedRef = useRef(false);
 
   const headers = useCallback(() => {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -115,49 +116,112 @@ export default function AdminPage() {
     }
   }, [headers, fetchStatus]);
 
-  // バルクインポートの進捗ポーリング
-  const pollBulkProgress = useCallback(async () => {
-    try {
-      const res = await fetch('/api/sync', {
-        method: 'POST',
-        headers: headers(),
-        body: JSON.stringify({ type: 'bulk_status' }),
-      });
-      const data = await res.json();
-      if (data.progress) {
-        setBulkProgress(data.progress);
-        if (!data.progress.isRunning && bulkPollRef.current) {
-          clearInterval(bulkPollRef.current);
-          bulkPollRef.current = null;
-        }
-      }
-    } catch {
-      // ignore polling errors
-    }
-  }, [headers]);
-
+  // チャンク方式バルクインポート（Vercel対応）
   const startBulkImport = useCallback(async () => {
-    await triggerSync('bulk', {
-      startDate: bulkStartDate,
-      endDate: bulkEndDate,
-      clearExisting: bulkClearExisting,
-    });
-    // Start polling
-    if (bulkPollRef.current) clearInterval(bulkPollRef.current);
-    bulkPollRef.current = setInterval(pollBulkProgress, 3000);
-    setTimeout(pollBulkProgress, 1000);
-  }, [triggerSync, bulkStartDate, bulkEndDate, bulkClearExisting, pollBulkProgress]);
+    if (isImporting) return;
+    setIsImporting(true);
+    abortChunkedRef.current = false;
+    setMessage('バルクインポートを開始しました');
 
-  const abortBulkImport = useCallback(async () => {
-    await triggerSync('bulk_abort');
-    setTimeout(pollBulkProgress, 2000);
-  }, [triggerSync, pollBulkProgress]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let state: any = null;
+    let retries = 0;
 
-  // Clean up polling on unmount
-  useEffect(() => {
-    return () => {
-      if (bulkPollRef.current) clearInterval(bulkPollRef.current);
-    };
+    while (true) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const body: any = { type: 'bulk_chunked' };
+        if (state) {
+          body.state = state;
+        } else {
+          body.startDate = bulkStartDate;
+          body.endDate = bulkEndDate;
+          body.clearExisting = bulkClearExisting;
+        }
+
+        const res = await fetch('/api/sync', {
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          const data = await res.json();
+          setMessage(data.error || 'エラーが発生しました');
+          break;
+        }
+
+        const data = await res.json();
+        state = data.state;
+        retries = 0;
+
+        // フェーズに応じた進捗計算
+        let progressCurrent = 0;
+        let progressTotal = 0;
+        switch (state.phase) {
+          case 'dates':
+            progressCurrent = state.stats.datesProcessed;
+            progressTotal = state.totalDates;
+            break;
+          case 'race_details':
+            progressCurrent = state.stats.racesScraped;
+            progressTotal = state.stats.racesScraped + state.phaseRemaining;
+            break;
+          case 'horses':
+            progressCurrent = state.stats.horsesScraped;
+            progressTotal = state.stats.horsesScraped + state.phaseRemaining;
+            break;
+          case 'results':
+            progressCurrent = state.stats.resultsScraped;
+            progressTotal = state.stats.resultsScraped + state.phaseRemaining;
+            break;
+          case 'predictions':
+            progressCurrent = state.stats.predictionsGenerated;
+            progressTotal = state.stats.predictionsGenerated + state.phaseRemaining;
+            break;
+        }
+
+        setBulkProgress({
+          phase: state.phaseLabel,
+          current: progressCurrent,
+          total: progressTotal,
+          detail: state.phaseRemaining > 0
+            ? `${state.phaseLabel} (残り${state.phaseRemaining}件)`
+            : state.phaseLabel,
+          stats: state.stats,
+          errors: state.errors,
+          isRunning: state.phase !== 'done',
+          startedAt: state.startedAt,
+          completedAt: state.completedAt,
+        });
+
+        if (state.phase === 'done') {
+          setMessage('バルクインポートが完了しました');
+          break;
+        }
+
+        if (abortChunkedRef.current) {
+          setMessage('バルクインポートを中断しました');
+          setBulkProgress(prev => prev ? { ...prev, isRunning: false, phase: '中断' } : null);
+          break;
+        }
+      } catch {
+        retries++;
+        if (retries >= 5) {
+          setMessage('サーバーに接続できません。処理を中断しました。');
+          setBulkProgress(prev => prev ? { ...prev, isRunning: false, phase: 'エラー' } : null);
+          break;
+        }
+        setMessage(`接続エラー。リトライ中... (${retries}/5)`);
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+
+    setIsImporting(false);
+  }, [bulkStartDate, bulkEndDate, bulkClearExisting, headers, isImporting]);
+
+  const abortBulkImport = useCallback(() => {
+    abortChunkedRef.current = true;
   }, []);
 
   return (
@@ -263,12 +327,12 @@ export default function AdminPage() {
         <div className="flex gap-2">
           <button
             onClick={startBulkImport}
-            disabled={loading || (bulkProgress?.isRunning ?? false)}
+            disabled={loading || isImporting}
             className="px-6 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/80 disabled:opacity-50 transition-colors font-medium"
           >
-            バルクインポート開始
+            {isImporting ? 'インポート中...' : 'バルクインポート開始'}
           </button>
-          {bulkProgress?.isRunning && (
+          {isImporting && (
             <button
               onClick={abortBulkImport}
               className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors"
@@ -276,12 +340,6 @@ export default function AdminPage() {
               中断
             </button>
           )}
-          <button
-            onClick={pollBulkProgress}
-            className="px-4 py-2 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-500 transition-colors"
-          >
-            進捗確認
-          </button>
         </div>
 
         {/* バルクインポート進捗表示 */}
