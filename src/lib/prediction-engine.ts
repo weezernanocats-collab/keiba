@@ -1219,3 +1219,31 @@ function timeToSeconds(timeStr: string): number {
 // エクスポート
 export { scoreHorse as _scoreHorse };
 export type { HorseAnalysisInput };
+
+// テスト用エクスポート
+export const _testExports = {
+  calcFactorReliability,
+  bayesianScore,
+  adjustWeights,
+  detectRunningStyle,
+  calcRecentFormScore,
+  calcCourseAptitude,
+  calcDistanceAptitude,
+  calcTrackConditionAptitude,
+  calcJockeyScore,
+  calcSpeedRating,
+  calcClassPerformance,
+  calcRunningStyleBase,
+  calcPostPositionBias,
+  calcRotation,
+  calcLastThreeFurlongs,
+  calcConsistency,
+  applyPaceBonus,
+  calculateConfidence,
+  generateBetRecommendations,
+  positionToScore,
+  ratioToScore,
+  timeToSeconds,
+  WEIGHTS,
+  POPULATION_PRIORS,
+};
