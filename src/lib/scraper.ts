@@ -28,9 +28,9 @@ async function fetchHtml(url: string): Promise<string> {
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
 
-      // 4xx errors are not retryable (except 429)
+      // 4xx errors: 400/429 are retryable (netkeiba returns 400 for rate limiting)
       if (!response.ok) {
-        if (response.status === 429 || response.status >= 500) {
+        if (response.status === 400 || response.status === 429 || response.status >= 500) {
           throw new Error(`HTTP ${response.status}: ${url}`);
         }
         throw new PermanentError(`HTTP ${response.status}: ${url}`);

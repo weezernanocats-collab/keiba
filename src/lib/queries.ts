@@ -87,10 +87,18 @@ export async function upsertRace(race: Partial<Race> & { id: string }) {
     INSERT INTO races (id, name, date, time, racecourse_id, racecourse_name, race_number, grade, track_type, distance, track_condition, weather, status)
     VALUES (@id, @name, @date, @time, @racecourse_id, @racecourse_name, @race_number, @grade, @track_type, @distance, @track_condition, @weather, @status)
     ON CONFLICT(id) DO UPDATE SET
-      name = @name, date = @date, time = @time, racecourse_id = @racecourse_id,
-      racecourse_name = @racecourse_name, race_number = @race_number, grade = @grade,
-      track_type = @track_type, distance = @distance, track_condition = @track_condition,
-      weather = @weather, status = @status
+      name = COALESCE(NULLIF(@name, ''), races.name),
+      date = COALESCE(NULLIF(@date, ''), races.date),
+      time = COALESCE(@time, races.time),
+      racecourse_id = COALESCE(NULLIF(@racecourse_id, ''), races.racecourse_id),
+      racecourse_name = COALESCE(NULLIF(@racecourse_name, ''), races.racecourse_name),
+      race_number = CASE WHEN @race_number > 0 THEN @race_number ELSE races.race_number END,
+      grade = COALESCE(@grade, races.grade),
+      track_type = COALESCE(NULLIF(@track_type, ''), races.track_type),
+      distance = CASE WHEN @distance > 0 THEN @distance ELSE races.distance END,
+      track_condition = COALESCE(@track_condition, races.track_condition),
+      weather = COALESCE(@weather, races.weather),
+      status = @status
   `, {
     id: race.id,
     name: race.name || '',
@@ -100,7 +108,7 @@ export async function upsertRace(race: Partial<Race> & { id: string }) {
     racecourse_name: race.racecourseName || '',
     race_number: race.raceNumber || 0,
     grade: race.grade || null,
-    track_type: race.trackType || 'ダート',
+    track_type: race.trackType || '',
     distance: race.distance || 0,
     track_condition: race.trackCondition || null,
     weather: race.weather || null,
