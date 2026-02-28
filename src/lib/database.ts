@@ -37,6 +37,13 @@ export async function ensureInitialized(): Promise<Client> {
   if (initialized) return db;
 
   await db.batch(SCHEMA_STATEMENTS);
+
+  // FK制約対策: 'unknown' racecourseが常に存在するように保証
+  await db.execute({
+    sql: "INSERT OR IGNORE INTO racecourses (id, name, region, prefecture) VALUES ('unknown', '不明', '地方', '不明')",
+    args: [],
+  });
+
   initialized = true;
   return db;
 }

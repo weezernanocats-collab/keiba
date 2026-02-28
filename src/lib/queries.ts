@@ -80,6 +80,9 @@ export async function getRecentResults(limit: number = 50) {
 }
 
 export async function upsertRace(race: Partial<Race> & { id: string }) {
+  // racecourseId が未指定の場合、raceIdから推定する（FK制約対策）
+  const racecourseId = race.racecourseId || inferRacecourseIdFromRaceId(race.id);
+
   await dbRunNamed(`
     INSERT OR REPLACE INTO races (id, name, date, time, racecourse_id, racecourse_name, race_number, grade, track_type, distance, track_condition, weather, status)
     VALUES (@id, @name, @date, @time, @racecourse_id, @racecourse_name, @race_number, @grade, @track_type, @distance, @track_condition, @weather, @status)
@@ -88,7 +91,7 @@ export async function upsertRace(race: Partial<Race> & { id: string }) {
     name: race.name || '',
     date: race.date || '',
     time: race.time || null,
-    racecourse_id: race.racecourseId || '',
+    racecourse_id: racecourseId,
     racecourse_name: race.racecourseName || '',
     race_number: race.raceNumber || 0,
     grade: race.grade || null,
@@ -98,6 +101,21 @@ export async function upsertRace(race: Partial<Race> & { id: string }) {
     weather: race.weather || null,
     status: race.status || '予定',
   });
+}
+
+/** raceId からracecourse_idを推定 (netkeiba IDの5-6桁目が競馬場コード) */
+function inferRacecourseIdFromRaceId(raceId: string): string {
+  const codeMap: Record<string, string> = {
+    '01': 'sapporo', '02': 'hakodate', '03': 'fukushima', '04': 'niigata',
+    '05': 'tokyo', '06': 'nakayama', '07': 'chukyo', '08': 'kyoto',
+    '09': 'hanshin', '10': 'kokura',
+    '30': 'monbetsu', '35': 'morioka', '36': 'mizusawa',
+    '42': 'urawa', '43': 'funabashi', '44': 'ooi', '45': 'kawasaki',
+    '46': 'kanazawa', '48': 'kasamatsu', '50': 'nagoya',
+    '51': 'sonoda', '54': 'kochi', '55': 'saga',
+  };
+  const code = raceId.substring(4, 6);
+  return codeMap[code] || 'unknown';
 }
 
 // ==================== 出走馬 ====================

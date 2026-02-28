@@ -62,29 +62,43 @@ class PermanentError extends Error {
 // レース一覧を取得（日付指定）
 export async function scrapeRaceList(date: string): Promise<ScrapedRace[]> {
   const dateStr = date.replace(/-/g, '');
-  const url = `${BASE_URL}/top/race_list.html?kaisai_date=${dateStr}`;
+  // netkeiba はレース一覧を race_list_sub.html で提供（メインページはAJAX動的読み込み）
+  const url = `${BASE_URL}/top/race_list_sub.html?kaisai_date=${dateStr}`;
   const html = await fetchHtml(url);
   const $ = cheerio.load(html);
   const races: ScrapedRace[] = [];
 
-  $('dl.RaceList_DataList').each((_, dl) => {
-    const courseName = $(dl).find('dt').text().trim();
-    $(dl).find('dd a').each((_, a) => {
-      const href = $(a).attr('href') || '';
-      const raceIdMatch = href.match(/race_id=(\d+)/);
-      if (!raceIdMatch) return;
+  // race_list_sub.html は <li><a href="...?race_id=XXXX">1R レース名 時刻 距離 頭数</a></li> 形式
+  $('li a[href*="race_id="]').each((_, a) => {
+    const href = $(a).attr('href') || '';
+    // 動画リンク (race/movie.html) は除外
+    if (href.includes('movie.html')) return;
 
-      const raceId = raceIdMatch[1];
-      const raceText = $(a).text().trim();
-      const raceNumMatch = raceText.match(/(\d+)R/);
+    const raceIdMatch = href.match(/race_id=(\d+)/);
+    if (!raceIdMatch) return;
 
-      races.push({
-        id: raceId,
-        raceNumber: raceNumMatch ? parseInt(raceNumMatch[1]) : 0,
-        name: raceText.replace(/\d+R\s*/, '').trim() || `${raceNumMatch?.[1] || ''}R`,
-        racecourseName: courseName,
-        date,
-      });
+    const raceId = raceIdMatch[1];
+    const raceText = $(a).text().trim();
+    const raceNumMatch = raceText.match(/(\d+)R/);
+
+    // レース名: "1R 2歳未勝利 09:50 ダ1200m 16頭" からレース名部分を抽出
+    const namePart = raceText
+      .replace(/\d+R\s*/, '')      // レース番号除去
+      .replace(/\d{2}:\d{2}/, '')  // 時刻除去
+      .replace(/[芝ダ障]\d+m/, '') // 距離除去
+      .replace(/\d+頭/, '')        // 頭数除去
+      .trim();
+
+    // 競馬場名はraceIdから推定
+    const racecourseId = inferRacecourseId(raceId);
+    const racecourseName = inferRacecourseName(racecourseId);
+
+    races.push({
+      id: raceId,
+      raceNumber: raceNumMatch ? parseInt(raceNumMatch[1]) : 0,
+      name: namePart || `${raceNumMatch?.[1] || ''}R`,
+      racecourseName,
+      date,
     });
   });
 

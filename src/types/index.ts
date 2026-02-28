@@ -226,4 +226,6 @@ export const RACECOURSES: Racecourse[] = [
   { id: 'himeji', name: '姫路', region: '地方', prefecture: '兵庫県', trackTypes: ['ダート'] },
   { id: 'kochi', name: '高知', region: '地方', prefecture: '高知県', trackTypes: ['ダート'] },
   { id: 'saga', name: '佐賀', region: '地方', prefecture: '佐賀県', trackTypes: ['ダート'] },
+  // フォールバック（不明な競馬場コード用）
+  { id: 'unknown', name: '不明', region: '地方', prefecture: '不明', trackTypes: ['芝', 'ダート'] },
 ];
