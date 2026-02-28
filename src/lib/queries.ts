@@ -13,7 +13,7 @@ export async function getAllRacecourses() {
 
 export async function seedRacecourses(racecourses: typeof RACECOURSES) {
   const statements = racecourses.map(rc => ({
-    sql: 'INSERT OR REPLACE INTO racecourses (id, name, region, prefecture) VALUES (?, ?, ?, ?)',
+    sql: 'INSERT INTO racecourses (id, name, region, prefecture) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, region = excluded.region, prefecture = excluded.prefecture',
     args: [rc.id, rc.name, rc.region, rc.prefecture],
   }));
   await dbBatch(statements);
@@ -84,8 +84,13 @@ export async function upsertRace(race: Partial<Race> & { id: string }) {
   const racecourseId = race.racecourseId || inferRacecourseIdFromRaceId(race.id);
 
   await dbRunNamed(`
-    INSERT OR REPLACE INTO races (id, name, date, time, racecourse_id, racecourse_name, race_number, grade, track_type, distance, track_condition, weather, status)
+    INSERT INTO races (id, name, date, time, racecourse_id, racecourse_name, race_number, grade, track_type, distance, track_condition, weather, status)
     VALUES (@id, @name, @date, @time, @racecourse_id, @racecourse_name, @race_number, @grade, @track_type, @distance, @track_condition, @weather, @status)
+    ON CONFLICT(id) DO UPDATE SET
+      name = @name, date = @date, time = @time, racecourse_id = @racecourse_id,
+      racecourse_name = @racecourse_name, race_number = @race_number, grade = @grade,
+      track_type = @track_type, distance = @distance, track_condition = @track_condition,
+      weather = @weather, status = @status
   `, {
     id: race.id,
     name: race.name || '',
@@ -216,7 +221,7 @@ export async function getAllHorses(limit: number = 100, offset: number = 0) {
 
 export async function upsertHorse(horse: Partial<Horse> & { id: string }) {
   await dbRunNamed(`
-    INSERT OR REPLACE INTO horses (
+    INSERT INTO horses (
       id, name, name_en, age, sex, color, birth_date,
       father_id, father_name, mother_id, mother_name,
       trainer_name, owner_name, total_races, wins, seconds, thirds,
@@ -229,6 +234,16 @@ export async function upsertHorse(horse: Partial<Horse> & { id: string }) {
       @total_earnings, @condition_overall, @condition_weight, @condition_weight_change,
       @training_comment, datetime('now')
     )
+    ON CONFLICT(id) DO UPDATE SET
+      name = @name, name_en = @name_en, age = @age, sex = @sex,
+      color = @color, birth_date = @birth_date,
+      father_id = @father_id, father_name = @father_name,
+      mother_id = @mother_id, mother_name = @mother_name,
+      trainer_name = @trainer_name, owner_name = @owner_name,
+      total_races = @total_races, wins = @wins, seconds = @seconds, thirds = @thirds,
+      total_earnings = @total_earnings, condition_overall = @condition_overall,
+      condition_weight = @condition_weight, condition_weight_change = @condition_weight_change,
+      training_comment = @training_comment, updated_at = datetime('now')
   `, {
     id: horse.id,
     name: horse.name || '',
@@ -290,7 +305,7 @@ export async function getAllJockeys(limit: number = 100, offset: number = 0) {
 
 export async function upsertJockey(jockey: Partial<Jockey> & { id: string }) {
   await dbRunNamed(`
-    INSERT OR REPLACE INTO jockeys (
+    INSERT INTO jockeys (
       id, name, name_en, age, region, belongs_to,
       total_races, wins, win_rate, place_rate, show_rate,
       total_earnings, updated_at
@@ -299,6 +314,11 @@ export async function upsertJockey(jockey: Partial<Jockey> & { id: string }) {
       @total_races, @wins, @win_rate, @place_rate, @show_rate,
       @total_earnings, datetime('now')
     )
+    ON CONFLICT(id) DO UPDATE SET
+      name = @name, name_en = @name_en, age = @age, region = @region,
+      belongs_to = @belongs_to, total_races = @total_races, wins = @wins,
+      win_rate = @win_rate, place_rate = @place_rate, show_rate = @show_rate,
+      total_earnings = @total_earnings, updated_at = datetime('now')
   `, {
     id: jockey.id,
     name: jockey.name || '',
