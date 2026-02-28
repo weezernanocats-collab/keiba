@@ -121,6 +121,14 @@ function inferRacecourseIdFromRaceId(raceId: string): string {
 // ==================== 出走馬 ====================
 
 export async function upsertRaceEntry(raceId: string, entry: Partial<RaceEntry>) {
+  // FK制約対策: horse_id が horses テーブルに存在しない場合、プレースホルダーを挿入
+  if (entry.horseId) {
+    await dbRun(
+      "INSERT OR IGNORE INTO horses (id, name, age, sex) VALUES (?, ?, ?, ?)",
+      [entry.horseId, entry.horseName || '不明', entry.age || 0, entry.sex || '牡']
+    );
+  }
+
   // まず既存エントリを確認
   const existing = await dbGet<{ id: number }>(
     'SELECT id FROM race_entries WHERE race_id = ? AND horse_number = ?',
