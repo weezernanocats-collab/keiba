@@ -5,7 +5,35 @@ import { upsertRace, upsertHorse } from '@/lib/queries';
 
 export const maxDuration = 30;
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const action = searchParams.get('action');
+
+  // ?action=fix_broken_dates → 壊れたレースを修復
+  if (action === 'fix_broken_dates') {
+    try {
+      const broken = await dbAll<{ id: string }>(
+        "SELECT id FROM races WHERE date = '' OR date IS NULL"
+      );
+      const ids = broken.map(r => r.id);
+      if (ids.length === 0) {
+        return NextResponse.json({ fixed: 0, message: '修復対象なし' });
+      }
+      const placeholders = ids.map(() => '?').join(',');
+      await dbRun(`DELETE FROM race_entries WHERE race_id IN (${placeholders})`, ids);
+      await dbRun(`DELETE FROM odds WHERE race_id IN (${placeholders})`, ids);
+      await dbRun(`DELETE FROM predictions WHERE race_id IN (${placeholders})`, ids);
+      await dbRun(`DELETE FROM races WHERE id IN (${placeholders})`, ids);
+      return NextResponse.json({
+        fixed: ids.length,
+        message: `${ids.length}件の壊れたレースを削除しました。バルクインポートで再取込してください。`,
+        deletedIds: ids.slice(0, 20),
+      });
+    } catch (error) {
+      return NextResponse.json({ error: String(error) }, { status: 500 });
+    }
+  }
+
   const results: Record<string, unknown> = {};
 
   // 0. 環境変数チェック
