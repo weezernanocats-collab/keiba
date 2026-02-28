@@ -12,6 +12,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@google/genai": "^1.43.0",
     "@libsql/client": "^0.17.0",
     "cheerio": "^1.2.0",
     "date-fns": "^4.1.0",
@@ -29,7 +30,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
-    "typescript": "^5",
+    "typescript": "5.9.3",
     "vitest": "^4.0.18"
   }
 }

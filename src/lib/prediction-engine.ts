@@ -45,6 +45,8 @@ import {
   calcSecondStartScore,
   type RaceHistoricalContext,
 } from './historical-analyzer';
+import { enhancePredictionWithGemini, type GeminiRaceContext } from './gemini-enhancer';
+import { callMLPredict, buildMLFeatures, type MLHorseInput } from './ml-client';
 
 // デフォルト重み設定 (v4.1: 的中率最適化 — 直近成績・距離・スピードの重みを増加)
 const DEFAULT_WEIGHTS: Record<string, number> = {
@@ -269,6 +271,43 @@ export async function generatePrediction(
   // スコア順にソート
   scoredHorses.sort((a, b) => b.totalScore - a.totalScore);
 
+  // --- ML推論によるスコアブレンド ---
+  const mlInputs: MLHorseInput[] = scoredHorses.map(sh => ({
+    horseNumber: sh.entry.horseNumber,
+    features: buildMLFeatures(
+      Object.fromEntries(
+        Object.entries(sh.scores).filter(([k]) => !k.startsWith('_'))
+      ),
+      {
+        fieldSize: horses.length,
+        odds: sh.entry.odds,
+        popularity: sh.entry.popularity,
+        age: sh.entry.age,
+        sex: sh.entry.sex,
+        handicapWeight: sh.entry.handicapWeight,
+        postPosition: sh.entry.postPosition,
+        grade,
+        trackType,
+        distance,
+        trackCondition: cond,
+      },
+    ),
+  }));
+
+  const mlPredictions = await callMLPredict(mlInputs);
+
+  if (mlPredictions) {
+    const ML_BLEND_WEIGHT = parseFloat(process.env.ML_BLEND_WEIGHT || '0.40');
+    for (const sh of scoredHorses) {
+      const ml = mlPredictions[sh.entry.horseNumber];
+      if (ml) {
+        sh.totalScore = sh.totalScore * (1 - ML_BLEND_WEIGHT) + ml.winProb * 100 * ML_BLEND_WEIGHT;
+      }
+    }
+    scoredHorses.sort((a, b) => b.totalScore - a.totalScore);
+  }
+  // --- ML推論ここまで ---
+
   // トップピック生成
   const topPicks: PredictionPick[] = scoredHorses.slice(0, 6).map((sh, idx) => ({
     rank: idx + 1,
@@ -294,6 +333,17 @@ export async function generatePrediction(
     }
     horseScores[sh.entry.horseNumber] = factorScores;
   }
+  // ML確率もhorseScoresに保存（学習データエクスポート用）
+  if (mlPredictions) {
+    for (const sh of scoredHorses) {
+      const ml = mlPredictions[sh.entry.horseNumber];
+      if (ml) {
+        horseScores[sh.entry.horseNumber].mlWinProb = Math.round(ml.winProb * 10000) / 10000;
+        horseScores[sh.entry.horseNumber].mlPlaceProb = Math.round(ml.placeProb * 10000) / 10000;
+      }
+    }
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (analysis as any).horseScores = horseScores;
 
@@ -306,7 +356,7 @@ export async function generatePrediction(
   // サマリー生成
   const summary = generateSummary(topPicks, analysis, raceName, confidence);
 
-  return {
+  const rawPrediction: Prediction = {
     raceId,
     raceName,
     date,
@@ -317,6 +367,27 @@ export async function generatePrediction(
     analysis,
     recommendedBets,
   };
+
+  // Gemini による分析テキスト強化（APIキー未設定時やエラー時はそのまま返却）
+  const geminiCtx: GeminiRaceContext = {
+    trackType,
+    distance,
+    trackCondition: cond,
+    racecourseName,
+    grade,
+    horseScores: scoredHorses.slice(0, 6).map(sh => ({
+      horseName: sh.entry.horseName,
+      horseNumber: sh.entry.horseNumber,
+      totalScore: sh.totalScore,
+      factorScores: Object.fromEntries(
+        Object.entries(sh.scores).filter(([k]) => !k.startsWith('_'))
+      ),
+      runningStyle: sh.runningStyle,
+      fatherName: sh.fatherName,
+    })),
+  };
+
+  return enhancePredictionWithGemini(rawPrediction, geminiCtx);
 }
 
 // ==================== メインスコアリング ====================
