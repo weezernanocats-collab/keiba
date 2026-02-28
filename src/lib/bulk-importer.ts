@@ -742,11 +742,12 @@ async function processChunkPhase(
 
     case 'horses': {
       state.phaseLabel = '馬詳細・過去成績取得';
-      const unprocessed = await dbAll<{ horse_id: string }>(
-        `SELECT DISTINCT re.horse_id
-        FROM race_entries re
-        LEFT JOIN horses h ON re.horse_id = h.id
-        WHERE h.id IS NULL`
+      // プレースホルダー馬（birth_date が NULL）も未処理として扱う
+      const unprocessed = await dbAll<{ id: string }>(
+        `SELECT DISTINCT h.id
+        FROM horses h
+        JOIN race_entries re ON h.id = re.horse_id
+        WHERE h.birth_date IS NULL AND h.name != '取得失敗'`
       );
 
       state.phaseRemaining = unprocessed.length;
@@ -756,7 +757,7 @@ async function processChunkPhase(
         return;
       }
 
-      for (const { horse_id } of unprocessed) {
+      for (const { id: horse_id } of unprocessed) {
         if (!hasTime()) return;
         try {
           const horse = await scrapeHorseDetail(horse_id);
@@ -776,7 +777,7 @@ async function processChunkPhase(
           }
         } catch (error) {
           addError(`馬詳細取得失敗 (${horse_id}): ${errMsg(error)}`);
-          // プレースホルダーを挿入してリトライを防ぐ
+          // 取得失敗をマークしてリトライを防ぐ
           try { await upsertHorse({ id: horse_id, name: '取得失敗' }); } catch { /* skip */ }
         }
         state.phaseRemaining--;
@@ -785,10 +786,10 @@ async function processChunkPhase(
 
       // 残りを再確認
       const remainingRow = await dbGet<{ c: number }>(
-        `SELECT COUNT(DISTINCT re.horse_id) as c
-        FROM race_entries re
-        LEFT JOIN horses h ON re.horse_id = h.id
-        WHERE h.id IS NULL`
+        `SELECT COUNT(DISTINCT h.id) as c
+        FROM horses h
+        JOIN race_entries re ON h.id = re.horse_id
+        WHERE h.birth_date IS NULL AND h.name != '取得失敗'`
       );
       const remainingCount = remainingRow?.c ?? 0;
       state.phaseRemaining = remainingCount;
