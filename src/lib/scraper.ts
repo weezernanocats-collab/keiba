@@ -267,11 +267,14 @@ export async function scrapeRaceResult(raceId: string): Promise<ScrapedResult[]>
 
 // 馬の詳細情報取得
 export async function scrapeHorseDetail(horseId: string): Promise<ScrapedHorseDetail | null> {
-  const url = `${DB_BASE_URL}/horse/${horseId}`;
-  const html = await fetchHtml(url);
-  const $ = cheerio.load(html);
+  // プロフィールページ
+  const profileUrl = `${DB_BASE_URL}/horse/${horseId}`;
+  const profileHtml = await fetchHtml(profileUrl);
+  const $ = cheerio.load(profileHtml);
 
-  const name = $('h1.horse_title').text().trim().split('\n')[0];
+  // 馬名: <div class="horse_title"><h1>馬名</h1></div>
+  const name = $('.horse_title h1').text().trim().split('\n')[0]
+    || $('h1').first().text().trim().split('\n')[0];
   if (!name) return null;
 
   const profileTable = $('table.db_prof_table');
@@ -281,58 +284,66 @@ export async function scrapeHorseDetail(horseId: string): Promise<ScrapedHorseDe
   const fatherName = $('a[href*="/horse/ped/"]').eq(0).text().trim();
   const motherName = $('a[href*="/horse/ped/"]').eq(1).text().trim();
 
-  // 過去成績
+  // 過去成績: /horse/result/{id} から取得（メインページはAJAX読み込みのため）
   const pastPerformances: ScrapedPastPerformance[] = [];
-  $('table.db_h_race_results tbody tr').each((_, tr) => {
-    const tds = $(tr).find('td');
-    if (tds.length < 20) return;
+  try {
+    const resultUrl = `${DB_BASE_URL}/horse/result/${horseId}`;
+    const resultHtml = await fetchHtml(resultUrl);
+    const $r = cheerio.load(resultHtml);
 
-    const date = $(tds[0]).find('a').text().trim();
-    const racecourseName = $(tds[1]).text().trim();
-    const raceName = $(tds[4]).find('a').text().trim();
-    const entries = parseInt($(tds[7]).text().trim()) || 0;
-    const postPosition = parseInt($(tds[8]).text().trim()) || 0;
-    const horseNumber = parseInt($(tds[9]).text().trim()) || 0;
-    const odds = parseFloat($(tds[10]).text().trim()) || 0;
-    const popularity = parseInt($(tds[11]).text().trim()) || 0;
-    const position = parseInt($(tds[12]).text().trim()) || 99;
-    const jockeyName = $(tds[13]).find('a').text().trim();
-    const handicapWeight = parseFloat($(tds[14]).text().trim()) || 0;
-    const distText = $(tds[15]).text().trim();
-    const trackMatch = distText.match(/(芝|ダート|障)(\d+)/);
-    const condText = $(tds[16]).text().trim();
-    const time = $(tds[17]).text().trim();
-    const margin = $(tds[18]).text().trim();
-    const lastThreeFurlongs = $(tds[22]).text().trim();
-    const cornerPositions = $(tds[21]).text().trim();
-    const weightText = $(tds[23]).text().trim();
-    const weightMatch = weightText.match(/(\d+)\(([+-]?\d+)\)/);
+    $r('table.db_h_race_results tbody tr').each((_, tr) => {
+      const tds = $r(tr).find('td');
+      if (tds.length < 20) return;
 
-    if (date) {
-      pastPerformances.push({
-        date: date.replace(/\//g, '-'),
-        racecourseName,
-        raceName,
-        trackType: (trackMatch?.[1] === '障' ? '障害' : trackMatch?.[1] || 'ダート') as '芝' | 'ダート' | '障害',
-        distance: parseInt(trackMatch?.[2] || '0'),
-        trackCondition: (condText || '良') as '良' | '稍重' | '重' | '不良',
-        entries,
-        postPosition,
-        horseNumber,
-        position,
-        jockeyName,
-        handicapWeight,
-        weight: weightMatch ? parseInt(weightMatch[1]) : 0,
-        weightChange: weightMatch ? parseInt(weightMatch[2]) : 0,
-        time,
-        margin,
-        lastThreeFurlongs,
-        cornerPositions,
-        odds,
-        popularity,
-      });
-    }
-  });
+      const date = $r(tds[0]).find('a').text().trim();
+      const racecourseName = $r(tds[1]).text().trim();
+      const raceName = $r(tds[4]).find('a').text().trim();
+      const entries = parseInt($r(tds[7]).text().trim()) || 0;
+      const postPosition = parseInt($r(tds[8]).text().trim()) || 0;
+      const horseNumber = parseInt($r(tds[9]).text().trim()) || 0;
+      const odds = parseFloat($r(tds[10]).text().trim()) || 0;
+      const popularity = parseInt($r(tds[11]).text().trim()) || 0;
+      const position = parseInt($r(tds[12]).text().trim()) || 99;
+      const jockeyName = $r(tds[13]).find('a').text().trim();
+      const handicapWeight = parseFloat($r(tds[14]).text().trim()) || 0;
+      const distText = $r(tds[15]).text().trim();
+      const trackMatch = distText.match(/(芝|ダート|障)(\d+)/);
+      const condText = $r(tds[16]).text().trim();
+      const time = $r(tds[17]).text().trim();
+      const margin = $r(tds[18]).text().trim();
+      const lastThreeFurlongs = $r(tds[22]).text().trim();
+      const cornerPositions = $r(tds[21]).text().trim();
+      const weightText = $r(tds[23]).text().trim();
+      const weightMatch = weightText.match(/(\d+)\(([+-]?\d+)\)/);
+
+      if (date) {
+        pastPerformances.push({
+          date: date.replace(/\//g, '-'),
+          racecourseName,
+          raceName,
+          trackType: (trackMatch?.[1] === '障' ? '障害' : trackMatch?.[1] || 'ダート') as '芝' | 'ダート' | '障害',
+          distance: parseInt(trackMatch?.[2] || '0'),
+          trackCondition: (condText || '良') as '良' | '稍重' | '重' | '不良',
+          entries,
+          postPosition,
+          horseNumber,
+          position,
+          jockeyName,
+          handicapWeight,
+          weight: weightMatch ? parseInt(weightMatch[1]) : 0,
+          weightChange: weightMatch ? parseInt(weightMatch[2]) : 0,
+          time,
+          margin,
+          lastThreeFurlongs,
+          cornerPositions,
+          odds,
+          popularity,
+        });
+      }
+    });
+  } catch {
+    // 過去成績取得失敗はスキップ（プロフィールだけでも保存する）
+  }
 
   return {
     id: horseId,
