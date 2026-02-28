@@ -8,6 +8,13 @@ export const maxDuration = 30;
 export async function GET() {
   const results: Record<string, unknown> = {};
 
+  // 0. 環境変数チェック
+  results.envCheck = {
+    hasTursoUrl: !!process.env.TURSO_DATABASE_URL,
+    tursoUrlPrefix: process.env.TURSO_DATABASE_URL?.substring(0, 30) || 'not set',
+    hasTursoToken: !!process.env.TURSO_AUTH_TOKEN,
+  };
+
   // 1. DB接続テスト: SELECT
   try {
     const row = await dbGet<{ c: number }>('SELECT COUNT(*) as c FROM races');
@@ -56,7 +63,7 @@ export async function GET() {
     results.dbNamedInsert = { success: false, error: String(error) };
   }
 
-  // 4. upsertRace関数テスト
+  // 4. upsertRace関数テスト (racecourseId未指定 = バルクインポートと同じ条件)
   try {
     await upsertRace({
       id: 'test_diag_003',
@@ -72,7 +79,7 @@ export async function GET() {
     results.upsertRaceTest = { success: false, error: String(error) };
   }
 
-  // 5. スクレイパーテスト: 複数日をテスト + 生のHTML確認
+  // 5. スクレイパーテスト: 複数日をテスト
   try {
     const testDates = ['2025-12-28', '2025-06-01', '2026-02-22'];
     const scraperResults: Record<string, unknown>[] = [];
@@ -105,9 +112,12 @@ export async function GET() {
     results.rawHtmlTest = {
       status: response.status,
       htmlLength: html.length,
-      htmlSnippet: html.substring(0, 2000),
       containsRaceList: html.includes('RaceList_DataList'),
       containsRaceId: html.includes('race_id='),
+      containsDlTag: html.includes('<dl'),
+      bodySnippetAroundRace: extractAroundKeyword(html, 'race_id', 500),
+      bodySnippetAroundDl: extractAroundKeyword(html, '<dl', 500),
+      htmlSnippet: html.substring(0, 2000),
     };
   } catch (error) {
     results.rawHtmlTest = { success: false, error: String(error) };
@@ -137,11 +147,10 @@ export async function GET() {
   return NextResponse.json(results, { status: 200 });
 }
 
-function getRecentSaturday(): string {
-  const now = new Date();
-  const dayOfWeek = now.getDay();
-  const diff = dayOfWeek >= 6 ? dayOfWeek - 6 : dayOfWeek + 1;
-  const saturday = new Date(now);
-  saturday.setDate(now.getDate() - diff);
-  return saturday.toISOString().split('T')[0];
+function extractAroundKeyword(html: string, keyword: string, radius: number): string {
+  const idx = html.indexOf(keyword);
+  if (idx === -1) return 'keyword not found';
+  const start = Math.max(0, idx - radius);
+  const end = Math.min(html.length, idx + radius);
+  return html.substring(start, end);
 }
