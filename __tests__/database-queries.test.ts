@@ -18,6 +18,9 @@ import {
   getDashboardStats,
   seedRacecourses, getAllRacecourses,
   setHorseTraits,
+  getJockeyStats,
+  saveCalibrationWeights, getActiveCalibrationWeights,
+  recordSchedulerRun, updateSchedulerRun, hasSchedulerRunToday,
 } from '@/lib/queries';
 
 // テスト用にインメモリDBを使用（環境変数未設定でローカルファイル使用）
@@ -398,5 +401,98 @@ describe('dashboard stats', () => {
     expect(stats).toHaveProperty('totalJockeys');
     expect(stats).toHaveProperty('totalPredictions');
     expect(typeof stats.totalRaces).toBe('number');
+  });
+});
+
+// ==================== Jockey Stats ====================
+
+describe('jockey stats', () => {
+  it('jockeysテーブルからの取得', async () => {
+    await upsertJockey({
+      id: 'j_stats', name: 'スタッツ騎手', winRate: 0.18, placeRate: 0.42, totalRaces: 200,
+    });
+    const stats = await getJockeyStats('j_stats');
+    expect(stats.winRate).toBe(0.18);
+    expect(stats.placeRate).toBe(0.42);
+  });
+
+  it('存在しない騎手はデフォルト値を返す', async () => {
+    const stats = await getJockeyStats('nonexistent_jockey');
+    expect(stats.winRate).toBe(0.08);
+    expect(stats.placeRate).toBe(0.20);
+  });
+
+  it('空文字列はデフォルト値を返す', async () => {
+    const stats = await getJockeyStats('');
+    expect(stats.winRate).toBe(0.08);
+    expect(stats.placeRate).toBe(0.20);
+  });
+});
+
+// ==================== Calibration Weights ====================
+
+describe('calibration weights', () => {
+  it('saveCalibrationWeights + getActiveCalibrationWeights', async () => {
+    const weights = { recentForm: 0.20, courseAptitude: 0.08, distanceAptitude: 0.10 };
+    await saveCalibrationWeights(weights, 50, true, 'テスト校正');
+
+    const active = await getActiveCalibrationWeights();
+    expect(active).toBeTruthy();
+    expect(active!.recentForm).toBe(0.20);
+    expect(active!.courseAptitude).toBe(0.08);
+  });
+
+  it('applied=false のものは取得されない', async () => {
+    await dbRun('DELETE FROM calibration_weights');
+    await saveCalibrationWeights({ recentForm: 0.15 }, 10, false);
+
+    const active = await getActiveCalibrationWeights();
+    expect(active).toBeNull();
+  });
+});
+
+// ==================== Scheduler Runs ====================
+
+describe('scheduler runs', () => {
+  it('recordSchedulerRun + updateSchedulerRun', async () => {
+    const runId = await recordSchedulerRun('morning', '2025-06-15', 'running', '取得開始');
+    expect(runId).toBeGreaterThan(0);
+
+    await updateSchedulerRun(runId, 'completed', 'レース12件取得完了');
+
+    const row = await dbGet<{ status: string; detail: string }>(
+      'SELECT status, detail FROM scheduler_runs WHERE id = ?', [runId]
+    );
+    expect(row?.status).toBe('completed');
+    expect(row?.detail).toBe('レース12件取得完了');
+  });
+
+  it('hasSchedulerRunToday は当日の実行をチェック', async () => {
+    const today = new Date().toISOString().split('T')[0];
+    await recordSchedulerRun('odds', today, 'completed', 'テスト');
+
+    const result = await hasSchedulerRunToday('odds', today);
+    expect(result).toBe(true);
+
+    const result2 = await hasSchedulerRunToday('odds', '2020-01-01');
+    expect(result2).toBe(false);
+  });
+});
+
+// ==================== New Tables Exist ====================
+
+describe('new tables', () => {
+  it('scheduler_runs テーブルが存在する', async () => {
+    const tables = await dbAll<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='scheduler_runs'"
+    );
+    expect(tables.length).toBe(1);
+  });
+
+  it('calibration_weights テーブルが存在する', async () => {
+    const tables = await dbAll<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='calibration_weights'"
+    );
+    expect(tables.length).toBe(1);
   });
 });

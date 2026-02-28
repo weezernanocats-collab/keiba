@@ -275,6 +275,26 @@ const SCHEMA_STATEMENTS: InStatement[] = [
     FOREIGN KEY (prediction_id) REFERENCES predictions(id)
   )`,
 
+  `CREATE TABLE IF NOT EXISTS scheduler_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_type TEXT NOT NULL,
+    target_date TEXT NOT NULL,
+    started_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT,
+    status TEXT DEFAULT 'running' CHECK(status IN ('running', 'completed', 'failed')),
+    detail TEXT,
+    error TEXT
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS calibration_weights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT DEFAULT (datetime('now')),
+    weights_json TEXT NOT NULL,
+    evaluated_races INTEGER NOT NULL,
+    applied INTEGER DEFAULT 0,
+    notes TEXT
+  )`,
+
   // インデックス
   `CREATE INDEX IF NOT EXISTS idx_races_date ON races(date)`,
   `CREATE INDEX IF NOT EXISTS idx_races_racecourse ON races(racecourse_id)`,
@@ -292,4 +312,5 @@ const SCHEMA_STATEMENTS: InStatement[] = [
   `CREATE INDEX IF NOT EXISTS idx_race_entries_jockey ON race_entries(jockey_id)`,
   `CREATE INDEX IF NOT EXISTS idx_races_status ON races(status, date)`,
   `CREATE INDEX IF NOT EXISTS idx_prediction_results_race ON prediction_results(race_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_scheduler_runs_date ON scheduler_runs(target_date, job_type)`,
 ];

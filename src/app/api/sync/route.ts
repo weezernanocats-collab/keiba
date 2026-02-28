@@ -23,10 +23,11 @@ import {
   getHorseById,
   getRaceById,
   savePrediction,
+  getJockeyStats,
 } from '@/lib/queries';
 import { generatePrediction } from '@/lib/prediction-engine';
 import { runBulkImport, getBulkImportProgress, abortBulkImport, type BulkImportConfig, runBulkChunk, createInitialChunkedState, type BulkChunkedState } from '@/lib/bulk-importer';
-import { evaluateRacePrediction, evaluateAllPendingRaces, getAccuracyStats, calibrateWeights } from '@/lib/accuracy-tracker';
+import { evaluateRacePrediction, evaluateAllPendingRaces, getAccuracyStats, calibrateWeights, autoCalibrate, ensureCalibrationLoaded } from '@/lib/accuracy-tracker';
 import type { PastPerformance } from '@/types';
 
 // Vercelのサーバーレス関数タイムアウトを60秒に設定
@@ -174,7 +175,10 @@ export async function POST(request: NextRequest) {
         error: '校正に必要なデータが不足しています（最低5レース分の照合済みデータが必要）',
       }, { status: 400 });
     }
-    return NextResponse.json({ calibration });
+
+    // 自動適用を試行
+    const autoResult = await autoCalibrate();
+    return NextResponse.json({ calibration, autoApplied: autoResult });
   }
 
   // バルクインポートの状態確認
@@ -600,6 +604,9 @@ async function syncFull(entry: SyncLogEntry, date?: string): Promise<void> {
   }
 
   // Step 5: Generate predictions for each race
+  // 校正済み重みがあれば適用
+  await ensureCalibrationLoaded();
+
   entry.details = `[5/5] AI予想を生成中`;
   for (const detail of raceDetails) {
     try {
@@ -611,11 +618,12 @@ async function syncFull(entry: SyncLogEntry, date?: string): Promise<void> {
       for (const re of raceData.entries) {
         const pastPerfs = await getHorsePastPerformances(re.horseId, 100);
         const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
+        const jockeyStats = await getJockeyStats(re.jockeyId);
         horseInputs.push({
           entry: re,
           pastPerformances: pastPerfs,
-          jockeyWinRate: 0.08, // default if jockey stats not available
-          jockeyPlaceRate: 0.20,
+          jockeyWinRate: jockeyStats.winRate,
+          jockeyPlaceRate: jockeyStats.placeRate,
           fatherName: horseData?.father_name || '',
         });
       }

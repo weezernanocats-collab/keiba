@@ -408,6 +408,125 @@ export async function getDashboardStats() {
   };
 }
 
+// ==================== 騎手勝率取得（予想エンジン用） ====================
+
+/**
+ * 騎手IDからDB上の勝率・複勝率を取得する。
+ * jockeysテーブルに登録がない場合は race_entries から計算する。
+ * どちらもなければデフォルト値を返す。
+ */
+export async function getJockeyStats(jockeyId: string): Promise<{ winRate: number; placeRate: number }> {
+  const DEFAULT_WIN_RATE = 0.08;
+  const DEFAULT_PLACE_RATE = 0.20;
+
+  if (!jockeyId) return { winRate: DEFAULT_WIN_RATE, placeRate: DEFAULT_PLACE_RATE };
+
+  // まず jockeys テーブルから取得
+  const jockey = await dbGet<{ win_rate: number; place_rate: number; total_races: number }>(
+    'SELECT win_rate, place_rate, total_races FROM jockeys WHERE id = ?',
+    [jockeyId]
+  );
+
+  if (jockey && jockey.total_races > 0 && jockey.win_rate > 0) {
+    return { winRate: jockey.win_rate, placeRate: jockey.place_rate };
+  }
+
+  // jockeys テーブルに登録がない場合は race_entries + races から計算
+  const stats = await dbGet<{ total: number; wins: number; places: number }>(`
+    SELECT
+      COUNT(*) as total,
+      SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN e.result_position <= 3 THEN 1 ELSE 0 END) as places
+    FROM race_entries e
+    JOIN races r ON e.race_id = r.id
+    WHERE e.jockey_id = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL
+  `, [jockeyId]);
+
+  if (stats && stats.total >= 5) {
+    return {
+      winRate: stats.wins / stats.total,
+      placeRate: stats.places / stats.total,
+    };
+  }
+
+  return { winRate: DEFAULT_WIN_RATE, placeRate: DEFAULT_PLACE_RATE };
+}
+
+// ==================== キャリブレーション ====================
+
+/** 最新の適用済みキャリブレーション重みを取得 */
+export async function getActiveCalibrationWeights(): Promise<Record<string, number> | null> {
+  const row = await dbGet<{ weights_json: string }>(
+    'SELECT weights_json FROM calibration_weights WHERE applied = 1 ORDER BY created_at DESC LIMIT 1'
+  );
+  if (!row) return null;
+  try {
+    return JSON.parse(row.weights_json);
+  } catch {
+    return null;
+  }
+}
+
+/** キャリブレーション結果を保存 */
+export async function saveCalibrationWeights(
+  weights: Record<string, number>,
+  evaluatedRaces: number,
+  applied: boolean,
+  notes?: string
+): Promise<void> {
+  await dbRun(`
+    INSERT INTO calibration_weights (weights_json, evaluated_races, applied, notes)
+    VALUES (?, ?, ?, ?)
+  `, [JSON.stringify(weights), evaluatedRaces, applied ? 1 : 0, notes || null]);
+}
+
+// ==================== スケジューラー実行記録 ====================
+
+/** スケジューラー実行記録を保存 */
+export async function recordSchedulerRun(
+  jobType: string,
+  targetDate: string,
+  status: 'running' | 'completed' | 'failed',
+  detail?: string,
+  error?: string,
+): Promise<number> {
+  const result = await dbRun(`
+    INSERT INTO scheduler_runs (job_type, target_date, status, detail, error, completed_at)
+    VALUES (?, ?, ?, ?, ?, CASE WHEN ? != 'running' THEN datetime('now') ELSE NULL END)
+  `, [jobType, targetDate, status, detail || null, error || null, status]);
+  return Number(result.lastInsertRowid || 0);
+}
+
+/** スケジューラー実行記録を更新 */
+export async function updateSchedulerRun(
+  id: number,
+  status: 'completed' | 'failed',
+  detail?: string,
+  error?: string,
+): Promise<void> {
+  await dbRun(`
+    UPDATE scheduler_runs SET status = ?, detail = ?, error = ?, completed_at = datetime('now')
+    WHERE id = ?
+  `, [status, detail || null, error || null, id]);
+}
+
+/** 特定日・ジョブタイプのスケジューラー実行が今日既に実行済みかを返す */
+export async function hasSchedulerRunToday(jobType: string, targetDate: string): Promise<boolean> {
+  const row = await dbGet<{ c: number }>(
+    "SELECT COUNT(*) as c FROM scheduler_runs WHERE job_type = ? AND target_date = ? AND DATE(started_at) = DATE('now') AND status IN ('completed', 'running')",
+    [jobType, targetDate]
+  );
+  return (row?.c ?? 0) > 0;
+}
+
+/** 最近のスケジューラー実行記録を取得 */
+export async function getRecentSchedulerRuns(limit: number = 20) {
+  return dbAll(
+    'SELECT * FROM scheduler_runs ORDER BY started_at DESC LIMIT ?',
+    [limit]
+  );
+}
+
 // ==================== 騎手成績（レース別） ====================
 
 export async function getJockeyRecentResults(jockeyId: string, limit: number = 20) {

@@ -46,8 +46,8 @@ import {
   type RaceHistoricalContext,
 } from './historical-analyzer';
 
-// 重み設定 (v4.1: 的中率最適化 — 直近成績・距離・スピードの重みを増加)
-const WEIGHTS = {
+// デフォルト重み設定 (v4.1: 的中率最適化 — 直近成績・距離・スピードの重みを増加)
+const DEFAULT_WEIGHTS: Record<string, number> = {
   // 個体分析 (直近・距離・速度の重み強化)
   recentForm: 0.18,
   courseAptitude: 0.06,
@@ -67,6 +67,37 @@ const WEIGHTS = {
   historicalPostBias: 0.03,
   seasonalPattern: 0.04,
 };
+
+// WEIGHTS はキャリブレーション結果で上書き可能
+let WEIGHTS: Record<string, number> = { ...DEFAULT_WEIGHTS };
+
+/**
+ * キャリブレーション済み重みを適用する。
+ * 合計が1.0に正規化されていることを検証する。
+ */
+export function applyCalibrationWeights(calibratedWeights: Record<string, number>): void {
+  const total = Object.values(calibratedWeights).reduce((s, v) => s + v, 0);
+  if (Math.abs(total - 1.0) > 0.05) {
+    // 正規化
+    const normalized: Record<string, number> = {};
+    for (const [k, v] of Object.entries(calibratedWeights)) {
+      normalized[k] = v / total;
+    }
+    WEIGHTS = { ...DEFAULT_WEIGHTS, ...normalized };
+  } else {
+    WEIGHTS = { ...DEFAULT_WEIGHTS, ...calibratedWeights };
+  }
+}
+
+/** デフォルト重みにリセット */
+export function resetWeights(): void {
+  WEIGHTS = { ...DEFAULT_WEIGHTS };
+}
+
+/** 現在使用中の重みを取得 */
+export function getCurrentWeights(): Record<string, number> {
+  return { ...WEIGHTS };
+}
 
 // ==================== v4: データ充実度 & ベイズ推定 ====================
 
@@ -250,6 +281,21 @@ export async function generatePrediction(
 
   // レース分析
   const analysis = analyzeRace(scoredHorses, trackType, distance, cond, racecourseName, ctx);
+
+  // キャリブレーション用: 全馬のファクタースコアを analysis に格納
+  // (horse_number -> { factor: score })
+  const horseScores: Record<number, Record<string, number>> = {};
+  for (const sh of scoredHorses) {
+    const factorScores: Record<string, number> = {};
+    for (const [key, value] of Object.entries(sh.scores)) {
+      if (!key.startsWith('_')) {
+        factorScores[key] = Math.round(value * 100) / 100;
+      }
+    }
+    horseScores[sh.entry.horseNumber] = factorScores;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (analysis as any).horseScores = horseScores;
 
   // 信頼度算出
   const confidence = calculateConfidence(scoredHorses, ctx);
@@ -1245,5 +1291,6 @@ export const _testExports = {
   ratioToScore,
   timeToSeconds,
   WEIGHTS,
+  DEFAULT_WEIGHTS,
   POPULATION_PRIORS,
 };

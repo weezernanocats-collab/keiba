@@ -31,9 +31,14 @@ import {
   getHorseById,
   getRaceById,
   savePrediction,
+  getJockeyStats,
+  recordSchedulerRun,
+  updateSchedulerRun,
+  hasSchedulerRunToday,
+  getRecentSchedulerRuns,
 } from './queries';
 import { generatePrediction } from './prediction-engine';
-import { evaluateAllPendingRaces } from './accuracy-tracker';
+import { evaluateAllPendingRaces, ensureCalibrationLoaded, autoCalibrate } from './accuracy-tracker';
 import { dbAll } from './database';
 import type { PastPerformance } from '@/types';
 
@@ -101,6 +106,11 @@ export function getSchedulerStatus(): SchedulerStatus {
   };
 }
 
+/** DB永続化された実行履歴を取得 */
+export async function getPersistedSchedulerHistory(limit: number = 20) {
+  return getRecentSchedulerRuns(limit);
+}
+
 export function startScheduler(config?: Partial<SchedulerConfig>): void {
   if (schedulerInterval) return;
 
@@ -152,6 +162,79 @@ export async function runSchedulerJob(job: 'morning' | 'odds' | 'results' | 'nig
   }
 }
 
+/**
+ * Vercel Cron 用のエントリーポイント。
+ * 現在のJST時刻に基づいて適切なジョブを実行する。
+ * Cron は毎時/30分で呼ばれる前提。
+ */
+export async function runCronJob(): Promise<{ executed: string[]; skipped: string[] }> {
+  const executed: string[] = [];
+  const skipped: string[] = [];
+
+  // JST 現在時刻を取得
+  const now = new Date();
+  const jstOffset = 9 * 60; // UTC+9
+  const jstMinutes = now.getUTCHours() * 60 + now.getUTCMinutes() + jstOffset;
+  const jstHour = Math.floor((jstMinutes % 1440) / 60);
+  const jstMin = jstMinutes % 60;
+  const timeStr = `${jstHour.toString().padStart(2, '0')}:${jstMin.toString().padStart(2, '0')}`;
+
+  // JST日付を計算
+  const jstTime = new Date(now.getTime() + jstOffset * 60_000);
+  const today = jstTime.toISOString().split('T')[0];
+  const tomorrow = new Date(jstTime.getTime() + 86400000).toISOString().split('T')[0];
+
+  // 時間帯に基づいてジョブを判定（±30分の範囲で実行）
+  const isNear = (target: string) => {
+    const [h, m] = target.split(':').map(Number);
+    const targetMin = h * 60 + m;
+    const currentMin = jstHour * 60 + jstMin;
+    return Math.abs(currentMin - targetMin) <= 30;
+  };
+
+  if (isNear(currentConfig.morningFetchTime)) {
+    try {
+      await executeMorningFetch(today);
+      executed.push(`morning (${today})`);
+    } catch (e) {
+      skipped.push(`morning: ${errMsg(e)}`);
+    }
+  }
+
+  if (isNear(currentConfig.oddsFetchTime)) {
+    try {
+      await executeOddsFetch(today);
+      executed.push(`odds (${today})`);
+    } catch (e) {
+      skipped.push(`odds: ${errMsg(e)}`);
+    }
+  }
+
+  if (isNear(currentConfig.resultFetchTime)) {
+    try {
+      await executeResultFetch(today);
+      executed.push(`results (${today})`);
+    } catch (e) {
+      skipped.push(`results: ${errMsg(e)}`);
+    }
+  }
+
+  if (isNear(currentConfig.nightFetchTime)) {
+    try {
+      await executeMorningFetch(tomorrow);
+      executed.push(`night/tomorrow (${tomorrow})`);
+    } catch (e) {
+      skipped.push(`night: ${errMsg(e)}`);
+    }
+  }
+
+  if (executed.length === 0 && skipped.length === 0) {
+    skipped.push(`現在時刻 ${timeStr} (JST) は実行対象外`);
+  }
+
+  return { executed, skipped };
+}
+
 // ==================== スケジュール実行 ====================
 
 async function checkAndExecute(): Promise<void> {
@@ -184,6 +267,13 @@ async function checkAndExecute(): Promise<void> {
 // ==================== ジョブ実行 ====================
 
 async function executeMorningFetch(date: string): Promise<void> {
+  // 重複実行防止: 今日すでに同ジョブを実行済みならスキップ
+  if (await hasSchedulerRunToday('morning', date)) {
+    addLog('朝のデータ取得スキップ', `${date} は既に実行済み`, true);
+    return;
+  }
+
+  const runId = await recordSchedulerRun('morning', date, 'running');
   addLog('朝のデータ取得開始', date, true);
   lastRunTime = new Date().toISOString();
 
@@ -265,7 +355,9 @@ async function executeMorningFetch(date: string): Promise<void> {
       await sleep(currentConfig.rateLimitMs);
     }
 
-    // 4. AI予想生成
+    // 4. AI予想生成（校正済み重みがあれば適用）
+    await ensureCalibrationLoaded();
+
     for (const detail of raceDetails) {
       try {
         const raceData = await getRaceById(detail.id);
@@ -274,9 +366,10 @@ async function executeMorningFetch(date: string): Promise<void> {
         for (const re of raceData.entries as import('@/types').RaceEntry[]) {
           const pastPerfs = await getHorsePastPerformances(re.horseId, 100);
           const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
+          const jockeyStats = await getJockeyStats(re.jockeyId);
           horseInputs.push({
             entry: re, pastPerformances: pastPerfs,
-            jockeyWinRate: 0.10, jockeyPlaceRate: 0.25,
+            jockeyWinRate: jockeyStats.winRate, jockeyPlaceRate: jockeyStats.placeRate,
             fatherName: horseData?.father_name || '',
           });
         }
@@ -290,13 +383,22 @@ async function executeMorningFetch(date: string): Promise<void> {
       }
     }
 
-    addLog('朝のデータ取得完了', `${date}: レース${races.length}件, 馬${horseIds.size}頭`, true);
+    const detail = `${date}: レース${races.length}件, 馬${horseIds.size}頭`;
+    addLog('朝のデータ取得完了', detail, true);
+    await updateSchedulerRun(runId, 'completed', detail);
   } catch (error) {
     addLog('朝のデータ取得失敗', errMsg(error), false);
+    await updateSchedulerRun(runId, 'failed', undefined, errMsg(error));
   }
 }
 
 async function executeOddsFetch(date: string): Promise<void> {
+  if (await hasSchedulerRunToday('odds', date)) {
+    addLog('オッズ取得スキップ', `${date} は既に実行済み`, true);
+    return;
+  }
+
+  const runId = await recordSchedulerRun('odds', date, 'running');
   addLog('オッズ取得開始', date, true);
   lastRunTime = new Date().toISOString();
 
@@ -323,13 +425,22 @@ async function executeOddsFetch(date: string): Promise<void> {
       await sleep(currentConfig.rateLimitMs);
     }
 
-    addLog('オッズ取得完了', `${date}: ${count}レース分`, true);
+    const detail = `${date}: ${count}レース分`;
+    addLog('オッズ取得完了', detail, true);
+    await updateSchedulerRun(runId, 'completed', detail);
   } catch (error) {
     addLog('オッズ取得失敗', errMsg(error), false);
+    await updateSchedulerRun(runId, 'failed', undefined, errMsg(error));
   }
 }
 
 async function executeResultFetch(date: string): Promise<void> {
+  if (await hasSchedulerRunToday('results', date)) {
+    addLog('結果取得スキップ', `${date} は既に実行済み`, true);
+    return;
+  }
+
+  const runId = await recordSchedulerRun('results', date, 'running');
   addLog('結果取得開始', date, true);
   lastRunTime = new Date().toISOString();
 
@@ -367,13 +478,18 @@ async function executeResultFetch(date: string): Promise<void> {
     const wins = evalResults.filter(r => r.winHit).length;
     const places = evalResults.filter(r => r.placeHit).length;
 
-    addLog(
-      '結果取得完了',
-      `${date}: ${resultCount}レース確定, 照合${evalResults.length}件 (単勝${wins}的中, 複勝${places}的中)`,
-      true,
-    );
+    const detail = `${date}: ${resultCount}レース確定, 照合${evalResults.length}件 (単勝${wins}的中, 複勝${places}的中)`;
+    addLog('結果取得完了', detail, true);
+    await updateSchedulerRun(runId, 'completed', detail);
+
+    // 結果取得後に自動キャリブレーションを試行
+    const calibResult = await autoCalibrate();
+    if (calibResult.applied) {
+      addLog('自動キャリブレーション', calibResult.message, true);
+    }
   } catch (error) {
     addLog('結果取得失敗', errMsg(error), false);
+    await updateSchedulerRun(runId, 'failed', undefined, errMsg(error));
   }
 }
 

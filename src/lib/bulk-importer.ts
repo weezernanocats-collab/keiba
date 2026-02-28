@@ -31,9 +31,10 @@ import {
   getHorseById,
   getRaceById,
   savePrediction,
+  getJockeyStats,
 } from './queries';
 import { generatePrediction } from './prediction-engine';
-import { evaluateAllPendingRaces } from './accuracy-tracker';
+import { evaluateAllPendingRaces, ensureCalibrationLoaded } from './accuracy-tracker';
 import { dbAll, dbGet, dbRun, dbExec } from './database';
 import type { PastPerformance } from '@/types';
 
@@ -102,6 +103,9 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
   if (currentProgress?.isRunning) {
     throw new Error('バルクインポートが既に実行中です');
   }
+
+  // 校正済み重みがあれば適用
+  await ensureCalibrationLoaded();
 
   abortRequested = false;
   const rateLimitMs = config.rateLimitMs ?? 1200;
@@ -391,11 +395,12 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
             raceData.entries.map(async (re: import('@/types').RaceEntry) => {
               const pastPerfs = await getHorsePastPerformances(re.horseId, maxPP);
               const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
+              const jockeyStats = await getJockeyStats(re.jockeyId);
               return {
                 entry: re,
                 pastPerformances: pastPerfs,
-                jockeyWinRate: 0.10,
-                jockeyPlaceRate: 0.25,
+                jockeyWinRate: jockeyStats.winRate,
+                jockeyPlaceRate: jockeyStats.placeRate,
                 fatherName: horseData?.father_name || '',
               };
             })
@@ -599,6 +604,9 @@ export function createInitialChunkedState(config: {
 }
 
 export async function runBulkChunk(state: BulkChunkedState): Promise<BulkChunkedState> {
+  // 校正済み重みがあれば適用
+  await ensureCalibrationLoaded();
+
   const startTime = Date.now();
   const hasTime = () => (Date.now() - startTime) < CHUNK_TIME_BUDGET_MS;
   const addError = (msg: string) => {
@@ -878,11 +886,12 @@ async function processChunkPhase(
             raceData.entries.map(async (re: import('@/types').RaceEntry) => {
               const pastPerfs = await getHorsePastPerformances(re.horseId, 100);
               const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
+              const jockeyStats = await getJockeyStats(re.jockeyId);
               return {
                 entry: re,
                 pastPerformances: pastPerfs,
-                jockeyWinRate: 0.10,
-                jockeyPlaceRate: 0.25,
+                jockeyWinRate: jockeyStats.winRate,
+                jockeyPlaceRate: jockeyStats.placeRate,
                 fatherName: horseData?.father_name || '',
               };
             })

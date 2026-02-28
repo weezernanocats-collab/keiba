@@ -10,18 +10,53 @@ const BASE_URL = 'https://race.netkeiba.com';
 const DB_BASE_URL = 'https://db.netkeiba.com';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY_MS = 2000;
+
 async function fetchHtml(url: string): Promise<string> {
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': USER_AGENT,
-      'Accept': 'text/html,application/xhtml+xml',
-      'Accept-Language': 'ja,en;q=0.9',
-    },
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status}: ${url}`);
-  const buffer = await response.arrayBuffer();
-  const decoder = new TextDecoder('euc-jp');
-  return decoder.decode(buffer);
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': USER_AGENT,
+          'Accept': 'text/html,application/xhtml+xml',
+          'Accept-Language': 'ja,en;q=0.9',
+        },
+      });
+
+      // 4xx errors are not retryable (except 429)
+      if (!response.ok) {
+        if (response.status === 429 || response.status >= 500) {
+          throw new Error(`HTTP ${response.status}: ${url}`);
+        }
+        throw new PermanentError(`HTTP ${response.status}: ${url}`);
+      }
+
+      const buffer = await response.arrayBuffer();
+      const decoder = new TextDecoder('euc-jp');
+      return decoder.decode(buffer);
+    } catch (error) {
+      if (error instanceof PermanentError) throw error;
+
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      if (attempt < MAX_RETRIES) {
+        const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw lastError || new Error(`Failed after ${MAX_RETRIES} retries: ${url}`);
+}
+
+class PermanentError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PermanentError';
+  }
 }
 
 // レース一覧を取得（日付指定）

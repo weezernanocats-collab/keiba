@@ -12,6 +12,8 @@
  */
 
 import { dbAll, dbGet, dbRun } from './database';
+import { applyCalibrationWeights } from './prediction-engine';
+import { saveCalibrationWeights, getActiveCalibrationWeights } from './queries';
 
 // ==================== 型定義 ====================
 
@@ -392,15 +394,45 @@ export async function calibrateWeights(): Promise<CalibrationResult | null> {
       if (entries.length === 0) continue;
       const winnerNumbers = new Set(entries.filter(e => e.result_position === 1).map(e => e.horse_number));
 
+      // analysis_json にファクタースコア付きの horseScores がある場合はそれを使用
+      let horseScoresMap: Map<number, Record<string, number>> | null = null;
+      try {
+        const analysis = JSON.parse(row.analysis_json || '{}');
+        if (analysis.horseScores && typeof analysis.horseScores === 'object') {
+          horseScoresMap = new Map();
+          for (const [numStr, scores] of Object.entries(analysis.horseScores)) {
+            horseScoresMap.set(Number(numStr), scores as Record<string, number>);
+          }
+        }
+      } catch {
+        // analysis parsing failed, use fallback
+      }
+
       for (const pick of picks) {
         const isWinner = winnerNumbers.has(pick.horseNumber);
-        const approxScoreFromRank = Math.max(10, 100 - (pick.rank || 1) * 12);
 
-        for (const f of factorNames) {
-          if (isWinner) {
-            factorStats[f].winnerScores.push(approxScoreFromRank);
-          } else {
-            factorStats[f].loserScores.push(approxScoreFromRank);
+        if (horseScoresMap && horseScoresMap.has(pick.horseNumber)) {
+          // 実際のファクタースコアを使用（高精度）
+          const factorScores = horseScoresMap.get(pick.horseNumber)!;
+          for (const f of factorNames) {
+            const score = factorScores[f];
+            if (score !== undefined) {
+              if (isWinner) {
+                factorStats[f].winnerScores.push(score);
+              } else {
+                factorStats[f].loserScores.push(score);
+              }
+            }
+          }
+        } else {
+          // フォールバック: ランクベースの近似スコア
+          const approxScoreFromRank = Math.max(10, 100 - (pick.rank || 1) * 12);
+          for (const f of factorNames) {
+            if (isWinner) {
+              factorStats[f].winnerScores.push(approxScoreFromRank);
+            } else {
+              factorStats[f].loserScores.push(approxScoreFromRank);
+            }
           }
         }
       }
@@ -457,4 +489,46 @@ export async function calibrateWeights(): Promise<CalibrationResult | null> {
     currentWeights,
     expectedImprovement: `識別力の高いファクター: ${topFactors.join(', ')}。これらの重みを上げることで精度向上が期待できます。`,
   };
+}
+
+// ==================== 自動キャリブレーション適用 ====================
+
+/** 最低レース数を満たしていれば自動校正を実行し、重みを適用する */
+const MIN_RACES_FOR_AUTO_CALIBRATION = 20;
+
+export async function autoCalibrate(): Promise<{ applied: boolean; message: string }> {
+  const total = await dbGet<{ c: number }>('SELECT COUNT(*) as c FROM prediction_results');
+  if (!total || total.c < MIN_RACES_FOR_AUTO_CALIBRATION) {
+    return { applied: false, message: `自動校正にはあと${MIN_RACES_FOR_AUTO_CALIBRATION - (total?.c ?? 0)}件の照合済みレースが必要です` };
+  }
+
+  const result = await calibrateWeights();
+  if (!result) {
+    return { applied: false, message: '校正データの生成に失敗しました' };
+  }
+
+  // 重みをDBに保存して適用
+  await saveCalibrationWeights(result.suggestedWeights, result.evaluatedRaces, true, '自動校正');
+  applyCalibrationWeights(result.suggestedWeights);
+
+  return {
+    applied: true,
+    message: `${result.evaluatedRaces}レースの実績から重みを校正しました。${result.expectedImprovement}`,
+  };
+}
+
+/**
+ * 起動時にDBからキャリブレーション済み重みがあれば読み込んで適用する。
+ * 各エンドポイントの初回呼び出し時に一度だけ実行する。
+ */
+let calibrationLoaded = false;
+
+export async function ensureCalibrationLoaded(): Promise<void> {
+  if (calibrationLoaded) return;
+  calibrationLoaded = true;
+
+  const weights = await getActiveCalibrationWeights();
+  if (weights) {
+    applyCalibrationWeights(weights);
+  }
 }
