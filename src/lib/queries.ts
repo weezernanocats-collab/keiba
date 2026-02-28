@@ -127,6 +127,25 @@ export async function upsertRaceEntry(raceId: string, entry: Partial<RaceEntry>)
     [raceId, entry.horseNumber]
   );
 
+  // undefined → null 変換（Turso/libsql は undefined を受け付けない）
+  const postPosition = entry.postPosition ?? null;
+  const horseId = entry.horseId ?? null;
+  const horseName = entry.horseName ?? null;
+  const age = entry.age ?? null;
+  const sex = entry.sex ?? null;
+  const weight = entry.weight ?? null;
+  const jockeyId = entry.jockeyId ?? null;
+  const jockeyName = entry.jockeyName ?? '';
+  const trainerName = entry.trainerName ?? null;
+  const handicapWeight = entry.handicapWeight ?? 0;
+  const resultPosition = entry.result?.position ?? null;
+  const resultTime = entry.result?.time ?? null;
+  const resultMargin = entry.result?.margin ?? null;
+  const resultLastThreeFurlongs = entry.result?.lastThreeFurlongs ?? null;
+  const resultCornerPositions = entry.result?.cornerPositions ?? null;
+  const resultWeight = entry.result?.weight ?? null;
+  const resultWeightChange = entry.result?.weightChange ?? null;
+
   if (existing) {
     await dbRun(`
       UPDATE race_entries SET
@@ -137,11 +156,11 @@ export async function upsertRaceEntry(raceId: string, entry: Partial<RaceEntry>)
         result_corner_positions = ?, result_weight = ?, result_weight_change = ?
       WHERE race_id = ? AND horse_number = ?
     `, [
-      entry.postPosition, entry.horseId, entry.horseName, entry.age, entry.sex,
-      entry.weight, entry.jockeyId, entry.jockeyName, entry.trainerName,
-      entry.handicapWeight, entry.result?.position, entry.result?.time,
-      entry.result?.margin, entry.result?.lastThreeFurlongs,
-      entry.result?.cornerPositions, entry.result?.weight, entry.result?.weightChange,
+      postPosition, horseId, horseName, age, sex,
+      weight, jockeyId, jockeyName, trainerName,
+      handicapWeight, resultPosition, resultTime,
+      resultMargin, resultLastThreeFurlongs,
+      resultCornerPositions, resultWeight, resultWeightChange,
       raceId, entry.horseNumber,
     ]);
   } else {
@@ -153,11 +172,11 @@ export async function upsertRaceEntry(raceId: string, entry: Partial<RaceEntry>)
         result_corner_positions, result_weight, result_weight_change
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
-      raceId, entry.postPosition, entry.horseNumber, entry.horseId, entry.horseName,
-      entry.age, entry.sex, entry.weight, entry.jockeyId, entry.jockeyName,
-      entry.trainerName, entry.handicapWeight, entry.result?.position,
-      entry.result?.time, entry.result?.margin, entry.result?.lastThreeFurlongs,
-      entry.result?.cornerPositions, entry.result?.weight, entry.result?.weightChange,
+      raceId, postPosition, entry.horseNumber, horseId, horseName,
+      age, sex, weight, jockeyId, jockeyName,
+      trainerName, handicapWeight, resultPosition,
+      resultTime, resultMargin, resultLastThreeFurlongs,
+      resultCornerPositions, resultWeight, resultWeightChange,
     ]);
   }
 }
@@ -337,12 +356,12 @@ export async function insertPastPerformance(horseId: string, perf: Partial<PastP
       corner_positions, odds, popularity, prize
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
-    horseId, perf.raceId, perf.date, perf.raceName, perf.racecourseName,
-    perf.trackType, perf.distance, perf.trackCondition, perf.weather,
-    perf.entries, perf.postPosition, perf.horseNumber, perf.position,
-    perf.jockeyName, perf.handicapWeight, perf.weight, perf.weightChange,
-    perf.time, perf.margin, perf.lastThreeFurlongs, perf.cornerPositions,
-    perf.odds, perf.popularity, perf.prize,
+    horseId, perf.raceId ?? null, perf.date ?? null, perf.raceName ?? null, perf.racecourseName ?? null,
+    perf.trackType ?? null, perf.distance ?? 0, perf.trackCondition ?? null, perf.weather ?? null,
+    perf.entries ?? 0, perf.postPosition ?? 0, perf.horseNumber ?? 0, perf.position ?? 0,
+    perf.jockeyName ?? null, perf.handicapWeight ?? 0, perf.weight ?? 0, perf.weightChange ?? 0,
+    perf.time ?? null, perf.margin ?? null, perf.lastThreeFurlongs ?? null, perf.cornerPositions ?? null,
+    perf.odds ?? 0, perf.popularity ?? 0, perf.prize ?? 0,
   ]);
 }
 

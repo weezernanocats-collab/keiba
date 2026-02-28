@@ -50,10 +50,23 @@ export async function ensureInitialized(): Promise<Client> {
 
 // ==================== ヘルパー関数 ====================
 
+/** undefined を null に変換（Turso/libsql は undefined を受け付けない） */
+function sanitizeArgs(args: unknown[]): InValue[] {
+  return args.map(v => (v === undefined ? null : v)) as InValue[];
+}
+
+function sanitizeNamedArgs(args: Record<string, unknown>): Record<string, InValue> {
+  const result: Record<string, InValue> = {};
+  for (const [key, value] of Object.entries(args)) {
+    result[key] = (value === undefined ? null : value) as InValue;
+  }
+  return result;
+}
+
 /** SELECT → 複数行取得 */
 export async function dbAll<T = Row>(sql: string, args?: unknown[]): Promise<T[]> {
   const db = await ensureInitialized();
-  const result = await db.execute({ sql, args: (args || []) as InValue[] });
+  const result = await db.execute({ sql, args: sanitizeArgs(args || []) });
   return result.rows as T[];
 }
 
@@ -66,14 +79,14 @@ export async function dbGet<T = Row>(sql: string, args?: unknown[]): Promise<T |
 /** INSERT/UPDATE/DELETE → 実行 */
 export async function dbRun(sql: string, args?: unknown[]): Promise<{ rowsAffected: number; lastInsertRowid: bigint | undefined }> {
   const db = await ensureInitialized();
-  const result = await db.execute({ sql, args: (args || []) as InValue[] });
+  const result = await db.execute({ sql, args: sanitizeArgs(args || []) });
   return { rowsAffected: result.rowsAffected, lastInsertRowid: result.lastInsertRowid };
 }
 
 /** 名前付きパラメータでINSERT/UPDATE/DELETE */
 export async function dbRunNamed(sql: string, args: Record<string, unknown>): Promise<{ rowsAffected: number; lastInsertRowid: bigint | undefined }> {
   const db = await ensureInitialized();
-  const result = await db.execute({ sql, args: args as Record<string, InValue> });
+  const result = await db.execute({ sql, args: sanitizeNamedArgs(args) });
   return { rowsAffected: result.rowsAffected, lastInsertRowid: result.lastInsertRowid };
 }
 
@@ -81,7 +94,7 @@ export async function dbRunNamed(sql: string, args: Record<string, unknown>): Pr
 export async function dbBatch(statements: (string | { sql: string; args: unknown[] })[]): Promise<void> {
   const db = await ensureInitialized();
   const typed = statements.map(s =>
-    typeof s === 'string' ? s : { sql: s.sql, args: s.args as InValue[] }
+    typeof s === 'string' ? s : { sql: s.sql, args: sanitizeArgs(s.args) }
   );
   await db.batch(typed, 'write');
 }
