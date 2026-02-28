@@ -10,8 +10,9 @@ const BASE_URL = 'https://race.netkeiba.com';
 const DB_BASE_URL = 'https://db.netkeiba.com';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
-const MAX_RETRIES = 3;
-const INITIAL_RETRY_DELAY_MS = 2000;
+const MAX_RETRIES = 2;
+const INITIAL_RETRY_DELAY_MS = 1500;
+const FETCH_TIMEOUT_MS = 10000;
 
 async function fetchHtml(url: string): Promise<string> {
   let lastError: Error | null = null;
@@ -24,6 +25,7 @@ async function fetchHtml(url: string): Promise<string> {
           'Accept': 'text/html,application/xhtml+xml',
           'Accept-Language': 'ja,en;q=0.9',
         },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
 
       // 4xx errors are not retryable (except 429)
