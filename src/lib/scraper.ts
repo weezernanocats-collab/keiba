@@ -35,7 +35,9 @@ async function fetchHtml(url: string): Promise<string> {
       }
 
       const buffer = await response.arrayBuffer();
-      const decoder = new TextDecoder('euc-jp');
+      // race_list_sub.html はUTF-8、その他のnetkeiba ページは EUC-JP
+      const encoding = detectEncoding(url, buffer);
+      const decoder = new TextDecoder(encoding);
       return decoder.decode(buffer);
     } catch (error) {
       if (error instanceof PermanentError) throw error;
@@ -50,6 +52,21 @@ async function fetchHtml(url: string): Promise<string> {
   }
 
   throw lastError || new Error(`Failed after ${MAX_RETRIES} retries: ${url}`);
+}
+
+/** URLとHTMLの先頭バイトからエンコーディングを判定 */
+function detectEncoding(url: string, buffer: ArrayBuffer): string {
+  // race_list_sub.html は UTF-8
+  if (url.includes('race_list_sub.html')) return 'utf-8';
+
+  // HTMLの先頭部分で charset を確認
+  const preview = new TextDecoder('ascii').decode(buffer.slice(0, 1024));
+  if (preview.includes('charset="UTF-8"') || preview.includes('charset=utf-8')) {
+    return 'utf-8';
+  }
+
+  // デフォルトはEUC-JP (netkeiba の多くのページ)
+  return 'euc-jp';
 }
 
 class PermanentError extends Error {
