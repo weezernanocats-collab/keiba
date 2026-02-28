@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { dbAll, dbGet, dbRun, dbRunNamed } from '@/lib/database';
-import { scrapeRaceList } from '@/lib/scraper';
-import { upsertRace } from '@/lib/queries';
+import { scrapeRaceList, scrapeHorseDetail } from '@/lib/scraper';
+import { upsertRace, upsertHorse } from '@/lib/queries';
 
 export const maxDuration = 30;
 
@@ -122,6 +122,48 @@ export async function GET() {
     };
   } catch (error) {
     results.rawHtmlTest = { success: false, error: String(error) };
+  }
+
+  // 5c. 馬詳細スクレイピングテスト（Vercelからdb.netkeiba.comにアクセスできるか）
+  try {
+    // DBから実際の馬IDを1件取得
+    const sampleHorse = await dbGet<{ id: string; name: string }>(
+      "SELECT id, name FROM horses WHERE birth_date IS NULL AND name != '取得失敗' LIMIT 1"
+    );
+    if (sampleHorse) {
+      const startMs = Date.now();
+      const horseDetail = await scrapeHorseDetail(sampleHorse.id);
+      const elapsed = Date.now() - startMs;
+      results.horseDetailTest = {
+        success: !!horseDetail,
+        horseId: sampleHorse.id,
+        elapsed: `${elapsed}ms`,
+        name: horseDetail?.name || null,
+        pastPerfs: horseDetail?.pastPerformances?.length || 0,
+      };
+
+      // upsertHorse テスト
+      if (horseDetail) {
+        try {
+          await upsertHorse({
+            id: horseDetail.id,
+            name: horseDetail.name,
+            birthDate: horseDetail.birthDate,
+            fatherName: horseDetail.fatherName,
+            motherName: horseDetail.motherName,
+            trainerName: horseDetail.trainerName,
+            ownerName: horseDetail.ownerName,
+          });
+          results.upsertHorseTest = { success: true, horseId: horseDetail.id };
+        } catch (error) {
+          results.upsertHorseTest = { success: false, error: String(error) };
+        }
+      }
+    } else {
+      results.horseDetailTest = { skipped: true, reason: 'No placeholder horses found' };
+    }
+  } catch (error) {
+    results.horseDetailTest = { success: false, error: String(error) };
   }
 
   // 6. 全テーブルのレコード数
