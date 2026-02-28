@@ -72,18 +72,45 @@ export async function GET() {
     results.upsertRaceTest = { success: false, error: String(error) };
   }
 
-  // 5. スクレイパーテスト: 直近の土曜日のレース一覧を1日分だけ取得
+  // 5. スクレイパーテスト: 複数日をテスト + 生のHTML確認
   try {
-    const testDate = getRecentSaturday();
-    const races = await scrapeRaceList(testDate);
-    results.scraperTest = {
-      success: true,
-      date: testDate,
-      racesFound: races.length,
-      sampleRaces: races.slice(0, 3).map(r => ({ id: r.id, name: r.name, course: r.racecourseName })),
-    };
+    const testDates = ['2025-12-28', '2025-06-01', '2026-02-22'];
+    const scraperResults: Record<string, unknown>[] = [];
+    for (const testDate of testDates) {
+      const races = await scrapeRaceList(testDate);
+      scraperResults.push({
+        date: testDate,
+        racesFound: races.length,
+        sampleRaces: races.slice(0, 3).map(r => ({ id: r.id, name: r.name, course: r.racecourseName })),
+      });
+    }
+    results.scraperTest = { success: true, results: scraperResults };
   } catch (error) {
     results.scraperTest = { success: false, error: String(error) };
+  }
+
+  // 5b. 生のHTMLを取得してセレクタを確認
+  try {
+    const rawUrl = 'https://race.netkeiba.com/top/race_list.html?kaisai_date=20251228';
+    const response = await fetch(rawUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'ja,en;q=0.9',
+      },
+    });
+    const buffer = await response.arrayBuffer();
+    const decoder = new TextDecoder('euc-jp');
+    const html = decoder.decode(buffer);
+    results.rawHtmlTest = {
+      status: response.status,
+      htmlLength: html.length,
+      htmlSnippet: html.substring(0, 2000),
+      containsRaceList: html.includes('RaceList_DataList'),
+      containsRaceId: html.includes('race_id='),
+    };
+  } catch (error) {
+    results.rawHtmlTest = { success: false, error: String(error) };
   }
 
   // 6. 全テーブルのレコード数
