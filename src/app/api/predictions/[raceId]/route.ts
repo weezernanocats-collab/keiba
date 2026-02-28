@@ -21,7 +21,27 @@ export async function GET(
       return NextResponse.json({ error: '予想がまだ生成されていません' }, { status: 404 });
     }
 
-    return NextResponse.json({ prediction, race });
+    // topPicks に horseName/horseNumber がない場合、race.entries から補完
+    const entriesMap = new Map(
+      race.entries.map(e => [e.horseNumber, e])
+    );
+
+    const augmentedPicks = prediction.topPicks.map(pick => {
+      if (pick.horseName && pick.horseNumber) return pick;
+      const entry = entriesMap.get(pick.horseNumber);
+      return {
+        ...pick,
+        horseName: pick.horseName || entry?.horseName || `${pick.horseNumber}番`,
+        horseNumber: pick.horseNumber || 0,
+      };
+    });
+
+    const augmentedPrediction = {
+      ...prediction,
+      topPicks: augmentedPicks,
+    };
+
+    return NextResponse.json({ prediction: augmentedPrediction, race });
   } catch (error) {
     console.error('予想API エラー:', error);
     return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });

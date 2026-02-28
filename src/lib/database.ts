@@ -63,11 +63,20 @@ function sanitizeNamedArgs(args: Record<string, unknown>): Record<string, InValu
   return result;
 }
 
+/** bigint値をnumberに変換（JSON.stringify互換性のため） */
+function sanitizeRow(row: Row): Row {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    result[key] = typeof value === 'bigint' ? Number(value) : value;
+  }
+  return result as Row;
+}
+
 /** SELECT → 複数行取得 */
 export async function dbAll<T = Row>(sql: string, args?: unknown[]): Promise<T[]> {
   const db = await ensureInitialized();
   const result = await db.execute({ sql, args: sanitizeArgs(args || []) });
-  return result.rows as T[];
+  return result.rows.map(sanitizeRow) as T[];
 }
 
 /** SELECT → 1行取得 */

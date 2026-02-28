@@ -94,7 +94,8 @@ export async function GET(
 
     return NextResponse.json({ horse, pastPerformances, raceEntries });
   } catch (error) {
-    console.error('馬詳細API エラー:', error);
-    return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('馬詳細API エラー:', msg, error);
+    return NextResponse.json({ error: 'サーバーエラー', detail: msg }, { status: 500 });
   }
 }
