@@ -196,35 +196,60 @@ export async function scrapeRaceCard(raceId: string): Promise<ScrapedRaceDetail>
   };
 }
 
-// オッズ取得（単勝・複勝）
+// オッズ取得（単勝・複勝）- JSON APIを使用
 export async function scrapeOdds(raceId: string): Promise<ScrapedOdds> {
-  const url = `${BASE_URL}/odds/index.html?race_id=${raceId}`;
-  const html = await fetchHtml(url);
-  const $ = cheerio.load(html);
-
   const win: { horseNumber: number; odds: number }[] = [];
   const place: { horseNumber: number; minOdds: number; maxOdds: number }[] = [];
 
-  $('table.Odds_Table tbody tr').each((_, tr) => {
-    const tds = $(tr).find('td');
-    if (tds.length < 4) return;
+  // netkeiba JSON API: type=1 で単勝・複勝を取得
+  const apiUrl = `${BASE_URL}/api/api_get_jra_odds.html?race_id=${raceId}&type=1`;
+  const response = await fetch(apiUrl, {
+    headers: { 'User-Agent': USER_AGENT },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
 
-    const horseNumber = parseInt($(tds[1]).text().trim()) || 0;
-    const winOdds = parseFloat($(tds[2]).text().trim()) || 0;
-    const placeOddsText = $(tds[3]).text().trim();
-    const placeOddsMatch = placeOddsText.match(/([\d.]+)\s*-\s*([\d.]+)/);
+  if (!response.ok) {
+    return { raceId, win, place };
+  }
 
-    if (horseNumber > 0) {
-      win.push({ horseNumber, odds: winOdds });
-      if (placeOddsMatch) {
-        place.push({
-          horseNumber,
-          minOdds: parseFloat(placeOddsMatch[1]),
-          maxOdds: parseFloat(placeOddsMatch[2]),
-        });
+  const data = await response.json() as {
+    status: string;
+    data?: {
+      odds?: {
+        '1'?: Record<string, [string, string, string]>; // 単勝: [odds, "", popularity]
+        '2'?: Record<string, [string, string, string]>; // 複勝: [minOdds, maxOdds, popularity]
+      };
+    };
+  };
+
+  if (data.status !== 'result' || !data.data?.odds) {
+    return { raceId, win, place };
+  }
+
+  // 単勝 (type "1")
+  const winOdds = data.data.odds['1'];
+  if (winOdds) {
+    for (const [numStr, values] of Object.entries(winOdds)) {
+      const horseNumber = parseInt(numStr);
+      const odds = parseFloat(values[0]);
+      if (horseNumber > 0 && odds > 0) {
+        win.push({ horseNumber, odds });
       }
     }
-  });
+  }
+
+  // 複勝 (type "2")
+  const placeOdds = data.data.odds['2'];
+  if (placeOdds) {
+    for (const [numStr, values] of Object.entries(placeOdds)) {
+      const horseNumber = parseInt(numStr);
+      const minOdds = parseFloat(values[0]);
+      const maxOdds = parseFloat(values[1]);
+      if (horseNumber > 0 && minOdds > 0) {
+        place.push({ horseNumber, minOdds, maxOdds });
+      }
+    }
+  }
 
   return { raceId, win, place };
 }
