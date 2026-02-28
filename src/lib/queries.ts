@@ -108,7 +108,7 @@ export async function upsertRace(race: Partial<Race> & { id: string }) {
     racecourse_name: race.racecourseName || '',
     race_number: race.raceNumber || 0,
     grade: race.grade || null,
-    track_type: race.trackType || '',
+    track_type: race.trackType || 'ダート',
     distance: race.distance || 0,
     track_condition: race.trackCondition || null,
     weather: race.weather || null,
