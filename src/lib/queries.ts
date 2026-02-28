@@ -160,13 +160,26 @@ export async function upsertRaceEntry(raceId: string, entry: Partial<RaceEntry>)
   const resultWeightChange = entry.result?.weightChange ?? null;
 
   if (existing) {
+    // COALESCE で非結果フィールドは既存値を保持（結果保存時に上書きしない）
     await dbRun(`
       UPDATE race_entries SET
-        post_position = ?, horse_id = ?, horse_name = ?, age = ?, sex = ?,
-        weight = ?, jockey_id = ?, jockey_name = ?, trainer_name = ?,
-        handicap_weight = ?, result_position = ?, result_time = ?,
-        result_margin = ?, result_last_three_furlongs = ?,
-        result_corner_positions = ?, result_weight = ?, result_weight_change = ?
+        post_position = COALESCE(?, post_position),
+        horse_id = COALESCE(?, horse_id),
+        horse_name = COALESCE(?, horse_name),
+        age = COALESCE(?, age),
+        sex = COALESCE(?, sex),
+        weight = COALESCE(?, weight),
+        jockey_id = COALESCE(?, jockey_id),
+        jockey_name = COALESCE(?, jockey_name),
+        trainer_name = COALESCE(?, trainer_name),
+        handicap_weight = COALESCE(?, handicap_weight),
+        result_position = COALESCE(?, result_position),
+        result_time = COALESCE(?, result_time),
+        result_margin = COALESCE(?, result_margin),
+        result_last_three_furlongs = COALESCE(?, result_last_three_furlongs),
+        result_corner_positions = COALESCE(?, result_corner_positions),
+        result_weight = COALESCE(?, result_weight),
+        result_weight_change = COALESCE(?, result_weight_change)
       WHERE race_id = ? AND horse_number = ?
     `, [
       postPosition, horseId, horseName, age, sex,

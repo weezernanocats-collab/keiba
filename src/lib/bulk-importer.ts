@@ -833,7 +833,7 @@ async function processChunkPhase(
           await upsertRace({ id: race.id, status: '結果確定' });
         } catch (error) {
           addError(`結果取得失敗 (${race.id}): ${errMsg(error)}`);
-          try { await upsertRace({ id: race.id, status: '結果確定' }); } catch { /* skip */ }
+          // スクレイプ失敗時は結果確定にしない（リトライ可能にする）
         }
         state.phaseRemaining--;
         await sleep(CHUNK_RATE_LIMIT_MS);
