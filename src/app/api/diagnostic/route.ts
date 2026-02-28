@@ -98,7 +98,8 @@ export async function GET() {
 
   // 5b. 生のHTMLを取得してセレクタを確認
   try {
-    const rawUrl = 'https://race.netkeiba.com/top/race_list.html?kaisai_date=20251228';
+    // race_list_sub.html をテスト（修正後のスクレイパーが使うURL）
+    const rawUrl = 'https://race.netkeiba.com/top/race_list_sub.html?kaisai_date=20251228';
     const response = await fetch(rawUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
