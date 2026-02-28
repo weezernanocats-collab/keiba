@@ -179,7 +179,17 @@ export async function GET() {
     results.tableCounts = { error: String(error) };
   }
 
-  // 7. クリーンアップ: テスト用レコードを削除
+  // 7. 壊れたレース（date=''）の検出
+  try {
+    const broken = await dbAll<{ id: string; name: string; status: string }>(
+      "SELECT id, name, status FROM races WHERE date = '' OR date IS NULL LIMIT 50"
+    );
+    results.brokenRaces = { count: broken.length, samples: broken.slice(0, 10) };
+  } catch (error) {
+    results.brokenRaces = { error: String(error) };
+  }
+
+  // 8. クリーンアップ: テスト用レコードを削除
   try {
     await dbRun("DELETE FROM races WHERE id LIKE 'test_diag_%'");
     results.cleanup = { success: true };
@@ -188,6 +198,41 @@ export async function GET() {
   }
 
   return NextResponse.json(results, { status: 200 });
+}
+
+// POST: 壊れたレースの修復（date=''のレースを削除して再取込可能にする）
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+
+    if (body.action === 'fix_broken_dates') {
+      // date='' のレースに関連するデータを削除
+      const broken = await dbAll<{ id: string }>(
+        "SELECT id FROM races WHERE date = '' OR date IS NULL"
+      );
+      const ids = broken.map(r => r.id);
+
+      if (ids.length === 0) {
+        return NextResponse.json({ fixed: 0, message: '修復対象なし' });
+      }
+
+      const placeholders = ids.map(() => '?').join(',');
+      await dbRun(`DELETE FROM race_entries WHERE race_id IN (${placeholders})`, ids);
+      await dbRun(`DELETE FROM odds WHERE race_id IN (${placeholders})`, ids);
+      await dbRun(`DELETE FROM predictions WHERE race_id IN (${placeholders})`, ids);
+      await dbRun(`DELETE FROM races WHERE id IN (${placeholders})`, ids);
+
+      return NextResponse.json({
+        fixed: ids.length,
+        message: `${ids.length}件の壊れたレースを削除しました。バルクインポートで再取込してください。`,
+        deletedIds: ids.slice(0, 20),
+      });
+    }
+
+    return NextResponse.json({ error: '不明なアクション' }, { status: 400 });
+  } catch (error) {
+    return NextResponse.json({ error: String(error) }, { status: 500 });
+  }
 }
 
 function extractAroundKeyword(html: string, keyword: string, radius: number): string {
