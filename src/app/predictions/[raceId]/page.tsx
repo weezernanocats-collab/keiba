@@ -41,12 +41,12 @@ interface RaceData {
   id: string;
   name: string;
   date: string;
-  racecourse_name: string;
-  race_number: number;
+  racecourseName: string;
+  raceNumber: number;
   grade: string | null;
-  track_type: string;
+  trackType: string;
   distance: number;
-  track_condition: string | null;
+  trackCondition: string | null;
 }
 
 export default function PredictionDetailPage() {
@@ -119,8 +119,8 @@ export default function PredictionDetailPage() {
           <h1 className="text-2xl font-bold">{race.name}</h1>
         </div>
         <p className="text-white/80 text-sm">
-          {race.date} | {race.racecourse_name} {race.race_number}R | {race.track_type}{race.distance}m
-          {race.track_condition && ` | ${race.track_condition}`}
+          {race.date} | {race.racecourseName} {race.raceNumber}R | {race.trackType}{race.distance}m
+          {race.trackCondition && ` | ${race.trackCondition}`}
         </p>
         <div className="mt-4 flex items-center gap-4">
           <div>

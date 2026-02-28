@@ -25,13 +25,13 @@ interface RaceRow {
   id: string;
   name: string;
   date: string;
-  racecourse_name: string;
-  race_number: number;
+  racecourseName: string;
+  raceNumber: number;
   grade: string | null;
-  track_type: string;
+  trackType: string;
   distance: number;
   status: string;
-  entry_count: number;
+  entryCount: number;
 }
 
 // ---------- Constants ----------
@@ -117,7 +117,7 @@ export default function CalendarPage() {
   const selectedDateRaces = useMemo(() => {
     if (!selectedDate) return [];
     return (racesByDate[selectedDate] || []).sort(
-      (a, b) => a.racecourse_name.localeCompare(b.racecourse_name) || a.race_number - b.race_number,
+      (a, b) => a.racecourseName.localeCompare(b.racecourseName) || a.raceNumber - b.raceNumber,
     );
   }, [selectedDate, racesByDate]);
 
@@ -340,8 +340,8 @@ export default function CalendarPage() {
                             key={race.id}
                             className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors"
                           >
-                            <td className="px-4 py-3 font-medium">{race.racecourse_name}</td>
-                            <td className="px-4 py-3">{race.race_number}R</td>
+                            <td className="px-4 py-3 font-medium">{race.racecourseName}</td>
+                            <td className="px-4 py-3">{race.raceNumber}R</td>
                             <td className="px-4 py-3">
                               <Link
                                 href={`/races/${race.id}`}
@@ -352,10 +352,10 @@ export default function CalendarPage() {
                               <GradeBadge grade={race.grade} size="sm" />
                             </td>
                             <td className="px-4 py-3 text-muted">
-                              {race.track_type}
+                              {race.trackType}
                               {race.distance}m
                             </td>
-                            <td className="px-4 py-3 text-center">{race.entry_count}頭</td>
+                            <td className="px-4 py-3 text-center">{race.entryCount}頭</td>
                             <td className="px-4 py-3 text-center">
                               <span
                                 className={`px-2 py-0.5 rounded text-xs font-medium ${
@@ -431,7 +431,7 @@ export default function CalendarPage() {
                           {race.name}
                         </Link>
                         <p className="text-xs text-muted mt-0.5">
-                          {race.date} / {race.racecourse_name} / {race.track_type}
+                          {race.date} / {race.racecourseName} / {race.trackType}
                           {race.distance}m
                         </p>
                       </div>
@@ -496,7 +496,7 @@ export default function CalendarPage() {
                     {[...new Set(
                       races
                         .filter((r) => isSameMonth(parseISO(r.date), currentMonth))
-                        .map((r) => r.racecourse_name),
+                        .map((r) => r.racecourseName),
                     )].length}
                   </div>
                   <div className="text-xs text-muted">競馬場</div>

@@ -17,6 +17,7 @@ interface JockeyDetail {
   place_rate: number;
   show_rate: number;
   total_earnings: number;
+  _partial?: boolean;
 }
 
 interface RecentResult {
@@ -53,32 +54,49 @@ export default function JockeyDetailPage() {
   }, [jockeyId]);
 
   if (loading) return <LoadingSpinner />;
-  if (!jockey) return <div className="text-center py-12">騎手が見つかりません</div>;
+  if (!jockey) {
+    return (
+      <div className="text-center py-12 space-y-4">
+        <p className="text-lg text-muted">騎手が見つかりません</p>
+        <Link href="/races" className="text-accent hover:underline">← レース一覧に戻る</Link>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fadeIn">
       <Link href="/jockeys" className="text-sm text-accent hover:underline">← 騎手一覧に戻る</Link>
+
+      {jockey._partial && (
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-800 rounded-xl p-4 text-sm text-yellow-800 dark:text-yellow-200">
+          この騎手の詳細情報は出走データから集計しています。成績は登録済みレースのみ反映されています。
+        </div>
+      )}
 
       {/* 基本情報 */}
       <div className="bg-card-bg border border-card-border rounded-xl p-6">
         <h1 className="text-3xl font-bold mb-1">{jockey.name}</h1>
         {jockey.name_en && <p className="text-muted text-sm mb-4">{jockey.name_en}</p>}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-          <div>
-            <p className="text-xs text-muted">年齢</p>
-            <p className="font-medium">{jockey.age}歳</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted">所属</p>
-            <p className="font-medium">
-              <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                jockey.region === '中央' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
-              }`}>
-                {jockey.region}
-              </span>
-              {' '}{jockey.belongs_to}
-            </p>
-          </div>
+          {jockey.age > 0 && (
+            <div>
+              <p className="text-xs text-muted">年齢</p>
+              <p className="font-medium">{jockey.age}歳</p>
+            </div>
+          )}
+          {(jockey.region || jockey.belongs_to) && (
+            <div>
+              <p className="text-xs text-muted">所属</p>
+              <p className="font-medium">
+                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                  jockey.region === '中央' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
+                }`}>
+                  {jockey.region}
+                </span>
+                {jockey.belongs_to && <> {jockey.belongs_to}</>}
+              </p>
+            </div>
+          )}
           <div>
             <p className="text-xs text-muted">通算出走</p>
             <p className="font-medium">{jockey.total_races}回</p>
@@ -104,10 +122,12 @@ export default function JockeyDetailPage() {
           <p className="text-xs text-muted mb-1">複勝率</p>
           <p className="text-2xl font-bold">{(jockey.show_rate * 100).toFixed(1)}%</p>
         </div>
-        <div className="bg-card-bg border border-card-border rounded-xl p-4 text-center">
-          <p className="text-xs text-muted mb-1">獲得賞金</p>
-          <p className="text-2xl font-bold">{(jockey.total_earnings / 10000).toFixed(0)}<span className="text-sm">万円</span></p>
-        </div>
+        {jockey.total_earnings > 0 && (
+          <div className="bg-card-bg border border-card-border rounded-xl p-4 text-center">
+            <p className="text-xs text-muted mb-1">獲得賞金</p>
+            <p className="text-2xl font-bold">{(jockey.total_earnings / 10000).toFixed(0)}<span className="text-sm">万円</span></p>
+          </div>
+        )}
       </div>
 
       {/* 直近成績 */}

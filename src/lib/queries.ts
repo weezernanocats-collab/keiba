@@ -22,7 +22,7 @@ export async function seedRacecourses(racecourses: typeof RACECOURSES) {
 // ==================== レース ====================
 
 export async function getRacesByDate(date: string) {
-  return dbAll<Race & { entry_count: number }>(`
+  const rows = await dbAll<Record<string, unknown>>(`
     SELECT r.*, COUNT(e.id) as entry_count
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
@@ -30,10 +30,11 @@ export async function getRacesByDate(date: string) {
     GROUP BY r.id
     ORDER BY r.racecourse_name, r.race_number
   `, [date]);
+  return rows.map(r => ({ ...mapRace(r), entryCount: (r.entry_count ?? 0) as number }));
 }
 
 export async function getRacesByDateRange(startDate: string, endDate: string) {
-  return dbAll<Race & { entry_count: number }>(`
+  const rows = await dbAll<Record<string, unknown>>(`
     SELECT r.*, COUNT(e.id) as entry_count
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
@@ -41,21 +42,70 @@ export async function getRacesByDateRange(startDate: string, endDate: string) {
     GROUP BY r.id
     ORDER BY r.date, r.racecourse_name, r.race_number
   `, [startDate, endDate]);
+  return rows.map(r => ({ ...mapRace(r), entryCount: (r.entry_count ?? 0) as number }));
 }
 
 export async function getRaceById(raceId: string) {
-  const race = await dbGet<Race>('SELECT * FROM races WHERE id = ?', [raceId]);
+  const race = await dbGet<Record<string, unknown>>('SELECT * FROM races WHERE id = ?', [raceId]);
   if (!race) return null;
 
-  const entries = await dbAll<RaceEntry>(`
+  const rawEntries = await dbAll<Record<string, unknown>>(`
     SELECT * FROM race_entries WHERE race_id = ? ORDER BY horse_number
   `, [raceId]);
 
-  return { ...race, entries };
+  return { ...mapRace(race), entries: rawEntries.map(mapRaceEntry) };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapRace(row: Record<string, any>): Race {
+  return {
+    id: row.id ?? '',
+    name: row.name ?? '',
+    date: row.date ?? '',
+    time: row.time ?? undefined,
+    racecourseId: row.racecourse_id ?? row.racecourseId ?? '',
+    racecourseName: row.racecourse_name ?? row.racecourseName ?? '',
+    raceNumber: row.race_number ?? row.raceNumber ?? 0,
+    grade: row.grade ?? undefined,
+    trackType: row.track_type ?? row.trackType ?? '芝',
+    distance: row.distance ?? 0,
+    trackCondition: row.track_condition ?? row.trackCondition ?? undefined,
+    weather: row.weather ?? undefined,
+    entries: [],
+    status: row.status ?? '予定',
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapRaceEntry(row: Record<string, any>): RaceEntry {
+  return {
+    postPosition: row.post_position ?? row.postPosition ?? 0,
+    horseNumber: row.horse_number ?? row.horseNumber ?? 0,
+    horseId: row.horse_id ?? row.horseId ?? '',
+    horseName: row.horse_name ?? row.horseName ?? '',
+    age: row.age ?? 0,
+    sex: row.sex ?? '牡',
+    weight: row.weight ?? undefined,
+    jockeyId: row.jockey_id ?? row.jockeyId ?? '',
+    jockeyName: row.jockey_name ?? row.jockeyName ?? '',
+    trainerName: row.trainer_name ?? row.trainerName ?? '',
+    handicapWeight: row.handicap_weight ?? row.handicapWeight ?? 0,
+    odds: row.odds ?? undefined,
+    popularity: row.popularity ?? undefined,
+    result: row.result_position != null ? {
+      position: row.result_position,
+      time: row.result_time ?? undefined,
+      margin: row.result_margin ?? undefined,
+      lastThreeFurlongs: row.result_last_three_furlongs ?? undefined,
+      cornerPositions: row.result_corner_positions ?? undefined,
+      weight: row.result_weight ?? undefined,
+      weightChange: row.result_weight_change ?? undefined,
+    } : undefined,
+  };
 }
 
 export async function getUpcomingRaces(limit: number = 50) {
-  return dbAll<Race & { entry_count: number }>(`
+  const rows = await dbAll<Record<string, unknown>>(`
     SELECT r.*, COUNT(e.id) as entry_count
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
@@ -65,10 +115,11 @@ export async function getUpcomingRaces(limit: number = 50) {
     ORDER BY r.date, r.racecourse_name, r.race_number
     LIMIT ?
   `, [limit]);
+  return rows.map(r => ({ ...mapRace(r), entryCount: (r.entry_count ?? 0) as number }));
 }
 
 export async function getRecentResults(limit: number = 50) {
-  return dbAll<Race & { entry_count: number }>(`
+  const rows = await dbAll<Record<string, unknown>>(`
     SELECT r.*, COUNT(e.id) as entry_count
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
@@ -77,6 +128,7 @@ export async function getRecentResults(limit: number = 50) {
     ORDER BY r.date DESC, r.racecourse_name DESC, r.race_number DESC
     LIMIT ?
   `, [limit]);
+  return rows.map(r => ({ ...mapRace(r), entryCount: (r.entry_count ?? 0) as number }));
 }
 
 export async function upsertRace(race: Partial<Race> & { id: string }) {
@@ -156,7 +208,7 @@ export async function upsertRaceEntry(raceId: string, entry: Partial<RaceEntry>)
   const sex = entry.sex ?? null;
   const weight = entry.weight ?? null;
   const jockeyId = entry.jockeyId ?? null;
-  const jockeyName = entry.jockeyName ?? '';
+  const jockeyName = entry.jockeyName || null;
   const trainerName = entry.trainerName ?? null;
   const handicapWeight = entry.handicapWeight ?? 0;
   const resultPosition = entry.result?.position ?? null;
@@ -168,18 +220,18 @@ export async function upsertRaceEntry(raceId: string, entry: Partial<RaceEntry>)
   const resultWeightChange = entry.result?.weightChange ?? null;
 
   if (existing) {
-    // COALESCE で非結果フィールドは既存値を保持（結果保存時に上書きしない）
+    // COALESCE + NULLIF で非結果フィールドは既存値を保持（結果保存時に上書きしない）
     await dbRun(`
       UPDATE race_entries SET
         post_position = COALESCE(?, post_position),
-        horse_id = COALESCE(?, horse_id),
-        horse_name = COALESCE(?, horse_name),
+        horse_id = COALESCE(NULLIF(?, ''), horse_id),
+        horse_name = COALESCE(NULLIF(?, ''), horse_name),
         age = COALESCE(?, age),
         sex = COALESCE(?, sex),
         weight = COALESCE(?, weight),
-        jockey_id = COALESCE(?, jockey_id),
-        jockey_name = COALESCE(?, jockey_name),
-        trainer_name = COALESCE(?, trainer_name),
+        jockey_id = COALESCE(NULLIF(?, ''), jockey_id),
+        jockey_name = COALESCE(NULLIF(?, ''), jockey_name),
+        trainer_name = COALESCE(NULLIF(?, ''), trainer_name),
         handicap_weight = COALESCE(?, handicap_weight),
         result_position = COALESCE(?, result_position),
         result_time = COALESCE(?, result_time),

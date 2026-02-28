@@ -553,7 +553,7 @@ function buildSummary(s: BulkImportStats): string {
 // 長時間のバルクインポートを小さなチャンクに分割して処理する。
 // フロントエンドが繰り返しAPIを呼び出し、各呼び出しで50秒以内の処理を行う。
 
-export type ChunkedPhase = 'init' | 'dates' | 'race_details' | 'horses' | 'results' | 'predictions' | 'evaluate' | 'done';
+export type ChunkedPhase = 'init' | 'dates' | 'race_details' | 'horses' | 'results' | 'odds' | 'predictions' | 'evaluate' | 'done';
 
 export interface BulkChunkedState {
   phase: ChunkedPhase;
@@ -742,7 +742,8 @@ async function processChunkPhase(
 
     case 'horses': {
       state.phaseLabel = '馬詳細・過去成績取得';
-      // プレースホルダー馬（birth_date が NULL）も未処理として扱う
+      // プレースホルダー馬（birth_date が NULL）は未処理として扱う
+      // FETCH_FAILED / 取得失敗 マーク済みの馬はスキップ
       const unprocessed = await dbAll<{ id: string }>(
         `SELECT DISTINCT h.id
         FROM horses h
@@ -777,8 +778,13 @@ async function processChunkPhase(
           }
         } catch (error) {
           addError(`馬詳細取得失敗 (${horse_id}): ${errMsg(error)}`);
-          // 取得失敗をマークしてリトライを防ぐ
-          try { await upsertHorse({ id: horse_id, name: '取得失敗' }); } catch { /* skip */ }
+          // 取得失敗をマークしてリトライを防ぐ（名前は上書きしない）
+          try {
+            await dbRun(
+              "UPDATE horses SET birth_date = 'FETCH_FAILED' WHERE id = ? AND birth_date IS NULL",
+              [horse_id]
+            );
+          } catch { /* skip */ }
         }
         state.phaseRemaining--;
         await sleep(CHUNK_RATE_LIMIT_MS);
@@ -846,7 +852,49 @@ async function processChunkPhase(
       );
       const remainingCount = remainingRow?.c ?? 0;
       state.phaseRemaining = remainingCount;
-      if (remainingCount === 0) state.phase = 'predictions';
+      if (remainingCount === 0) state.phase = 'odds';
+      return;
+    }
+
+    case 'odds': {
+      state.phaseLabel = 'オッズ取得';
+      const today = new Date().toISOString().split('T')[0];
+      // 未来レースのみオッズを取得（過去レースはオッズ不要）
+      const targetRaces = await dbAll<{ id: string; name: string }>(
+        `SELECT id, name FROM races
+         WHERE date >= ? AND status IN ('出走確定', '予定')
+         AND date BETWEEN ? AND ?
+         ORDER BY date`,
+        [today, state.config.startDate, state.config.endDate]
+      );
+
+      state.phaseRemaining = targetRaces.length;
+
+      if (targetRaces.length === 0) {
+        state.phase = 'predictions';
+        return;
+      }
+
+      for (const race of targetRaces) {
+        if (!hasTime()) return;
+        try {
+          const odds = await scrapeOdds(race.id);
+          for (const w of odds.win) {
+            await upsertOdds(race.id, '単勝', [w.horseNumber], w.odds);
+            state.stats.oddsScraped++;
+          }
+          for (const p of odds.place) {
+            await upsertOdds(race.id, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
+            state.stats.oddsScraped++;
+          }
+        } catch (error) {
+          addError(`オッズ取得失敗 (${race.id}): ${errMsg(error)}`);
+        }
+        state.phaseRemaining--;
+        await sleep(CHUNK_RATE_LIMIT_MS);
+      }
+
+      state.phase = 'predictions';
       return;
     }
 

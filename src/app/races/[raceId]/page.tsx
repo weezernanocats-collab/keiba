@@ -6,22 +6,24 @@ import GradeBadge from '@/components/GradeBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
 
 interface EntryRow {
-  post_position: number;
-  horse_number: number;
-  horse_id: string;
-  horse_name: string;
+  postPosition: number;
+  horseNumber: number;
+  horseId: string;
+  horseName: string;
   age: number;
   sex: string;
-  jockey_id: string;
-  jockey_name: string;
-  trainer_name: string;
-  handicap_weight: number;
+  jockeyId: string;
+  jockeyName: string;
+  trainerName: string;
+  handicapWeight: number;
   weight: number | null;
-  result_position: number | null;
-  result_time: string | null;
-  result_margin: string | null;
-  result_last_three_furlongs: string | null;
-  result_corner_positions: string | null;
+  result?: {
+    position: number;
+    time?: string;
+    margin?: string;
+    lastThreeFurlongs?: string;
+    cornerPositions?: string;
+  };
 }
 
 interface RaceDetail {
@@ -29,12 +31,12 @@ interface RaceDetail {
   name: string;
   date: string;
   time: string | null;
-  racecourse_name: string;
-  race_number: number;
+  racecourseName: string;
+  raceNumber: number;
   grade: string | null;
-  track_type: string;
+  trackType: string;
   distance: number;
-  track_condition: string | null;
+  trackCondition: string | null;
   weather: string | null;
   status: string;
   entries: EntryRow[];
@@ -68,7 +70,7 @@ export default function RaceDetailPage() {
         setRace(raceData.race || null);
         setOdds(oddsData.odds || []);
       } catch (err) {
-        console.error('エラー:', err);
+        console.error(err);
       } finally {
         setLoading(false);
       }
@@ -81,7 +83,7 @@ export default function RaceDetailPage() {
 
   const winOdds = odds.filter(o => o.bet_type === '単勝');
   const placeOdds = odds.filter(o => o.bet_type === '複勝');
-  const hasResults = race.entries.some(e => e.result_position != null);
+  const hasResults = race.entries.some(e => e.result != null);
 
   // オッズマップ
   const winOddsMap: Record<number, number> = {};
@@ -90,7 +92,7 @@ export default function RaceDetailPage() {
   for (const o of placeOdds) placeOddsMap[o.horse_number1] = { min: o.min_odds || 0, max: o.max_odds || 0 };
 
   const sortedEntries = tab === 'result' && hasResults
-    ? [...race.entries].sort((a, b) => (a.result_position || 99) - (b.result_position || 99))
+    ? [...race.entries].sort((a, b) => (a.result?.position || 99) - (b.result?.position || 99))
     : race.entries;
 
   return (
@@ -103,9 +105,9 @@ export default function RaceDetailPage() {
         </div>
         <div className="flex flex-wrap gap-4 text-sm text-muted">
           <span>📅 {race.date} {race.time || ''}</span>
-          <span>🏟️ {race.racecourse_name} {race.race_number}R</span>
-          <span>🏁 {race.track_type}{race.distance}m</span>
-          {race.track_condition && <span>馬場: {race.track_condition}</span>}
+          <span>🏟️ {race.racecourseName} {race.raceNumber}R</span>
+          <span>🏁 {race.trackType}{race.distance}m</span>
+          {race.trackCondition && <span>馬場: {race.trackCondition}</span>}
           {race.weather && <span>天候: {race.weather}</span>}
           <span className={`px-2 py-0.5 rounded text-xs font-medium ${
             race.status === '出走確定' ? 'bg-green-100 text-green-800' :
@@ -182,55 +184,55 @@ export default function RaceDetailPage() {
             </thead>
             <tbody className="divide-y divide-card-border">
               {sortedEntries.map(entry => (
-                <tr key={entry.horse_number} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
+                <tr key={entry.horseNumber} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
                   {tab === 'result' && (
                     <td className="px-3 py-3 text-center font-bold">
                       <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-sm ${
-                        entry.result_position === 1 ? 'bg-yellow-400 text-black' :
-                        entry.result_position === 2 ? 'bg-gray-300 text-black' :
-                        entry.result_position === 3 ? 'bg-amber-600 text-white' :
+                        entry.result?.position === 1 ? 'bg-yellow-400 text-black' :
+                        entry.result?.position === 2 ? 'bg-gray-300 text-black' :
+                        entry.result?.position === 3 ? 'bg-amber-600 text-white' :
                         'bg-gray-100 text-gray-600'
                       }`}>
-                        {entry.result_position || '-'}
+                        {entry.result?.position || '-'}
                       </span>
                     </td>
                   )}
                   <td className="px-3 py-3 text-center">
-                    <span className={`inline-flex items-center justify-center w-7 h-7 rounded text-xs font-bold waku-${entry.post_position}`}>
-                      {entry.post_position}
+                    <span className={`inline-flex items-center justify-center w-7 h-7 rounded text-xs font-bold waku-${entry.postPosition}`}>
+                      {entry.postPosition}
                     </span>
                   </td>
-                  <td className="px-3 py-3 text-center font-bold">{entry.horse_number}</td>
+                  <td className="px-3 py-3 text-center font-bold">{entry.horseNumber}</td>
                   <td className="px-3 py-3">
-                    <Link href={`/horses/${entry.horse_id}`} className="text-accent hover:underline font-medium">
-                      {entry.horse_name}
+                    <Link href={`/horses/${entry.horseId}`} className="text-accent hover:underline font-medium">
+                      {entry.horseName}
                     </Link>
                   </td>
                   <td className="px-3 py-3 text-center text-muted">{entry.sex}{entry.age}</td>
-                  <td className="px-3 py-3 text-center">{entry.handicap_weight}</td>
+                  <td className="px-3 py-3 text-center">{entry.handicapWeight}</td>
                   <td className="px-3 py-3">
-                    <Link href={`/jockeys/${entry.jockey_id}`} className="text-accent hover:underline">
-                      {entry.jockey_name}
+                    <Link href={`/jockeys/${entry.jockeyId}`} className="text-accent hover:underline">
+                      {entry.jockeyName}
                     </Link>
                   </td>
-                  <td className="px-3 py-3 text-muted">{entry.trainer_name}</td>
+                  <td className="px-3 py-3 text-muted">{entry.trainerName}</td>
                   {(tab === 'odds' || tab === 'shutuba') && (
                     <>
                       <td className="px-3 py-3 text-right font-medium">
-                        {winOddsMap[entry.horse_number]?.toFixed(1) || '-'}
+                        {winOddsMap[entry.horseNumber]?.toFixed(1) || '-'}
                       </td>
                       <td className="px-3 py-3 text-right text-muted">
-                        {placeOddsMap[entry.horse_number]
-                          ? `${placeOddsMap[entry.horse_number].min.toFixed(1)} - ${placeOddsMap[entry.horse_number].max.toFixed(1)}`
+                        {placeOddsMap[entry.horseNumber]
+                          ? `${placeOddsMap[entry.horseNumber].min.toFixed(1)} - ${placeOddsMap[entry.horseNumber].max.toFixed(1)}`
                           : '-'}
                       </td>
                     </>
                   )}
                   {tab === 'result' && (
                     <>
-                      <td className="px-3 py-3 text-right">{entry.result_time || '-'}</td>
-                      <td className="px-3 py-3 text-right text-muted">{entry.result_margin || '-'}</td>
-                      <td className="px-3 py-3 text-right">{entry.result_last_three_furlongs || '-'}</td>
+                      <td className="px-3 py-3 text-right">{entry.result?.time || '-'}</td>
+                      <td className="px-3 py-3 text-right text-muted">{entry.result?.margin || '-'}</td>
+                      <td className="px-3 py-3 text-right">{entry.result?.lastThreeFurlongs || '-'}</td>
                     </>
                   )}
                 </tr>

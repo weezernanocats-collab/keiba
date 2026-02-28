@@ -8,13 +8,13 @@ interface RaceRow {
   id: string;
   name: string;
   date: string;
-  racecourse_name: string;
-  race_number: number;
+  racecourseName: string;
+  raceNumber: number;
   grade: string | null;
-  track_type: string;
+  trackType: string;
   distance: number;
   status: string;
-  entry_count: number;
+  entryCount: number;
 }
 
 interface Stats {
@@ -125,8 +125,8 @@ export default function HomePage() {
                 {upcomingRaces.slice(0, 10).map((race) => (
                   <tr key={race.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
                     <td className="px-4 py-3 whitespace-nowrap">{race.date}</td>
-                    <td className="px-4 py-3 font-medium">{race.racecourse_name}</td>
-                    <td className="px-4 py-3">{race.race_number}R</td>
+                    <td className="px-4 py-3 font-medium">{race.racecourseName}</td>
+                    <td className="px-4 py-3">{race.raceNumber}R</td>
                     <td className="px-4 py-3">
                       <Link href={`/races/${race.id}`} className="text-accent hover:underline font-medium">
                         {race.name}
@@ -134,8 +134,8 @@ export default function HomePage() {
                       {' '}
                       <GradeBadge grade={race.grade} size="sm" />
                     </td>
-                    <td className="px-4 py-3 text-muted">{race.track_type}{race.distance}m</td>
-                    <td className="px-4 py-3 text-center">{race.entry_count}頭</td>
+                    <td className="px-4 py-3 text-muted">{race.trackType}{race.distance}m</td>
+                    <td className="px-4 py-3 text-center">{race.entryCount}頭</td>
                     <td className="px-4 py-3 text-center">
                       <Link
                         href={`/predictions/${race.id}`}
@@ -171,7 +171,7 @@ export default function HomePage() {
                   {recentResults.slice(0, 5).map((race) => (
                     <tr key={race.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
                       <td className="px-4 py-3 whitespace-nowrap">{race.date}</td>
-                      <td className="px-4 py-3 font-medium">{race.racecourse_name}</td>
+                      <td className="px-4 py-3 font-medium">{race.racecourseName}</td>
                       <td className="px-4 py-3">
                         <Link href={`/races/${race.id}`} className="text-accent hover:underline">
                           {race.name}
@@ -179,7 +179,7 @@ export default function HomePage() {
                         {' '}
                         <GradeBadge grade={race.grade} size="sm" />
                       </td>
-                      <td className="px-4 py-3 text-muted">{race.track_type}{race.distance}m</td>
+                      <td className="px-4 py-3 text-muted">{race.trackType}{race.distance}m</td>
                     </tr>
                   ))}
                 </tbody>

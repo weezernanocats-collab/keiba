@@ -8,13 +8,13 @@ interface RaceRow {
   id: string;
   name: string;
   date: string;
-  racecourse_name: string;
-  race_number: number;
+  racecourseName: string;
+  raceNumber: number;
   grade: string | null;
-  track_type: string;
+  trackType: string;
   distance: number;
   status: string;
-  entry_count: number;
+  entryCount: number;
 }
 
 export default function PredictionsPage() {
@@ -61,11 +61,11 @@ export default function PredictionsPage() {
             </div>
             <h3 className="text-lg font-bold group-hover:text-accent transition-colors">{race.name}</h3>
             <div className="mt-2 flex flex-wrap gap-2 text-sm text-muted">
-              <span>{race.racecourse_name} {race.race_number}R</span>
+              <span>{race.racecourseName} {race.raceNumber}R</span>
               <span>|</span>
-              <span>{race.track_type}{race.distance}m</span>
+              <span>{race.trackType}{race.distance}m</span>
               <span>|</span>
-              <span>{race.entry_count}頭</span>
+              <span>{race.entryCount}頭</span>
             </div>
             <div className="mt-3 text-xs text-accent font-medium group-hover:underline">
               AI予想を見る →
