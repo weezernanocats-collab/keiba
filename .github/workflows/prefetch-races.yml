@@ -1,0 +1,44 @@
+name: Prefetch Upcoming Races
+
+on:
+  schedule:
+    # 毎週 水・土 の 00:00 UTC (09:00 JST) に実行
+    # 水曜: 週末開催の出馬表が公開されるタイミング
+    # 土曜: 翌週前半の地方競馬をカバー
+    - cron: '0 0 * * 3,6'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'Number of days to look ahead'
+        required: false
+        default: '14'
+
+jobs:
+  prefetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create .env.local
+        run: |
+          echo "TURSO_DATABASE_URL=\"${{ secrets.TURSO_DATABASE_URL }}\"" > .env.local
+          echo "TURSO_AUTH_TOKEN=\"${{ secrets.TURSO_AUTH_TOKEN }}\"" >> .env.local
+
+      - name: Run prefetch script
+        run: npx tsx scripts/prefetch-upcoming.ts --days ${{ github.event.inputs.days || '14' }}
+
+      - name: Cleanup
+        if: always()
+        run: rm -f .env.local
