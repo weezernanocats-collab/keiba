@@ -114,15 +114,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '認証エラー: 無効な同期キーです' }, { status: 401 });
   }
 
-  // Reject if a sync is already running
+  // Reject if a sync is already running (with stale check: auto-clear after 2 minutes)
   if (currentSync && currentSync.status === 'running') {
-    return NextResponse.json(
-      {
-        error: '同期処理が既に実行中です',
-        currentSync,
-      },
-      { status: 409 }
-    );
+    const elapsed = Date.now() - new Date(currentSync.startedAt).getTime();
+    if (elapsed > 2 * 60 * 1000) {
+      // Stale sync - force clear
+      currentSync.status = 'failed' as SyncLogEntry['status'];
+      currentSync.details = 'タイムアウトにより自動リセット';
+      currentSync.completedAt = new Date().toISOString();
+      syncLog.unshift(currentSync);
+      currentSync = null;
+    } else {
+      return NextResponse.json(
+        {
+          error: '同期処理が既に実行中です',
+          currentSync,
+        },
+        { status: 409 }
+      );
+    }
   }
 
   let body: SyncRequest;
