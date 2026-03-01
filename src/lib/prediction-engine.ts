@@ -47,6 +47,7 @@ import {
 } from './historical-analyzer';
 import { enhancePredictionWithGemini, type GeminiRaceContext } from './gemini-enhancer';
 import { callMLPredict, buildMLFeatures, type MLHorseInput } from './ml-client';
+import { calculateTodayTrackBias, type TodayTrackBias } from './track-bias';
 
 // デフォルト重み設定 (v4.1: 的中率最適化 — 直近成績・距離・スピードの重みを増加)
 const DEFAULT_WEIGHTS: Record<string, number> = {
@@ -268,6 +269,12 @@ export async function generatePrediction(
   // 展開予想から脚質ボーナスを付与
   applyPaceBonus(scoredHorses, distance);
 
+  // 当日馬場バイアスを反映（同場・同日の完走レースから推定）
+  const todayBias = await calculateTodayTrackBias(racecourseName, date);
+  if (todayBias) {
+    applyTodayTrackBias(scoredHorses, todayBias, horses.length);
+  }
+
   // スコア順にソート
   scoredHorses.sort((a, b) => b.totalScore - a.totalScore);
 
@@ -318,8 +325,8 @@ export async function generatePrediction(
     reasons: sh.reasons,
   }));
 
-  // レース分析
-  const analysis = analyzeRace(scoredHorses, trackType, distance, cond, racecourseName, ctx);
+  // レース分析（当日バイアスも含める）
+  const analysis = analyzeRace(scoredHorses, trackType, distance, cond, racecourseName, ctx, todayBias);
 
   // キャリブレーション用: 全馬のファクタースコアを analysis に格納
   // (horse_number -> { factor: score })
@@ -700,6 +707,56 @@ function applyPaceBonus(horses: ScoredHorse[], distance: number): void {
   }
 }
 
+// ==================== 当日馬場バイアス調整 ====================
+
+/**
+ * 同日・同場の完走レースから得た馬場バイアスをスコアに反映する。
+ *
+ * 最大調整幅: ±4点（枠順 ±2 + 脚質 ±2）
+ * バイアス値(±1) × 信頼度(0-1) × 係数(2) でスケール。
+ */
+function applyTodayTrackBias(
+  horses: ScoredHorse[],
+  bias: TodayTrackBias,
+  fieldSize: number,
+): void {
+  const midPoint = Math.ceil(fieldSize / 2);
+  const SCALE = 2; // 最大 ±2点/要素
+
+  for (const horse of horses) {
+    let adjustment = 0;
+    const reasons: string[] = [];
+
+    // 枠順バイアス
+    const isInner = horse.entry.postPosition <= midPoint;
+    if (Math.abs(bias.innerAdvantage) > 0.15) {
+      const match = (isInner && bias.innerAdvantage > 0) || (!isInner && bias.innerAdvantage < 0);
+      const postAdj = Math.abs(bias.innerAdvantage) * bias.confidence * SCALE * (match ? 1 : -1);
+      adjustment += postAdj;
+      if (Math.abs(postAdj) >= 0.5) {
+        reasons.push(match ? '本日の枠順バイアス有利' : '本日の枠順バイアス不利');
+      }
+    }
+
+    // 脚質バイアス
+    if (Math.abs(bias.frontRunnerAdvantage) > 0.15) {
+      const isFront = horse.runningStyle === '逃げ' || horse.runningStyle === '先行';
+      const isBack = horse.runningStyle === '差し' || horse.runningStyle === '追込';
+      if (isFront || isBack) {
+        const match = (isFront && bias.frontRunnerAdvantage > 0) || (isBack && bias.frontRunnerAdvantage < 0);
+        const styleAdj = Math.abs(bias.frontRunnerAdvantage) * bias.confidence * SCALE * (match ? 1 : -1);
+        adjustment += styleAdj;
+        if (Math.abs(styleAdj) >= 0.5) {
+          reasons.push(match ? '本日の馬場で脚質有利' : '本日の馬場で脚質不利');
+        }
+      }
+    }
+
+    horse.totalScore += adjustment;
+    horse.reasons.push(...reasons);
+  }
+}
+
 // ==================== 個別スコア計算 ====================
 
 function calcRecentFormScore(pp: PastPerformance[]): number {
@@ -998,6 +1055,7 @@ function analyzeRace(
   condition: TrackCondition,
   racecourseName: string,
   ctx: RaceHistoricalContext,
+  todayBias?: TodayTrackBias | null,
 ): RaceAnalysis {
   let trackBias = `${racecourseName}${trackType}${distance}m`;
 
@@ -1023,6 +1081,11 @@ function analyzeRace(
       const biasDir = stats.innerFrameWinRate > stats.outerFrameWinRate ? '内枠' : '外枠';
       trackBias += ` 統計上は${biasDir}有利。`;
     }
+  }
+
+  // 当日バイアス（リアルタイム分析結果）
+  if (todayBias) {
+    trackBias += ` 【当日実績(${todayBias.sampleRaces}R分析)】${todayBias.summary}。`;
   }
 
   // ペース分析
