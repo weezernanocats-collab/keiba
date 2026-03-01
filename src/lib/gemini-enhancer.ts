@@ -183,7 +183,7 @@ export async function enhancePredictionWithGemini(
       config: {
         responseMimeType: 'application/json',
         temperature: 0.7,
-        maxOutputTokens: 1500,
+        maxOutputTokens: 4096,
       },
     });
 
@@ -194,10 +194,6 @@ export async function enhancePredictionWithGemini(
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error(`[gemini-enhancer] FAILED: ${msg}`);
-    // Embed error in summary for debugging (temporary)
-    return {
-      ...prediction,
-      summary: prediction.summary + `\n\n[GEMINI_DEBUG: ${msg.substring(0, 200)}]`,
-    };
+    return prediction;
   }
 }
