@@ -1252,18 +1252,25 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
   const bets: RecommendedBet[] = [];
   if (scoredHorses.length < 3) return bets;
 
+  // softmax で全馬の推定勝率を算出
+  const winProbs = estimateWinProbabilities(scoredHorses);
   const top = scoredHorses[0];
   const second = scoredHorses[1];
   const third = scoredHorses[2];
   const fourth = scoredHorses[3];
   const gap12 = top.totalScore - second.totalScore;
 
+  const evOf = (h: ScoredHorse) => calcExpectedValue(h, winProbs);
+
+  // --- 通常の馬券推奨（従来ロジック + EV表示） ---
+
   if (gap12 > 5 && confidence >= 50) {
+    const ev = evOf(top);
     bets.push({
       type: '単勝',
       selections: [top.entry.horseNumber],
-      reasoning: `${top.entry.horseName}が総合力で群を抜いている。${top.reasons[0] || ''}。信頼度${confidence}%。`,
-      expectedValue: calcExpectedValue(top, scoredHorses),
+      reasoning: `${top.entry.horseName}が総合力で群を抜いている。${top.reasons[0] || ''}。信頼度${confidence}%。${ev >= 1.0 ? `期待値${ev.toFixed(2)}で妙味あり。` : ''}`,
+      expectedValue: ev,
     });
   }
 
@@ -1271,14 +1278,14 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
     type: '複勝',
     selections: [top.entry.horseNumber],
     reasoning: `${top.entry.horseName}の3着以内は堅い。安定感重視の馬券。${top.scores.consistency >= 70 ? '着順も安定しており信頼できる。' : ''}`,
-    expectedValue: calcExpectedValue(top, scoredHorses) * 0.7,
+    expectedValue: evOf(top) * 0.7,
   });
 
   bets.push({
     type: '馬連',
     selections: [top.entry.horseNumber, second.entry.horseNumber],
     reasoning: `${top.entry.horseName}と${second.entry.horseName}の上位2頭。${second.reasons[0] || ''}`,
-    expectedValue: (calcExpectedValue(top, scoredHorses) + calcExpectedValue(second, scoredHorses)) / 2,
+    expectedValue: (evOf(top) + evOf(second)) / 2,
   });
 
   if (third.totalScore > 40) {
@@ -1286,7 +1293,7 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
       type: 'ワイド',
       selections: [top.entry.horseNumber, third.entry.horseNumber],
       reasoning: `${top.entry.horseName}軸で${third.entry.horseName}へ。${third.reasons[0] || '好走条件が揃っている'}`,
-      expectedValue: (calcExpectedValue(top, scoredHorses) + calcExpectedValue(third, scoredHorses)) / 2,
+      expectedValue: (evOf(top) + evOf(third)) / 2,
     });
   }
 
@@ -1295,7 +1302,7 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
       type: '三連複',
       selections: [top.entry.horseNumber, second.entry.horseNumber, third.entry.horseNumber],
       reasoning: `上位3頭で堅く決まる想定。${confidence >= 60 ? '信頼度高め。' : '波乱の余地あり、抑え程度に。'}`,
-      expectedValue: (calcExpectedValue(top, scoredHorses) + calcExpectedValue(second, scoredHorses) + calcExpectedValue(third, scoredHorses)) / 3,
+      expectedValue: (evOf(top) + evOf(second) + evOf(third)) / 3,
     });
   }
 
@@ -1304,7 +1311,7 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
       type: '馬単',
       selections: [top.entry.horseNumber, second.entry.horseNumber],
       reasoning: `${top.entry.horseName}が頭鉄板。2着に${second.entry.horseName}。${gap12 > 10 ? '1着は堅い。' : ''}`,
-      expectedValue: calcExpectedValue(top, scoredHorses) * 1.5,
+      expectedValue: evOf(top) * 1.5,
     });
   }
 
@@ -1313,19 +1320,84 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
       type: '三連単',
       selections: [top.entry.horseNumber, second.entry.horseNumber, third.entry.horseNumber],
       reasoning: `高配当狙い。着順まで予想。${top.entry.horseName}→${second.entry.horseName}→${third.entry.horseName}の順。`,
-      expectedValue: (calcExpectedValue(top, scoredHorses) + calcExpectedValue(second, scoredHorses) + calcExpectedValue(third, scoredHorses)) / 3 * 2,
+      expectedValue: (evOf(top) + evOf(second) + evOf(third)) / 3 * 2,
     });
   }
+
+  // --- バリューベット検出（EV > 1.0 の馬を抽出） ---
+  // 上位3頭以外で期待値が高い馬（＝市場が過小評価している穴馬）を検出
+  for (const horse of scoredHorses) {
+    if (!horse.entry.odds || horse.entry.odds <= 0) continue;
+    const ev = evOf(horse);
+    if (ev < 1.15) continue; // EV 1.15以上のみ（マージン考慮）
+
+    const rank = scoredHorses.indexOf(horse) + 1;
+    // 上位3頭は既に推奨済みなのでスキップ
+    if (rank <= 3) continue;
+
+    const prob = winProbs.get(horse) || 0;
+    bets.push({
+      type: '単勝',
+      selections: [horse.entry.horseNumber],
+      reasoning: `【バリューベット】${horse.entry.horseName}（${rank}番人気相当）。推定勝率${(prob * 100).toFixed(1)}%に対しオッズ${horse.entry.odds.toFixed(1)}倍は過小評価。期待値${ev.toFixed(2)}。${horse.reasons[0] || ''}`,
+      expectedValue: ev,
+    });
+  }
+
+  // EVが高い順にソート（バリューベットが上位に来るように）
+  bets.sort((a, b) => b.expectedValue - a.expectedValue);
 
   return bets;
 }
 
-function calcExpectedValue(horse: ScoredHorse, all: ScoredHorse[]): number {
-  const totalScores = all.reduce((sum, h) => sum + h.totalScore, 0);
-  if (totalScores === 0) return 1;
-  const probability = horse.totalScore / totalScores;
-  const odds = horse.entry.odds || (1 / probability);
-  return Math.round(probability * odds * 100) / 100;
+// ==================== 確率推定・期待値計算 ====================
+
+/**
+ * softmax で各馬の推定勝率を算出する。
+ * temperature パラメータでスコア差の感度を調整:
+ *   低い値 → スコア差が大きく反映（1強なら高確率）
+ *   高い値 → 均等に近づく
+ */
+function estimateWinProbabilities(
+  scoredHorses: ScoredHorse[],
+  temperature: number = 8,
+): Map<ScoredHorse, number> {
+  const probs = new Map<ScoredHorse, number>();
+  if (scoredHorses.length === 0) return probs;
+
+  // スコアの中央値を基準に正規化（オーバーフロー防止）
+  const scores = scoredHorses.map(h => h.totalScore);
+  const maxScore = Math.max(...scores);
+
+  let sumExp = 0;
+  const exps: number[] = [];
+  for (const score of scores) {
+    const e = Math.exp((score - maxScore) / temperature);
+    exps.push(e);
+    sumExp += e;
+  }
+
+  for (let i = 0; i < scoredHorses.length; i++) {
+    probs.set(scoredHorses[i], exps[i] / sumExp);
+  }
+
+  return probs;
+}
+
+/**
+ * 期待値 = 推定勝率 × 実オッズ
+ * オッズ未取得の場合はスコアベースのフェアオッズを使用。
+ */
+function calcExpectedValue(
+  horse: ScoredHorse,
+  winProbs: Map<ScoredHorse, number>,
+): number {
+  const prob = winProbs.get(horse) || 0;
+  if (prob <= 0) return 0;
+  const odds = horse.entry.odds && horse.entry.odds > 0
+    ? horse.entry.odds
+    : 1 / prob; // オッズ未取得時はフェアオッズ（EV=1.0）
+  return Math.round(prob * odds * 100) / 100;
 }
 
 // ==================== サマリー生成 ====================
