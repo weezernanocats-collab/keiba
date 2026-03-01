@@ -168,7 +168,7 @@ function mergeEnhancedOutput(
 // ==================== Main export ====================
 
 // 使用するモデルの優先順位（quota超過時にフォールバック）
-const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-flash-latest'];
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 const GEMINI_TIMEOUT_MS = 25_000; // 25秒タイムアウト（Vercel 60秒制限対応）
 
 export async function enhancePredictionWithGemini(
@@ -176,7 +176,10 @@ export async function enhancePredictionWithGemini(
   ctx: GeminiRaceContext,
 ): Promise<Prediction> {
   const client = getGenAI();
-  if (!client) return prediction;
+  if (!client) {
+    console.warn('[gemini-enhancer] GEMINI_API_KEY未設定 — テンプレートテキストを使用');
+    return prediction;
+  }
 
   const prompt = buildPrompt(prediction, ctx);
 
