@@ -1,9 +1,14 @@
 /**
- * XGBoost ML推論クライアント
+ * XGBoost ML推論クライアント（TypeScript ネイティブ実装）
  *
- * Python Vercel関数 (/api/ml-predict) を呼び出し、勝率・複勝率を取得する。
- * モデル未配置・タイムアウト・エラー時は null を返却し、呼び出し元は加重平均にフォールバックする。
+ * XGBoost の JSON モデルファイルを直接読み込み、決定木を走査して推論する。
+ * Python 不要 — Vercel の 500MB 制限を回避。
+ *
+ * モデル未配置時は null を返却し、呼び出し元は加重平均にフォールバックする。
  */
+
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
 
 // ==================== Types ====================
 
@@ -18,6 +23,36 @@ export interface MLPrediction {
 }
 
 export type MLPredictions = Record<number, MLPrediction>;
+
+// ==================== XGBoost JSON Model Types ====================
+
+interface XGBTree {
+  tree_param: { num_nodes: string };
+  left_children: number[];
+  right_children: number[];
+  split_indices: number[];
+  split_conditions: number[];
+  default_left: number[];
+  base_weights: number[];
+}
+
+interface XGBModel {
+  learner: {
+    learner_model_param: {
+      base_score: string;
+      num_feature: string;
+    };
+    gradient_booster: {
+      model: {
+        trees: XGBTree[];
+        tree_info: number[];
+      };
+    };
+    objective: {
+      name: string;
+    };
+  };
+}
 
 // ==================== Feature construction ====================
 
@@ -72,44 +107,133 @@ export function buildMLFeatures(
   };
 }
 
-// ==================== ML inference call ====================
+// ==================== Model loading & caching ====================
 
-const ML_TIMEOUT_MS = 8000;
+let cachedWinModel: XGBModel | null | undefined;
+let cachedPlaceModel: XGBModel | null | undefined;
+let cachedFeatureNames: string[] | null = null;
+
+function getModelDir(): string {
+  return join(process.cwd(), 'model');
+}
+
+function loadModel(filename: string): XGBModel | null {
+  const filepath = join(getModelDir(), filename);
+  if (!existsSync(filepath)) return null;
+  try {
+    const raw = readFileSync(filepath, 'utf-8');
+    return JSON.parse(raw) as XGBModel;
+  } catch {
+    return null;
+  }
+}
+
+function loadFeatureNames(): string[] | null {
+  const filepath = join(getModelDir(), 'feature_names.json');
+  if (!existsSync(filepath)) return null;
+  try {
+    const raw = readFileSync(filepath, 'utf-8');
+    return JSON.parse(raw) as string[];
+  } catch {
+    return null;
+  }
+}
+
+function ensureModelsLoaded(): boolean {
+  if (cachedWinModel === undefined) {
+    cachedWinModel = loadModel('xgb_win.json');
+  }
+  if (cachedPlaceModel === undefined) {
+    cachedPlaceModel = loadModel('xgb_place.json');
+  }
+  if (cachedFeatureNames === null) {
+    cachedFeatureNames = loadFeatureNames();
+  }
+  return cachedWinModel !== null && cachedPlaceModel !== null;
+}
+
+// ==================== XGBoost tree inference ====================
+
+function sigmoid(x: number): number {
+  return 1 / (1 + Math.exp(-x));
+}
 
 /**
- * Python XGBoost推論関数を呼び出す。
- * 失敗時は null を返却（呼び出し元で加重平均フォールバック）。
+ * 単一の木を走査してリーフの値を返す
+ */
+function traverseTree(tree: XGBTree, features: number[]): number {
+  let nodeId = 0;
+
+  while (tree.left_children[nodeId] !== -1) {
+    const featureIdx = tree.split_indices[nodeId];
+    const threshold = tree.split_conditions[nodeId];
+    const featureVal = features[featureIdx];
+
+    // NaN/undefined の場合は default direction
+    if (featureVal === undefined || isNaN(featureVal)) {
+      nodeId = tree.default_left[nodeId]
+        ? tree.left_children[nodeId]
+        : tree.right_children[nodeId];
+    } else if (featureVal < threshold) {
+      nodeId = tree.left_children[nodeId];
+    } else {
+      nodeId = tree.right_children[nodeId];
+    }
+  }
+
+  return tree.base_weights[nodeId];
+}
+
+/**
+ * XGBoostモデルで推論し、確率を返す (binary:logistic 前提)
+ */
+function predictProba(model: XGBModel, features: number[]): number {
+  const baseScore = parseFloat(model.learner.learner_model_param.base_score) || 0.5;
+  const trees = model.learner.gradient_booster.model.trees;
+
+  let sum = baseScore;
+  for (const tree of trees) {
+    sum += traverseTree(tree, features);
+  }
+
+  return sigmoid(sum);
+}
+
+/**
+ * 特徴量 dict を特徴量名の順序に従って配列に変換
+ */
+function featureDictToArray(
+  features: Record<string, number>,
+  featureNames: string[],
+): number[] {
+  return featureNames.map(name => features[name] ?? 0);
+}
+
+// ==================== Public API ====================
+
+/**
+ * XGBoost推論を実行する。
+ * モデル未配置・エラー時は null を返却（呼び出し元で加重平均フォールバック）。
  */
 export async function callMLPredict(horses: MLHorseInput[]): Promise<MLPredictions | null> {
-  // 開発環境ではスキップ（ローカルにPython関数がない前提）
-  if (process.env.NODE_ENV === 'development') return null;
-
-  // モデル未配置を想定して存在チェック用の環境変数は不要
-  // Python関数が500を返せばnullになる
-
-  const baseUrl = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : process.env.NEXT_PUBLIC_APP_URL || '';
-
-  if (!baseUrl) return null;
-
   try {
-    const response = await fetch(`${baseUrl}/api/ml-predict`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ horses }),
-      signal: AbortSignal.timeout(ML_TIMEOUT_MS),
-    });
-
-    if (!response.ok) return null;
-
-    const data = await response.json() as { success: boolean; predictions?: Record<string, MLPrediction> };
-    if (!data.success || !data.predictions) return null;
+    if (!ensureModelsLoaded()) return null;
+    if (!cachedFeatureNames || !cachedWinModel || !cachedPlaceModel) return null;
 
     const result: MLPredictions = {};
-    for (const [key, val] of Object.entries(data.predictions)) {
-      result[parseInt(key)] = val;
+
+    for (const horse of horses) {
+      const featureArray = featureDictToArray(horse.features, cachedFeatureNames);
+
+      const winProb = predictProba(cachedWinModel, featureArray);
+      const placeProb = predictProba(cachedPlaceModel, featureArray);
+
+      result[horse.horseNumber] = {
+        winProb: Math.round(winProb * 1_000_000) / 1_000_000,
+        placeProb: Math.round(placeProb * 1_000_000) / 1_000_000,
+      };
     }
+
     return result;
   } catch {
     return null;
