@@ -51,15 +51,15 @@ const FACTOR_LABELS: Record<string, string> = {
 
 // ==================== Lazy singleton ====================
 
-let genAIInstance: import('@google/genai').GoogleGenAI | null = null;
+import { GoogleGenAI } from '@google/genai';
 
-function getGenAI(): import('@google/genai').GoogleGenAI | null {
+let genAIInstance: GoogleGenAI | null = null;
+
+function getGenAI(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
   if (genAIInstance) return genAIInstance;
 
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { GoogleGenAI } = require('@google/genai') as typeof import('@google/genai');
   genAIInstance = new GoogleGenAI({ apiKey });
   return genAIInstance;
 }
@@ -192,10 +192,9 @@ export async function enhancePredictionWithGemini(
 
     return mergeEnhancedOutput(prediction, enhanced);
   } catch (error) {
-    console.error(
-      '[gemini-enhancer] Enhancement failed, using template fallback:',
-      error instanceof Error ? error.message : String(error),
-    );
+    const msg = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? error.stack?.split('\n').slice(0, 3).join(' ') : '';
+    console.error(`[gemini-enhancer] FAILED: ${msg} | ${stack}`);
     return prediction;
   }
 }
