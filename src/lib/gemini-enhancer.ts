@@ -193,8 +193,11 @@ export async function enhancePredictionWithGemini(
     return mergeEnhancedOutput(prediction, enhanced);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    const stack = error instanceof Error ? error.stack?.split('\n').slice(0, 3).join(' ') : '';
-    console.error(`[gemini-enhancer] FAILED: ${msg} | ${stack}`);
-    return prediction;
+    console.error(`[gemini-enhancer] FAILED: ${msg}`);
+    // Embed error in summary for debugging (temporary)
+    return {
+      ...prediction,
+      summary: prediction.summary + `\n\n[GEMINI_DEBUG: ${msg.substring(0, 200)}]`,
+    };
   }
 }
