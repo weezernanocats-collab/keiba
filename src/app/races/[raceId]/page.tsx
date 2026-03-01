@@ -57,6 +57,7 @@ export default function RaceDetailPage() {
   const [odds, setOdds] = useState<OddsRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'shutuba' | 'odds' | 'result'>('shutuba');
+  const [fetchingOdds, setFetchingOdds] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -84,6 +85,26 @@ export default function RaceDetailPage() {
   const winOdds = odds.filter(o => o.bet_type === '単勝');
   const placeOdds = odds.filter(o => o.bet_type === '複勝');
   const hasResults = race.entries.some(e => e.result != null);
+  const hasOdds = winOdds.length > 0;
+
+  async function handleFetchOdds() {
+    setFetchingOdds(true);
+    try {
+      const res = await fetch('/api/odds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ raceId }),
+      });
+      const data = await res.json();
+      if (data.odds) {
+        setOdds(data.odds);
+      }
+    } catch (err) {
+      console.error('オッズ取得失敗:', err);
+    } finally {
+      setFetchingOdds(false);
+    }
+  }
 
   // オッズマップ
   const winOddsMap: Record<number, number> = {};
@@ -130,25 +151,36 @@ export default function RaceDetailPage() {
       </div>
 
       {/* タブ */}
-      <div className="flex rounded-lg overflow-hidden border border-card-border w-fit">
-        <button
-          className={`px-4 py-2 text-sm font-medium transition-colors ${tab === 'shutuba' ? 'bg-primary text-white' : 'bg-card-bg hover:bg-gray-100'}`}
-          onClick={() => setTab('shutuba')}
-        >
-          出馬表
-        </button>
-        <button
-          className={`px-4 py-2 text-sm font-medium transition-colors ${tab === 'odds' ? 'bg-primary text-white' : 'bg-card-bg hover:bg-gray-100'}`}
-          onClick={() => setTab('odds')}
-        >
-          オッズ
-        </button>
-        {hasResults && (
+      <div className="flex items-center gap-3">
+        <div className="flex rounded-lg overflow-hidden border border-card-border w-fit">
           <button
-            className={`px-4 py-2 text-sm font-medium transition-colors ${tab === 'result' ? 'bg-primary text-white' : 'bg-card-bg hover:bg-gray-100'}`}
-            onClick={() => setTab('result')}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${tab === 'shutuba' ? 'bg-primary text-white' : 'bg-card-bg hover:bg-gray-100'}`}
+            onClick={() => setTab('shutuba')}
           >
-            結果
+            出馬表
+          </button>
+          <button
+            className={`px-4 py-2 text-sm font-medium transition-colors ${tab === 'odds' ? 'bg-primary text-white' : 'bg-card-bg hover:bg-gray-100'}`}
+            onClick={() => setTab('odds')}
+          >
+            オッズ
+          </button>
+          {hasResults && (
+            <button
+              className={`px-4 py-2 text-sm font-medium transition-colors ${tab === 'result' ? 'bg-primary text-white' : 'bg-card-bg hover:bg-gray-100'}`}
+              onClick={() => setTab('result')}
+            >
+              結果
+            </button>
+          )}
+        </div>
+        {(tab === 'odds' || tab === 'shutuba') && (
+          <button
+            onClick={handleFetchOdds}
+            disabled={fetchingOdds}
+            className="px-4 py-2 text-sm font-medium rounded-lg border border-accent text-accent hover:bg-accent hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {fetchingOdds ? '取得中...' : hasOdds ? 'オッズ更新' : 'オッズ取得'}
           </button>
         )}
       </div>
