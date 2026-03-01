@@ -29,6 +29,7 @@ import { generatePrediction } from '@/lib/prediction-engine';
 import { dbAll, dbRun } from '@/lib/database';
 import { runBulkImport, getBulkImportProgress, abortBulkImport, type BulkImportConfig, runBulkChunk, createInitialChunkedState, type BulkChunkedState } from '@/lib/bulk-importer';
 import { evaluateRacePrediction, evaluateAllPendingRaces, getAccuracyStats, calibrateWeights, autoCalibrate, ensureCalibrationLoaded } from '@/lib/accuracy-tracker';
+import { calculateTodayTrackBias } from '@/lib/track-bias';
 import type { PastPerformance } from '@/types';
 
 // Vercelのサーバーレス関数タイムアウトを60秒に設定
@@ -710,12 +711,26 @@ async function syncRegeneratePredictions(entry: SyncLogEntry, date?: string): Pr
     return;
   }
 
-  entry.details = `[1/2] 既存予想を削除中: ${races.length}レース`;
+  // 競馬場ごとのバイアス状況を事前チェック
+  const racecourses = [...new Set(races.map(r => r.racecourse_name))];
+  const biasStatus: string[] = [];
+  for (const rc of racecourses) {
+    const bias = await calculateTodayTrackBias(rc, targetDate);
+    if (bias) {
+      biasStatus.push(`${rc}: ${bias.summary}`);
+    } else {
+      biasStatus.push(`${rc}: バイアスデータ不足（結果確定3R未満）`);
+    }
+  }
+
+  entry.details = `[1/3] バイアス確認: ${biasStatus.join(' / ')}`;
+
+  entry.details = `[2/3] 既存予想を削除中: ${races.length}レース`;
   const raceIds = races.map(r => r.id);
   const placeholders = raceIds.map(() => '?').join(',');
   await dbRun(`DELETE FROM predictions WHERE race_id IN (${placeholders})`, raceIds);
 
-  entry.details = `[2/2] 予想を再生成中: ${races.length}レース`;
+  entry.details = `[3/3] 予想を再生成中: ${races.length}レース`;
   for (const race of races) {
     try {
       const raceData = await getRaceById(race.id);
@@ -755,7 +770,10 @@ async function syncRegeneratePredictions(entry: SyncLogEntry, date?: string): Pr
     }
   }
 
-  entry.details = `予想再生成完了: ${targetDate} - ${entry.stats.predictionsGenerated}件生成`;
+  const biasApplied = biasStatus.some(s => !s.includes('不足'));
+  entry.details = biasApplied
+    ? `予想再生成完了: ${targetDate} - ${entry.stats.predictionsGenerated}件生成【バイアス適用: ${biasStatus.join(' / ')}】`
+    : `予想再生成完了: ${targetDate} - ${entry.stats.predictionsGenerated}件生成【バイアス未適用: 結果確定レース不足のため前回と同じ予想】`;
 }
 
 // ==================== Type import for Race (used in upsertRace grade cast) ====================
