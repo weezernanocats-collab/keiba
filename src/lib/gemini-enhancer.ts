@@ -169,6 +169,7 @@ function mergeEnhancedOutput(
 
 // 使用するモデルの優先順位（quota超過時にフォールバック）
 const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-flash-latest'];
+const GEMINI_TIMEOUT_MS = 25_000; // 25秒タイムアウト（Vercel 60秒制限対応）
 
 export async function enhancePredictionWithGemini(
   prediction: Prediction,
@@ -181,15 +182,20 @@ export async function enhancePredictionWithGemini(
 
   for (const model of GEMINI_MODELS) {
     try {
-      const response = await client.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.7,
-          maxOutputTokens: 8192,
-        },
-      });
+      const response = await Promise.race([
+        client.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            temperature: 0.7,
+            maxOutputTokens: 8192,
+          },
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Gemini timeout')), GEMINI_TIMEOUT_MS)
+        ),
+      ]);
 
       const rawText = response.text ?? '';
       if (!rawText) continue;
