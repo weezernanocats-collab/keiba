@@ -267,10 +267,14 @@ export default function AdminPage() {
 
       {/* ==================== バルクインポート ==================== */}
       <div className="bg-card-bg border-2 border-primary/40 rounded-xl p-4">
-        <h3 className="font-bold mb-2 text-lg">バルクインポート（実データ一括取り込み）</h3>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="px-2 py-0.5 rounded text-xs font-medium bg-yellow-900/40 text-yellow-300">初回 / リセット時</span>
+          <h3 className="font-bold text-lg">バルクインポート（実データ一括取り込み）</h3>
+        </div>
         <p className="text-sm text-muted mb-4">
           netkeiba.com から指定期間のレース・馬・過去成績を一括で取り込みます。
-          数百〜数千頭の実データを投入し、種牡馬統計やコース統計を有効にします。
+          <span className="text-yellow-300">初回セットアップ時</span>や、DBをリセットした後に実行してください。
+          日常運用ではCronが毎日自動取得するため不要です。
         </p>
 
         {/* 期間プリセット */}
@@ -449,131 +453,133 @@ export default function AdminPage() {
         )}
       </div>
 
-      {/* ==================== 個別同期アクション ==================== */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Full Sync */}
-        <div className="bg-card-bg border border-card-border rounded-xl p-4">
-          <h3 className="font-bold mb-2">フル同期（1日分）</h3>
-          <p className="text-sm text-muted mb-3">
-            指定日のレース一覧、出馬表、オッズ、馬詳細、AI予想を一括取得します。
-          </p>
-          <div className="flex gap-2">
-            <input
-              type="date"
-              value={syncDate}
-              onChange={e => setSyncDate(e.target.value)}
-              className="flex-1 px-3 py-2 text-sm border border-card-border rounded-lg bg-gray-800 text-white"
-            />
-            <button
-              onClick={() => triggerSync('full', { date: syncDate })}
-              disabled={loading}
-              className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-500 disabled:opacity-50 transition-colors"
-            >
-              実行
-            </button>
-          </div>
+      {/* ==================== 自動化ステータス ==================== */}
+      <div className="bg-card-bg border border-green-700/40 rounded-xl p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-900/40 text-green-300">自動</span>
+          <h3 className="font-bold text-lg">自動データ更新</h3>
         </div>
-
-        {/* Regenerate Predictions */}
-        <div className="bg-card-bg border border-card-border rounded-xl p-4">
-          <h3 className="font-bold mb-2">予想再生成（バイアス反映）</h3>
-          <p className="text-sm text-muted mb-3">
-            当日の完走レースから馬場バイアスを分析し、全レースの予想を再生成します。午後のメインレース前に実行すると効果的です。
-          </p>
-          <div className="flex gap-2">
-            <input
-              type="date"
-              value={syncDate}
-              onChange={e => setSyncDate(e.target.value)}
-              className="flex-1 px-3 py-2 text-sm border border-card-border rounded-lg bg-gray-800 text-white"
-            />
-            <button
-              onClick={() => triggerSync('regenerate_predictions', { date: syncDate })}
-              disabled={loading}
-              className="px-4 py-2 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-500 disabled:opacity-50 transition-colors"
-            >
-              再生成
-            </button>
+        <p className="text-sm text-muted mb-4">
+          以下の処理はVercel CronとGitHub Actionsで自動実行されます。操作不要です。
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="bg-gray-800/50 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-green-400 text-sm">&#x2713;</span>
+              <span className="text-sm font-medium">毎朝 09:00 (JST)</span>
+            </div>
+            <p className="text-xs text-muted">レース一覧 / 出馬表 / 馬情報 / オッズ / AI予想を自動取得</p>
           </div>
-        </div>
-
-        {/* Race List */}
-        <div className="bg-card-bg border border-card-border rounded-xl p-4">
-          <h3 className="font-bold mb-2">レース一覧取得</h3>
-          <p className="text-sm text-muted mb-3">
-            指定日のレース一覧のみを取得します。
-          </p>
-          <div className="flex gap-2">
-            <input
-              type="date"
-              value={syncDate}
-              onChange={e => setSyncDate(e.target.value)}
-              className="flex-1 px-3 py-2 text-sm border border-card-border rounded-lg bg-gray-800 text-white"
-            />
-            <button
-              onClick={() => triggerSync('races', { date: syncDate })}
-              disabled={loading}
-              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-50 transition-colors"
-            >
-              実行
-            </button>
+          <div className="bg-gray-800/50 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-green-400 text-sm">&#x2713;</span>
+              <span className="text-sm font-medium">毎夕 17:00 (JST)</span>
+            </div>
+            <p className="text-xs text-muted">レース結果を自動取得 / 的中率を自動照合</p>
           </div>
-        </div>
-
-        {/* Race Detail */}
-        <div className="bg-card-bg border border-card-border rounded-xl p-4">
-          <h3 className="font-bold mb-2">出馬表取得</h3>
-          <p className="text-sm text-muted mb-3">
-            指定レースIDの出馬表を取得します。
-          </p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={syncRaceId}
-              onChange={e => setSyncRaceId(e.target.value)}
-              className="flex-1 px-3 py-2 text-sm border border-card-border rounded-lg bg-gray-800 text-white"
-              placeholder="レースID"
-            />
-            <button
-              onClick={() => triggerSync('race_detail', { raceId: syncRaceId })}
-              disabled={loading || !syncRaceId}
-              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-50 transition-colors"
-            >
-              実行
-            </button>
+          <div className="bg-gray-800/50 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-green-400 text-sm">&#x2713;</span>
+              <span className="text-sm font-medium">毎週月曜 12:00 (JST)</span>
+            </div>
+            <p className="text-xs text-muted">XGBoost MLモデルを自動再学習 (GitHub Actions)</p>
           </div>
-        </div>
-
-        {/* Horse Detail */}
-        <div className="bg-card-bg border border-card-border rounded-xl p-4">
-          <h3 className="font-bold mb-2">馬詳細取得</h3>
-          <p className="text-sm text-muted mb-3">
-            指定馬IDの詳細と過去成績を取得します。
-          </p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={syncHorseId}
-              onChange={e => setSyncHorseId(e.target.value)}
-              className="flex-1 px-3 py-2 text-sm border border-card-border rounded-lg bg-gray-800 text-white"
-              placeholder="馬ID"
-            />
-            <button
-              onClick={() => triggerSync('horse', { horseId: syncHorseId })}
-              disabled={loading || !syncHorseId}
-              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-50 transition-colors"
-            >
-              実行
-            </button>
+          <div className="bg-gray-800/50 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-blue-400 text-sm">i</span>
+              <span className="text-sm font-medium">Gemini AI解説</span>
+            </div>
+            <p className="text-xs text-muted">予想生成時にGemini APIで自動テキスト強化（GEMINI_API_KEY設定時）</p>
           </div>
         </div>
       </div>
 
-      {/* ==================== 自動スケジューラー ==================== */}
-      <SchedulerPanel headers={headers} />
+      {/* ==================== 必要に応じて実行 ==================== */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <span className="px-2 py-0.5 rounded text-xs font-medium bg-orange-900/40 text-orange-300">手動</span>
+          <h3 className="font-bold text-lg">必要に応じて実行</h3>
+        </div>
+        <p className="text-sm text-muted mb-4">
+          特定の状況で手動実行が必要な操作です。各項目の説明を確認してください。
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Regenerate Predictions */}
+          <div className="bg-card-bg border border-card-border rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="font-bold">予想再生成（バイアス反映）</h3>
+            </div>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-900/30 text-orange-300">レース当日に使う</span>
+            </div>
+            <p className="text-sm text-muted mb-3">
+              午前のレース結果を取得し、馬場バイアスを分析して午後のレース予想を再生成します。
+              <span className="text-orange-300"> レース当日の13時頃</span>に実行すると効果的です。
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="date"
+                value={syncDate}
+                onChange={e => setSyncDate(e.target.value)}
+                className="flex-1 px-3 py-2 text-sm border border-card-border rounded-lg bg-gray-800 text-white"
+              />
+              <button
+                onClick={() => triggerSync('regenerate_predictions', { date: syncDate })}
+                disabled={loading}
+                className="px-4 py-2 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-500 disabled:opacity-50 transition-colors"
+              >
+                再生成
+              </button>
+            </div>
+          </div>
+
+          {/* Full Sync */}
+          <div className="bg-card-bg border border-card-border rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="font-bold">フル同期（1日分）</h3>
+            </div>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-900/30 text-blue-300">Cronが動かなかった時に</span>
+            </div>
+            <p className="text-sm text-muted mb-3">
+              指定日のレース一覧、出馬表、オッズ、馬詳細、AI予想を一括取得します。
+              通常はCronが自動実行するため、<span className="text-blue-300">Cronが失敗した場合や過去日のデータが欲しい時</span>に使います。
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="date"
+                value={syncDate}
+                onChange={e => setSyncDate(e.target.value)}
+                className="flex-1 px-3 py-2 text-sm border border-card-border rounded-lg bg-gray-800 text-white"
+              />
+              <button
+                onClick={() => triggerSync('full', { date: syncDate })}
+                disabled={loading}
+                className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-500 disabled:opacity-50 transition-colors"
+              >
+                実行
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* ==================== 的中率ダッシュボード ==================== */}
       <AccuracyPanel headers={headers} triggerSync={triggerSync} />
+
+      {/* ==================== 上級者向け：個別操作 ==================== */}
+      <AdvancedPanel
+        syncDate={syncDate}
+        setSyncDate={setSyncDate}
+        syncRaceId={syncRaceId}
+        setSyncRaceId={setSyncRaceId}
+        syncHorseId={syncHorseId}
+        setSyncHorseId={setSyncHorseId}
+        triggerSync={triggerSync}
+        loading={loading}
+        headers={headers}
+      />
 
       {/* Sync Status */}
       {status && (
@@ -629,25 +635,23 @@ export default function AdminPage() {
   );
 }
 
-// ==================== スケジューラーパネル ====================
+// ==================== 上級者向けパネル ====================
 
-interface SchedulerStatus {
-  isRunning: boolean;
-  config: { morningFetchTime: string; oddsFetchTime: string; resultFetchTime: string; nightFetchTime: string };
-  lastRun: string | null;
-  nextScheduled: string | null;
-  recentLogs: { timestamp: string; action: string; detail: string; success: boolean }[];
-}
-
-function SchedulerPanel({ headers }: { headers: () => Record<string, string> }) {
-  const [sched, setSched] = useState<SchedulerStatus | null>(null);
-
-  const fetchScheduler = useCallback(async () => {
-    try {
-      const res = await fetch('/api/scheduler', { headers: headers() });
-      if (res.ok) setSched(await res.json());
-    } catch { /* ignore */ }
-  }, [headers]);
+function AdvancedPanel({
+  syncDate, setSyncDate, syncRaceId, setSyncRaceId, syncHorseId, setSyncHorseId,
+  triggerSync, loading, headers,
+}: {
+  syncDate: string;
+  setSyncDate: (v: string) => void;
+  syncRaceId: string;
+  setSyncRaceId: (v: string) => void;
+  syncHorseId: string;
+  setSyncHorseId: (v: string) => void;
+  triggerSync: (type: string, extra?: Record<string, string | boolean>) => Promise<void>;
+  loading: boolean;
+  headers: () => Record<string, string>;
+}) {
+  const [expanded, setExpanded] = useState(false);
 
   const schedAction = useCallback(async (action: string, extra?: Record<string, unknown>) => {
     try {
@@ -655,74 +659,110 @@ function SchedulerPanel({ headers }: { headers: () => Record<string, string> }) 
         method: 'POST', headers: headers(),
         body: JSON.stringify({ action, ...extra }),
       });
-      setTimeout(fetchScheduler, 1000);
     } catch { /* ignore */ }
-  }, [headers, fetchScheduler]);
+  }, [headers]);
 
   return (
     <div className="bg-card-bg border border-card-border rounded-xl p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-bold text-lg">自動データ更新スケジューラー</h3>
-        <button onClick={fetchScheduler} className="px-3 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors">
-          状態取得
-        </button>
-      </div>
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="flex items-center justify-between w-full"
+      >
+        <div className="flex items-center gap-2">
+          <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-700 text-gray-400">上級者向け</span>
+          <h3 className="font-bold text-lg">個別操作・デバッグ</h3>
+        </div>
+        <span className="text-muted text-sm">{expanded ? '▲ 閉じる' : '▼ 開く'}</span>
+      </button>
+      <p className="text-sm text-muted mt-1">
+        通常は使う必要のない個別データ取得操作です。デバッグやデータ修復時に使います。
+      </p>
 
-      {!sched ? (
-        <p className="text-sm text-muted">「状態取得」をクリックしてスケジューラーの状態を確認</p>
-      ) : (
-        <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <span className={`px-2 py-1 rounded text-xs font-medium ${sched.isRunning ? 'bg-green-900/40 text-green-300' : 'bg-gray-700 text-gray-400'}`}>
-              {sched.isRunning ? '稼働中' : '停止中'}
-            </span>
-            {sched.nextScheduled && (
-              <span className="text-xs text-muted">次回: {sched.nextScheduled}</span>
-            )}
-            {sched.lastRun && (
-              <span className="text-xs text-muted">最終: {sched.lastRun}</span>
-            )}
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {!sched.isRunning ? (
-              <button onClick={() => schedAction('start')} className="px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-500 transition-colors">
-                スケジューラー開始
+      {expanded && (
+        <div className="mt-4 space-y-4">
+          {/* 手動ジョブ実行 */}
+          <div className="bg-gray-800/30 rounded-lg p-3">
+            <h4 className="text-sm font-medium mb-2">Cronジョブを手動実行</h4>
+            <p className="text-xs text-muted mb-3">Cronが失敗した場合や、今すぐ実行したい場合に個別のジョブを手動で実行できます。</p>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => schedAction('run_job', { job: 'morning' })} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors">
+                朝取得（レース+出馬表+予想）
               </button>
-            ) : (
-              <button onClick={() => schedAction('stop')} className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors">
-                停止
+              <button onClick={() => schedAction('run_job', { job: 'odds' })} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors">
+                オッズ取得
               </button>
-            )}
-            <button onClick={() => schedAction('run_job', { job: 'morning' })} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors">
-              今すぐ朝取得
-            </button>
-            <button onClick={() => schedAction('run_job', { job: 'odds' })} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors">
-              今すぐオッズ
-            </button>
-            <button onClick={() => schedAction('run_job', { job: 'results' })} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors">
-              今すぐ結果
-            </button>
-          </div>
-
-          <p className="text-xs text-muted">
-            スケジュール: 朝{sched.config.morningFetchTime} / オッズ{sched.config.oddsFetchTime} / 結果{sched.config.resultFetchTime} / 翌日分{sched.config.nightFetchTime}
-          </p>
-
-          {sched.recentLogs.length > 0 && (
-            <div className="max-h-40 overflow-y-auto space-y-1">
-              {sched.recentLogs.slice(0, 10).map((log, i) => (
-                <div key={i} className="flex items-start gap-2 text-xs">
-                  <span className={log.success ? 'text-green-400' : 'text-red-400'}>
-                    {log.success ? '[OK]' : '[NG]'}
-                  </span>
-                  <span className="text-muted">{log.timestamp.slice(11, 19)}</span>
-                  <span className="font-medium">{log.action}</span>
-                  <span className="text-muted truncate">{log.detail}</span>
-                </div>
-              ))}
+              <button onClick={() => schedAction('run_job', { job: 'results' })} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors">
+                結果取得
+              </button>
             </div>
-          )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Race List */}
+            <div className="bg-gray-800/30 rounded-lg p-3">
+              <h4 className="text-sm font-medium mb-1">レース一覧取得</h4>
+              <p className="text-xs text-muted mb-2">指定日のレース一覧のみを取得します。</p>
+              <div className="flex gap-2">
+                <input
+                  type="date"
+                  value={syncDate}
+                  onChange={e => setSyncDate(e.target.value)}
+                  className="flex-1 px-3 py-2 text-sm border border-card-border rounded-lg bg-gray-800 text-white"
+                />
+                <button
+                  onClick={() => triggerSync('races', { date: syncDate })}
+                  disabled={loading}
+                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-50 transition-colors"
+                >
+                  実行
+                </button>
+              </div>
+            </div>
+
+            {/* Race Detail */}
+            <div className="bg-gray-800/30 rounded-lg p-3">
+              <h4 className="text-sm font-medium mb-1">出馬表取得</h4>
+              <p className="text-xs text-muted mb-2">指定レースIDの出馬表を取得します。</p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={syncRaceId}
+                  onChange={e => setSyncRaceId(e.target.value)}
+                  className="flex-1 px-3 py-2 text-sm border border-card-border rounded-lg bg-gray-800 text-white"
+                  placeholder="レースID"
+                />
+                <button
+                  onClick={() => triggerSync('race_detail', { raceId: syncRaceId })}
+                  disabled={loading || !syncRaceId}
+                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-50 transition-colors"
+                >
+                  実行
+                </button>
+              </div>
+            </div>
+
+            {/* Horse Detail */}
+            <div className="bg-gray-800/30 rounded-lg p-3">
+              <h4 className="text-sm font-medium mb-1">馬詳細取得</h4>
+              <p className="text-xs text-muted mb-2">指定馬IDの詳細と過去成績を取得します。</p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={syncHorseId}
+                  onChange={e => setSyncHorseId(e.target.value)}
+                  className="flex-1 px-3 py-2 text-sm border border-card-border rounded-lg bg-gray-800 text-white"
+                  placeholder="馬ID"
+                />
+                <button
+                  onClick={() => triggerSync('horse', { horseId: syncHorseId })}
+                  disabled={loading || !syncHorseId}
+                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-50 transition-colors"
+                >
+                  実行
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -782,23 +822,38 @@ function AccuracyPanel({ headers, triggerSync }: {
 
   return (
     <div className="bg-card-bg border border-card-border rounded-xl p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-bold text-lg">予想的中率ダッシュボード</h3>
-        <div className="flex gap-2">
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-900/40 text-purple-300">分析</span>
+          <h3 className="font-bold text-lg">予想的中率ダッシュボード</h3>
+        </div>
+      </div>
+      <p className="text-sm text-muted mb-3">
+        AIの予想精度を確認できます。結果照合はCronで自動実行されますが、手動でも実行できます。
+      </p>
+      <div className="flex flex-wrap gap-2 mb-4">
+        <div className="flex items-center gap-1">
+          <button onClick={fetchAccuracy} className="px-3 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors">
+            統計表示
+          </button>
+          <span className="text-[10px] text-muted">現在の統計を読み込む</span>
+        </div>
+        <div className="flex items-center gap-1">
           <button onClick={() => triggerSync('evaluate_all')} className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-500 transition-colors">
             一括照合
           </button>
+          <span className="text-[10px] text-muted">結果未照合の予想を一括で照合</span>
+        </div>
+        <div className="flex items-center gap-1">
           <button onClick={runCalibration} className="px-3 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-500 transition-colors">
             ウェイト校正
           </button>
-          <button onClick={fetchAccuracy} className="px-3 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors">
-            統計更新
-          </button>
+          <span className="text-[10px] text-muted">照合データから最適ウェイトを分析</span>
         </div>
       </div>
 
       {!acc ? (
-        <p className="text-sm text-muted">「統計更新」をクリックして的中率統計を取得</p>
+        <p className="text-sm text-muted">「統計表示」をクリックして的中率統計を読み込みます</p>
       ) : acc.totalEvaluated === 0 ? (
         <p className="text-sm text-muted">照合済みレースがありません。結果が確定したレースがあれば「一括照合」を実行してください。</p>
       ) : (
