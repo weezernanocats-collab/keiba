@@ -855,7 +855,9 @@ async function processChunkPhase(
             }
             state.stats.resultsScraped++;
           }
-          await upsertRace({ id: race.id, status: '結果確定' });
+          if (results.length > 0) {
+            await upsertRace({ id: race.id, status: '結果確定' });
+          }
         } catch (error) {
           addError(`結果取得失敗 (${race.id}): ${errMsg(error)}`);
           // スクレイプ失敗時は結果確定にしない（リトライ可能にする）
