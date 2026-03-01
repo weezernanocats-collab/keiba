@@ -103,9 +103,9 @@ async function main() {
             config: { startDate: today, endDate: today, clearExisting: false },
             remainingDates: [],
             totalDates: 1,
-            stats: { ...state.stats },
-            errors: state.errors as string[],
-            startedAt: state.startedAt,
+            stats: { ...(state.stats as Record<string, number>) },
+            errors: (state.errors as string[]).slice(),
+            startedAt: state.startedAt as string,
             phaseLabel: 'AI予想生成',
             phaseRemaining: 0,
           };
