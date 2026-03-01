@@ -167,38 +167,42 @@ function mergeEnhancedOutput(
 
 // ==================== Main export ====================
 
+// 使用するモデルの優先順位（quota超過時にフォールバック）
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-flash-latest'];
+
 export async function enhancePredictionWithGemini(
   prediction: Prediction,
   ctx: GeminiRaceContext,
 ): Promise<Prediction> {
   const client = getGenAI();
-  if (!client) {
-    return { ...prediction, summary: prediction.summary + '\n[GEMINI: NO_KEY]' };
-  }
+  if (!client) return prediction;
 
-  try {
-    const prompt = buildPrompt(prediction, ctx);
+  const prompt = buildPrompt(prediction, ctx);
 
-    const response = await client.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        temperature: 0.7,
-        maxOutputTokens: 4096,
-      },
-    });
+  for (const model of GEMINI_MODELS) {
+    try {
+      const response = await client.models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          temperature: 0.7,
+          maxOutputTokens: 8192,
+        },
+      });
 
-    const rawText = response.text ?? '';
-    if (!rawText) {
-      return { ...prediction, summary: prediction.summary + '\n[GEMINI: EMPTY_RESPONSE]' };
+      const rawText = response.text ?? '';
+      if (!rawText) continue;
+
+      const enhanced = JSON.parse(rawText) as GeminiEnhancedOutput;
+      return mergeEnhancedOutput(prediction, enhanced);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      const isQuotaError = msg.includes('RESOURCE_EXHAUSTED') || msg.includes('429');
+      console.error(`[gemini-enhancer] ${model} failed: ${msg.substring(0, 100)}`);
+      if (!isQuotaError) break; // quota以外のエラーは次のモデルも同じ結果になるので中断
     }
-
-    const enhanced = JSON.parse(rawText) as GeminiEnhancedOutput;
-    return mergeEnhancedOutput(prediction, enhanced);
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error(`[gemini-enhancer] FAILED: ${msg}`);
-    return { ...prediction, summary: prediction.summary + `\n[GEMINI_ERR: ${msg.substring(0, 150)}]` };
   }
+
+  return prediction;
 }
