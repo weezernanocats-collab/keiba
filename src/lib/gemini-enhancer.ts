@@ -172,7 +172,9 @@ export async function enhancePredictionWithGemini(
   ctx: GeminiRaceContext,
 ): Promise<Prediction> {
   const client = getGenAI();
-  if (!client) return prediction;
+  if (!client) {
+    return { ...prediction, summary: prediction.summary + '\n[GEMINI: NO_KEY]' };
+  }
 
   try {
     const prompt = buildPrompt(prediction, ctx);
@@ -188,12 +190,15 @@ export async function enhancePredictionWithGemini(
     });
 
     const rawText = response.text ?? '';
-    const enhanced = JSON.parse(rawText) as GeminiEnhancedOutput;
+    if (!rawText) {
+      return { ...prediction, summary: prediction.summary + '\n[GEMINI: EMPTY_RESPONSE]' };
+    }
 
+    const enhanced = JSON.parse(rawText) as GeminiEnhancedOutput;
     return mergeEnhancedOutput(prediction, enhanced);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error(`[gemini-enhancer] FAILED: ${msg}`);
-    return prediction;
+    return { ...prediction, summary: prediction.summary + `\n[GEMINI_ERR: ${msg.substring(0, 150)}]` };
   }
 }
