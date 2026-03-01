@@ -141,11 +141,13 @@ export async function scrapeRaceCard(raceId: string): Promise<ScrapedRaceDetail>
   const weatherMatch = raceInfo.match(/(晴|曇|小雨|雨|小雪|雪)/);
   const timeMatch = raceInfo.match(/(\d{1,2}:\d{2})/);
 
+  // Grade detection: netkeiba uses CSS classes (Icon_GradeType1=G1, etc.) or text
   const gradeText = $('span.RaceGrade, span.Icon_GradeType').text().trim();
+  const gradeClasses = $('span.Icon_GradeType').map((_, el) => $(el).attr('class') || '').get().join(' ');
   let grade: string | undefined;
-  if (gradeText.includes('G1') || gradeText.includes('Ｇ１')) grade = 'G1';
-  else if (gradeText.includes('G2') || gradeText.includes('Ｇ２')) grade = 'G2';
-  else if (gradeText.includes('G3') || gradeText.includes('Ｇ３')) grade = 'G3';
+  if (gradeText.includes('G1') || gradeText.includes('Ｇ１') || gradeClasses.includes('Icon_GradeType1 ') || gradeClasses.endsWith('Icon_GradeType1')) grade = 'G1';
+  else if (gradeText.includes('G2') || gradeText.includes('Ｇ２') || gradeClasses.includes('Icon_GradeType2')) grade = 'G2';
+  else if (gradeText.includes('G3') || gradeText.includes('Ｇ３') || gradeClasses.includes('Icon_GradeType3')) grade = 'G3';
 
   // 出走馬
   const entries: ScrapedEntry[] = [];
