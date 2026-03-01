@@ -699,10 +699,11 @@ async function syncRegeneratePredictions(entry: SyncLogEntry, date?: string): Pr
   // 校正済み重みがあれば適用
   await ensureCalibrationLoaded();
 
-  // 対象レースを取得
-  const races = await dbAll<{ id: string; name: string; track_type: string; distance: number; track_condition: string; racecourse_name: string; grade: string }>(
-    `SELECT id, name, track_type, distance, track_condition, racecourse_name, grade
-     FROM races WHERE date = ? AND status IN ('出走確定', '結果確定')`,
+  // 対象レースを取得（出走確定 = まだ結果未取得のものも含む）
+  const races = await dbAll<{ id: string; name: string; status: string; track_type: string; distance: number; track_condition: string; racecourse_name: string; grade: string }>(
+    `SELECT id, name, status, track_type, distance, track_condition, racecourse_name, grade
+     FROM races WHERE date = ? AND status IN ('出走確定', '結果確定')
+     ORDER BY racecourse_name, id`,
     [targetDate],
   );
 
@@ -711,7 +712,42 @@ async function syncRegeneratePredictions(entry: SyncLogEntry, date?: string): Pr
     return;
   }
 
-  // 競馬場ごとのバイアス状況を事前チェック
+  // Step 1: 未確定レースの結果を取得
+  const pendingRaces = races.filter(r => r.status === '出走確定');
+  let resultsFetched = 0;
+  if (pendingRaces.length > 0) {
+    entry.details = `[1/4] 結果取得中: ${pendingRaces.length}レース`;
+    for (const race of pendingRaces) {
+      try {
+        const results = await scrapeRaceResult(race.id);
+        if (results.length > 0) {
+          for (const r of results) {
+            await upsertRaceEntry(race.id, {
+              horseNumber: r.horseNumber,
+              horseName: r.horseName,
+              result: {
+                position: r.position,
+                time: r.time,
+                margin: r.margin,
+                lastThreeFurlongs: r.lastThreeFurlongs,
+                cornerPositions: r.cornerPositions,
+              },
+            });
+          }
+          await upsertRace({ id: race.id, status: '結果確定' });
+          entry.stats.resultsScraped += results.length;
+          resultsFetched++;
+        }
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        entry.errors.push(`結果取得失敗 (${race.id} ${race.name}): ${errMsg}`);
+      }
+      await sleep(RATE_LIMIT_MS);
+    }
+  }
+  entry.details = `[1/4] 結果取得完了: ${resultsFetched}レース確定`;
+
+  // Step 2: バイアス状況を確認
   const racecourses = [...new Set(races.map(r => r.racecourse_name))];
   const biasStatus: string[] = [];
   for (const rc of racecourses) {
@@ -722,15 +758,16 @@ async function syncRegeneratePredictions(entry: SyncLogEntry, date?: string): Pr
       biasStatus.push(`${rc}: バイアスデータ不足（結果確定3R未満）`);
     }
   }
+  entry.details = `[2/4] バイアス確認: ${biasStatus.join(' / ')}`;
 
-  entry.details = `[1/3] バイアス確認: ${biasStatus.join(' / ')}`;
-
-  entry.details = `[2/3] 既存予想を削除中: ${races.length}レース`;
+  // Step 3: 既存予想を削除
+  entry.details = `[3/4] 既存予想を削除中: ${races.length}レース`;
   const raceIds = races.map(r => r.id);
   const placeholders = raceIds.map(() => '?').join(',');
   await dbRun(`DELETE FROM predictions WHERE race_id IN (${placeholders})`, raceIds);
 
-  entry.details = `[3/3] 予想を再生成中: ${races.length}レース`;
+  // Step 4: 予想を再生成
+  entry.details = `[4/4] 予想を再生成中: ${races.length}レース`;
   for (const race of races) {
     try {
       const raceData = await getRaceById(race.id);
@@ -771,9 +808,10 @@ async function syncRegeneratePredictions(entry: SyncLogEntry, date?: string): Pr
   }
 
   const biasApplied = biasStatus.some(s => !s.includes('不足'));
+  const resultsSummary = resultsFetched > 0 ? `結果${resultsFetched}R取得、` : '';
   entry.details = biasApplied
-    ? `予想再生成完了: ${targetDate} - ${entry.stats.predictionsGenerated}件生成【バイアス適用: ${biasStatus.join(' / ')}】`
-    : `予想再生成完了: ${targetDate} - ${entry.stats.predictionsGenerated}件生成【バイアス未適用: 結果確定レース不足のため前回と同じ予想】`;
+    ? `予想再生成完了: ${targetDate} - ${resultsSummary}${entry.stats.predictionsGenerated}件生成【バイアス適用: ${biasStatus.join(' / ')}】`
+    : `予想再生成完了: ${targetDate} - ${resultsSummary}${entry.stats.predictionsGenerated}件生成【バイアス未適用: 結果確定3R未満】`;
 }
 
 // ==================== Type import for Race (used in upsertRace grade cast) ====================
