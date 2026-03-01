@@ -267,6 +267,10 @@ export async function scrapeRaceResult(raceId: string): Promise<ScrapedResult[]>
 
   const results: ScrapedResult[] = [];
 
+  // RaceTable01 列マッピング (2026年時点):
+  // [0]着順 [1]枠 [2]馬番 [3]馬名 [4]性齢 [5]斤量 [6]騎手
+  // [7]タイム [8]着差 [9]人気 [10]単勝オッズ [11]後3F
+  // [12]コーナー通過順 [13]厩舎 [14]馬体重(増減)
   $('table.RaceTable01 tbody tr').each((_, tr) => {
     const tds = $(tr).find('td');
     if (tds.length < 12) return;
@@ -277,7 +281,7 @@ export async function scrapeRaceResult(raceId: string): Promise<ScrapedResult[]>
     const time = $(tds[7]).text().trim();
     const margin = $(tds[8]).text().trim();
     const lastThreeFurlongs = $(tds[11]).text().trim();
-    const cornerPositions = $(tds[10]).text().trim();
+    const cornerPositions = $(tds[12]).text().trim();
 
     if (position > 0) {
       results.push({
@@ -325,25 +329,31 @@ export async function scrapeHorseDetail(horseId: string): Promise<ScrapedHorseDe
       const tds = $r(tr).find('td');
       if (tds.length < 20) return;
 
+      // netkeiba db_h_race_results テーブルの列マッピング (2026年時点):
+      // [0]日付 [1]開催 [2]天気 [3]R [4]レース名 [5]映像 [6]頭数 [7]枠番
+      // [8]馬番 [9]オッズ [10]人気 [11]着順 [12]騎手 [13]斤量 [14]距離
+      // [15]水分量 [16]馬場 [17]馬場指数 [18]タイム [19]着差
+      // [20]タイム指数 [21]通過 [22]ペース [23]上り [24]馬体重
+      // [25]厩舎コメント [26]備考 [27]勝ち馬 [28]賞金
       const date = $r(tds[0]).find('a').text().trim();
       const racecourseName = $r(tds[1]).text().trim();
       const raceName = $r(tds[4]).find('a').text().trim();
-      const entries = parseInt($r(tds[7]).text().trim()) || 0;
-      const postPosition = parseInt($r(tds[8]).text().trim()) || 0;
-      const horseNumber = parseInt($r(tds[9]).text().trim()) || 0;
-      const odds = parseFloat($r(tds[10]).text().trim()) || 0;
-      const popularity = parseInt($r(tds[11]).text().trim()) || 0;
-      const position = parseInt($r(tds[12]).text().trim()) || 99;
-      const jockeyName = $r(tds[13]).find('a').text().trim();
-      const handicapWeight = parseFloat($r(tds[14]).text().trim()) || 0;
-      const distText = $r(tds[15]).text().trim();
+      const entries = parseInt($r(tds[6]).text().trim()) || 0;
+      const postPosition = parseInt($r(tds[7]).text().trim()) || 0;
+      const horseNumber = parseInt($r(tds[8]).text().trim()) || 0;
+      const odds = parseFloat($r(tds[9]).text().trim()) || 0;
+      const popularity = parseInt($r(tds[10]).text().trim()) || 0;
+      const position = parseInt($r(tds[11]).text().trim()) || 99;
+      const jockeyName = $r(tds[12]).find('a').text().trim();
+      const handicapWeight = parseFloat($r(tds[13]).text().trim()) || 0;
+      const distText = $r(tds[14]).text().trim();
       const trackMatch = distText.match(/(芝|ダート|ダ|障害|障)(\d+)/);
       const condText = $r(tds[16]).text().trim();
-      const time = $r(tds[17]).text().trim();
-      const margin = $r(tds[18]).text().trim();
-      const lastThreeFurlongs = $r(tds[22]).text().trim();
+      const time = $r(tds[18]).text().trim();
+      const margin = $r(tds[19]).text().trim();
       const cornerPositions = $r(tds[21]).text().trim();
-      const weightText = $r(tds[23]).text().trim();
+      const lastThreeFurlongs = $r(tds[23]).text().trim();
+      const weightText = $r(tds[24]).text().trim();
       const weightMatch = weightText.match(/(\d+)\(([+-]?\d+)\)/);
 
       if (date) {

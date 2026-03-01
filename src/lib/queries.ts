@@ -570,11 +570,12 @@ export async function getJockeyStats(jockeyId: string): Promise<{ winRate: numbe
   }
 
   // jockeys テーブルに登録がない場合は race_entries + races から計算
+  // place_rate = 連対率（2着以内）: calcJockeyScore の係数と整合させる
   const stats = await dbGet<{ total: number; wins: number; places: number }>(`
     SELECT
       COUNT(*) as total,
       SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins,
-      SUM(CASE WHEN e.result_position <= 3 THEN 1 ELSE 0 END) as places
+      SUM(CASE WHEN e.result_position <= 2 THEN 1 ELSE 0 END) as places
     FROM race_entries e
     JOIN races r ON e.race_id = r.id
     WHERE e.jockey_id = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL

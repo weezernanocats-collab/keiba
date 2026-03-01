@@ -605,13 +605,17 @@ function detectRunningStyle(pp: PastPerformance[]): RunningStyle {
     if (corners.length === 0) continue;
 
     const firstCorner = corners[0];
-    const entries = perf.entries || 16;
-    const ratio = firstCorner / entries;
 
-    if (ratio <= 0.10) escapeCount++;
-    else if (ratio <= 0.30) frontCount++;
-    else if (ratio <= 0.60) stalkerCount++;
-    else closerCount++;
+    // entries フィールドが不正（枠番が入っている場合がある）のため、
+    // コーナー通過順の最大値からフィールドサイズを推定
+    const maxCorner = Math.max(...corners);
+    const estimatedFieldSize = Math.max(maxCorner + 2, perf.entries || 0, 8);
+    const ratio = firstCorner / estimatedFieldSize;
+
+    if (ratio <= 0.15) escapeCount++;       // 先頭〜15% = 逃げ
+    else if (ratio <= 0.35) frontCount++;   // 〜35% = 先行
+    else if (ratio <= 0.65) stalkerCount++; // 〜65% = 差し
+    else closerCount++;                     // 後方   = 追込
   }
 
   const total = escapeCount + frontCount + stalkerCount + closerCount;

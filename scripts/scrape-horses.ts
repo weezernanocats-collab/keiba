@@ -133,29 +133,35 @@ async function scrapeHorse(horseId: string): Promise<HorseData | null> {
       const tds = $r(tr).find('td');
       if (tds.length < 20) return;
 
+      // netkeiba db_h_race_results テーブルの列マッピング (2026年時点):
+      // [0]日付 [1]開催 [2]天気 [3]R [4]レース名 [5]映像 [6]頭数 [7]枠番
+      // [8]馬番 [9]オッズ [10]人気 [11]着順 [12]騎手 [13]斤量 [14]距離
+      // [15]水分量 [16]馬場 [17]馬場指数 [18]タイム [19]着差
+      // [20]タイム指数 [21]通過 [22]ペース [23]上り [24]馬体重
+      // [25]厩舎コメント [26]備考 [27]勝ち馬 [28]賞金
       const date = $r(tds[0]).find('a').text().trim();
       if (!date) return;
 
       const racecourseName = $r(tds[1]).text().trim();
       const raceName = $r(tds[4]).find('a').text().trim();
-      const entries = parseInt($r(tds[7]).text().trim()) || 0;
-      const postPosition = parseInt($r(tds[8]).text().trim()) || 0;
-      const horseNumber = parseInt($r(tds[9]).text().trim()) || 0;
-      const odds = parseFloat($r(tds[10]).text().trim()) || 0;
-      const popularity = parseInt($r(tds[11]).text().trim()) || 0;
-      const position = parseInt($r(tds[12]).text().trim()) || 99;
-      const jockeyName = $r(tds[13]).find('a').text().trim();
-      const handicapWeight = parseFloat($r(tds[14]).text().trim()) || 0;
-      const distText = $r(tds[15]).text().trim();
+      const entries = parseInt($r(tds[6]).text().trim()) || 0;
+      const postPosition = parseInt($r(tds[7]).text().trim()) || 0;
+      const horseNumber = parseInt($r(tds[8]).text().trim()) || 0;
+      const odds = parseFloat($r(tds[9]).text().trim()) || 0;
+      const popularity = parseInt($r(tds[10]).text().trim()) || 0;
+      const position = parseInt($r(tds[11]).text().trim()) || 99;
+      const jockeyName = $r(tds[12]).find('a').text().trim();
+      const handicapWeight = parseFloat($r(tds[13]).text().trim()) || 0;
+      const distText = $r(tds[14]).text().trim();
       const trackMatch = distText.match(/(芝|ダート|ダ|障害|障)(\d+)/);
       const condText = $r(tds[16]).text().trim();
-      const time = $r(tds[17]).text().trim();
-      const margin = $r(tds[18]).text().trim();
-      const lastThreeFurlongs = $r(tds[22])?.text().trim() || '';
+      const time = $r(tds[18]).text().trim();
+      const margin = $r(tds[19]).text().trim();
       const cornerPositions = $r(tds[21])?.text().trim() || '';
-      const weightText = $r(tds[23])?.text().trim() || '';
+      const lastThreeFurlongs = $r(tds[23])?.text().trim() || '';
+      const weightText = $r(tds[24])?.text().trim() || '';
       const weightMatch = weightText.match(/(\d+)\(([+-]?\d+)\)/);
-      const prizeText = $r(tds[27])?.text().trim() || '0';
+      const prizeText = $r(tds[28])?.text().trim() || '0';
       const prize = parseFloat(prizeText.replace(/,/g, '')) || 0;
 
       let trackType = trackMatch?.[1] || 'ダート';
@@ -281,15 +287,22 @@ async function main() {
   const horseIds = rows.rows.map(r => r.horse_id as string);
   console.log(`Found ${horseIds.length} unique horses to scrape`);
 
-  // Check which already have past performances
-  const existing = await db.execute(
-    `SELECT DISTINCT horse_id FROM past_performances WHERE horse_id IN (${horseIds.map(() => '?').join(',')})`,
-    horseIds
-  );
-  const existingSet = new Set(existing.rows.map(r => r.horse_id as string));
-  const toScrape = horseIds.filter(id => !existingSet.has(id));
+  const forceRescrape = process.argv.includes('--force');
 
-  console.log(`Already have data: ${existingSet.size}, Need to scrape: ${toScrape.length}`);
+  // Check which already have past performances
+  let toScrape: string[];
+  if (forceRescrape) {
+    toScrape = horseIds;
+    console.log(`Force mode: re-scraping all ${toScrape.length} horses`);
+  } else {
+    const existing = await db.execute(
+      `SELECT DISTINCT horse_id FROM past_performances WHERE horse_id IN (${horseIds.map(() => '?').join(',')})`,
+      horseIds
+    );
+    const existingSet = new Set(existing.rows.map(r => r.horse_id as string));
+    toScrape = horseIds.filter(id => !existingSet.has(id));
+    console.log(`Already have data: ${existingSet.size}, Need to scrape: ${toScrape.length}`);
+  }
 
   let completed = 0;
   let totalPerfs = 0;
