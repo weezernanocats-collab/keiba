@@ -94,6 +94,24 @@ async function main() {
       });
 
       if (!res.ok) {
+        if (res.status === 504) {
+          // Vercel function timeout - prediction may have been saved
+          // Reset state and retry (the LEFT JOIN check will skip already-generated predictions)
+          console.log(`  Chunk ${iteration}: timeout (504) - retrying with fresh state...`);
+          state = {
+            phase: 'predictions',
+            config: { startDate: today, endDate: today, clearExisting: false },
+            remainingDates: [],
+            totalDates: 1,
+            stats: { ...state.stats },
+            errors: state.errors as string[],
+            startedAt: state.startedAt,
+            phaseLabel: 'AI予想生成',
+            phaseRemaining: 0,
+          };
+          await new Promise(r => setTimeout(r, 3000)); // Wait before retry
+          continue;
+        }
         console.error(`API error: ${res.status} ${res.statusText}`);
         const text = await res.text();
         console.error(text);
