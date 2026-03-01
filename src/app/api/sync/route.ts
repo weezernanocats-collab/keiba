@@ -149,7 +149,7 @@ export async function POST(request: NextRequest) {
   const { type, date, raceId, horseId } = body;
 
   // Validate type
-  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'bulk_chunked', 'accuracy', 'evaluate_all', 'calibrate'];
+  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'bulk_chunked', 'accuracy', 'evaluate_all', 'calibrate', 'regenerate_predictions'];
   if (!type || !validTypes.includes(type)) {
     return NextResponse.json(
       {
