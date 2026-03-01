@@ -44,10 +44,19 @@ export async function GET(request: NextRequest) {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (syncKey) headers['x-sync-key'] = syncKey;
 
+      // JST日付を計算（今日 〜 3日後をカバー）
+      const jstTime = new Date(now.getTime() + jstOffset * 60_000);
+      const todayStr = jstTime.toISOString().split('T')[0];
+      const endDay = new Date(jstTime.getTime() + 3 * 86400000).toISOString().split('T')[0];
+
       fetch(`${baseUrl}/api/sync`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ type: 'bulk_chunked' }),
+        body: JSON.stringify({
+          type: 'bulk_chunked',
+          startDate: todayStr,
+          endDate: endDay,
+        }),
       }).catch(() => {
         // fire-and-forget: エラーは無視（sync API 側でログに記録される）
       });
