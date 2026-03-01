@@ -289,13 +289,29 @@ export async function POST(request: NextRequest) {
 
   currentSync = syncEntry;
 
-  // Execute sync in background (non-blocking for the HTTP response)
-  executeSyncInBackground(syncEntry, type, date, raceId, horseId);
+  // For single-item operations, execute synchronously (within maxDuration=60s)
+  // For bulk operations, fire-and-forget with background processing
+  const isBulkOperation = type === 'full' || type === 'races';
 
+  if (isBulkOperation) {
+    executeSyncInBackground(syncEntry, type, date, raceId, horseId);
+    return NextResponse.json({
+      message: '同期処理を開始しました',
+      syncId: syncEntry.id,
+      type,
+    });
+  }
+
+  // Synchronous execution for single-item operations
+  await executeSyncInBackground(syncEntry, type, date, raceId, horseId);
   return NextResponse.json({
-    message: '同期処理を開始しました',
+    message: '同期完了',
     syncId: syncEntry.id,
     type,
+    status: syncEntry.status,
+    stats: syncEntry.stats,
+    details: syncEntry.details,
+    errors: syncEntry.errors,
   });
 }
 
