@@ -338,30 +338,40 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
     if (abortRequested) return finalize(progress);
 
     // =============================================
-    // Step 5: オッズ取得 (未来レースのみ)
+    // Step 5: オッズ取得（API → result.html フォールバック）
     // =============================================
     if (config.importOdds !== false) {
-      const today = new Date().toISOString().split('T')[0];
-      const futureRaces = allRaces.filter(r => r.date >= today);
-
       progress.phase = 'オッズ取得';
-      progress.total = futureRaces.length;
+      progress.total = allRaces.length;
 
-      for (let i = 0; i < futureRaces.length; i++) {
+      for (let i = 0; i < allRaces.length; i++) {
         if (abortRequested) break;
-        const race = futureRaces[i];
+        const race = allRaces[i];
         progress.current = i + 1;
-        progress.detail = `${race.name} のオッズを取得中 (${i + 1}/${futureRaces.length})`;
+        progress.detail = `${race.name} のオッズを取得中 (${i + 1}/${allRaces.length})`;
 
         try {
+          // まず odds API を試行
           const odds = await scrapeOdds(race.id);
-          for (const w of odds.win) {
-            await upsertOdds(race.id, '単勝', [w.horseNumber], w.odds);
-            progress.stats.oddsScraped++;
-          }
-          for (const p of odds.place) {
-            await upsertOdds(race.id, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
-            progress.stats.oddsScraped++;
+          if (odds.win.length > 0) {
+            for (const w of odds.win) {
+              await upsertOdds(race.id, '単勝', [w.horseNumber], w.odds);
+              progress.stats.oddsScraped++;
+            }
+            for (const p of odds.place) {
+              await upsertOdds(race.id, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
+              progress.stats.oddsScraped++;
+            }
+          } else {
+            // API が空 → result.html からオッズ取得
+            const results = await scrapeRaceResult(race.id);
+            for (const r of results) {
+              if (r.odds > 0) {
+                await upsertOdds(race.id, '単勝', [r.horseNumber], r.odds);
+                await upsertRaceEntryOdds(race.id, r.horseNumber, r.odds, r.popularity);
+                progress.stats.oddsScraped++;
+              }
+            }
           }
         } catch (error) {
           progress.errors.push(`オッズ取得失敗 (${race.id}): ${errMsg(error)}`);
@@ -867,14 +877,13 @@ async function processChunkPhase(
 
     case 'odds': {
       state.phaseLabel = 'オッズ取得';
-      const today = new Date().toISOString().split('T')[0];
-      // 未来レースのみオッズを取得（過去レースはオッズ不要）
-      const targetRaces = await dbAll<{ id: string; name: string }>(
-        `SELECT id, name FROM races
-         WHERE date >= ? AND status IN ('出走確定', '予定')
-         AND date BETWEEN ? AND ?
-         ORDER BY date`,
-        [today, state.config.startDate, state.config.endDate]
+      // オッズ未取得のレースを対象（ステータス問わず）
+      const targetRaces = await dbAll<{ id: string; name: string; status: string }>(
+        `SELECT r.id, r.name, r.status FROM races r
+         WHERE r.date BETWEEN ? AND ?
+         AND NOT EXISTS (SELECT 1 FROM odds o WHERE o.race_id = r.id)
+         ORDER BY r.date`,
+        [state.config.startDate, state.config.endDate]
       );
 
       state.phaseRemaining = targetRaces.length;
@@ -887,14 +896,27 @@ async function processChunkPhase(
       for (const race of targetRaces) {
         if (!hasTime()) return;
         try {
+          // まず odds API を試行（未確定レース向け）
           const odds = await scrapeOdds(race.id);
-          for (const w of odds.win) {
-            await upsertOdds(race.id, '単勝', [w.horseNumber], w.odds);
-            state.stats.oddsScraped++;
-          }
-          for (const p of odds.place) {
-            await upsertOdds(race.id, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
-            state.stats.oddsScraped++;
+          if (odds.win.length > 0) {
+            for (const w of odds.win) {
+              await upsertOdds(race.id, '単勝', [w.horseNumber], w.odds);
+              state.stats.oddsScraped++;
+            }
+            for (const p of odds.place) {
+              await upsertOdds(race.id, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
+              state.stats.oddsScraped++;
+            }
+          } else {
+            // API が空 → result.html からオッズを取得（確定レース向け）
+            const results = await scrapeRaceResult(race.id);
+            for (const r of results) {
+              if (r.odds > 0) {
+                await upsertOdds(race.id, '単勝', [r.horseNumber], r.odds);
+                await upsertRaceEntryOdds(race.id, r.horseNumber, r.odds, r.popularity);
+                state.stats.oddsScraped++;
+              }
+            }
           }
         } catch (error) {
           addError(`オッズ取得失敗 (${race.id}): ${errMsg(error)}`);

@@ -44,6 +44,15 @@ export async function ensureInitialized(): Promise<Client> {
     args: [],
   });
 
+  // ALTER TABLE マイグレーション（カラム追加、既存なら無視）
+  for (const sql of MIGRATIONS) {
+    try {
+      await db.execute(sql);
+    } catch {
+      // カラムが既に存在する場合のエラーは無視
+    }
+  }
+
   initialized = true;
   return db;
 }
@@ -343,4 +352,14 @@ const SCHEMA_STATEMENTS: InStatement[] = [
   `CREATE INDEX IF NOT EXISTS idx_races_status ON races(status, date)`,
   `CREATE INDEX IF NOT EXISTS idx_prediction_results_race ON prediction_results(race_id)`,
   `CREATE INDEX IF NOT EXISTS idx_scheduler_runs_date ON scheduler_runs(target_date, job_type)`,
+
+  // マイグレーション: race_entries に odds/popularity カラム追加
+  // ALTER TABLE ... ADD COLUMN はカラムが既に存在するとエラーになるため、
+  // 存在チェック付きで実行する（SQLite は IF NOT EXISTS をサポートしないため try-catch で対応）
+];
+
+/** ALTER TABLE マイグレーション（カラム追加など） */
+const MIGRATIONS = [
+  `ALTER TABLE race_entries ADD COLUMN odds REAL`,
+  `ALTER TABLE race_entries ADD COLUMN popularity INTEGER`,
 ];
