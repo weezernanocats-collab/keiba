@@ -34,8 +34,8 @@ export async function GET(request: NextRequest) {
     const jstMinutes = now.getUTCHours() * 60 + now.getUTCMinutes() + jstOffset;
     const jstHour = Math.floor((jstMinutes % 1440) / 60);
 
-    // 朝 (05:30-06:30 JST) → bulk_chunked で非同期チェーン
-    if (jstHour >= 5 && jstHour <= 6) {
+    // 朝 (08:30-09:30 JST) → bulk_chunked で非同期チェーン（全レース発売開始後）
+    if (jstHour >= 8 && jstHour <= 9) {
       const baseUrl = request.nextUrl.origin;
       const syncKey = process.env.SYNC_KEY;
 
