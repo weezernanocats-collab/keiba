@@ -1,22 +1,18 @@
 /**
  * Vercel Cron エンドポイント
  *
- * Vercel の Cron Jobs 機能から定期的に呼び出され、
- * 現在時刻（JST）に基づいて適切なスケジューラージョブを実行する。
+ * vercel.json の cron から呼び出される。
+ * JST 時刻に基づいて朝ジョブ（bulk_chunked トリガー）または結果取得を実行。
  *
- * vercel.json での設定例:
- * {
- *   "crons": [
- *     { "path": "/api/cron", "schedule": "0 6,9,17,22 * * *" }
- *   ]
- * }
- *
- * CRON_SECRET 環境変数を設定すると、Vercel からのリクエストのみ許可する。
+ * Hobby プラン対応:
+ *   - 朝 (06:00 JST): /api/sync に bulk_chunked を POST してチェーン開始（軽量）
+ *   - 夕方 (17:00 JST): 結果スクレイプ + 予想照合（60秒以内で完了）
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { runCronJob } from '@/lib/scheduler';
 
-export const maxDuration = 300; // Vercel Pro: 最大300秒
+// Hobby: 60秒、Pro: 300秒 — Vercel が自動的にプランに応じて制限
+export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
   // Vercel Cron からのリクエスト認証
@@ -32,11 +28,44 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // JST 現在時刻を計算
+    const now = new Date();
+    const jstOffset = 9 * 60;
+    const jstMinutes = now.getUTCHours() * 60 + now.getUTCMinutes() + jstOffset;
+    const jstHour = Math.floor((jstMinutes % 1440) / 60);
+
+    // 朝 (05:30-06:30 JST) → bulk_chunked で非同期チェーン
+    if (jstHour >= 5 && jstHour <= 6) {
+      const baseUrl = request.nextUrl.origin;
+      const syncKey = process.env.SYNC_KEY;
+
+      // bulk_chunked の初回リクエストを fire-and-forget で送信
+      // これにより /api/sync 内でチャンク実行が自動チェーンされる
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (syncKey) headers['x-sync-key'] = syncKey;
+
+      fetch(`${baseUrl}/api/sync`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ type: 'bulk_chunked' }),
+      }).catch(() => {
+        // fire-and-forget: エラーは無視（sync API 側でログに記録される）
+      });
+
+      return NextResponse.json({
+        ok: true,
+        timestamp: now.toISOString(),
+        executed: ['morning: bulk_chunked triggered'],
+        skipped: [],
+      });
+    }
+
+    // 夕方 (17:00 JST) 以降、または他の時間帯 → 従来のスケジューラーロジック
     const result = await runCronJob();
 
     return NextResponse.json({
       ok: true,
-      timestamp: new Date().toISOString(),
+      timestamp: now.toISOString(),
       ...result,
     });
   } catch (error) {

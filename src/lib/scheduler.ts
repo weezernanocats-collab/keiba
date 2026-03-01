@@ -450,6 +450,8 @@ async function executeResultFetch(date: string): Promise<void> {
       [date]
     );
 
+    // 結果取得はレスポンスが軽いので 500ms 間隔で十分（60秒制限対応）
+    const resultRateMs = 500;
     let resultCount = 0;
     for (const race of races) {
       try {
@@ -470,7 +472,7 @@ async function executeResultFetch(date: string): Promise<void> {
       } catch (error) {
         addLog('結果取得失敗', `${race.id}: ${errMsg(error)}`, false);
       }
-      await sleep(currentConfig.rateLimitMs);
+      await sleep(resultRateMs);
     }
 
     // 予想 vs 実結果の自動照合
