@@ -192,78 +192,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ calibration, autoApplied: autoResult });
   }
 
-  // 予想再生成（当日バイアス反映）
-  if (type === 'regenerate_predictions') {
-    const targetDate = body.date || new Date().toISOString().split('T')[0];
-    await ensureCalibrationLoaded();
-
-    // 対象レースを取得
-    const allRaces = await dbAll<{
-      id: string; name: string; date: string; track_type: string;
-      distance: number; track_condition: string; racecourse_name: string; grade: string;
-    }>(
-      `SELECT id, name, date, track_type, distance, track_condition, racecourse_name, grade
-       FROM races WHERE date = ? AND status IN ('出走確定', '結果確定')
-       ORDER BY racecourse_name, race_number`,
-      [targetDate],
-    );
-
-    if (allRaces.length === 0) {
-      return NextResponse.json({ error: `${targetDate} のレースが見つかりません` }, { status: 400 });
-    }
-
-    // 既存予想を削除
-    await dbRun('DELETE FROM predictions WHERE race_id IN (SELECT id FROM races WHERE date = ?)', [targetDate]);
-
-    let generated = 0;
-    const errors: string[] = [];
-
-    for (const race of allRaces) {
-      try {
-        const raceData = await getRaceById(race.id);
-        if (!raceData || !raceData.entries || raceData.entries.length === 0) continue;
-
-        const horseInputs = [];
-        for (const re of raceData.entries) {
-          const pastPerfs = await getHorsePastPerformances(re.horseId, 100);
-          const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
-          const jockeyStats = await getJockeyStats(re.jockeyId);
-          horseInputs.push({
-            entry: re,
-            pastPerformances: pastPerfs,
-            jockeyWinRate: jockeyStats.winRate,
-            jockeyPlaceRate: jockeyStats.placeRate,
-            fatherName: horseData?.father_name || '',
-          });
-        }
-
-        const prediction = await generatePrediction(
-          race.id, race.name, targetDate,
-          race.track_type as '芝' | 'ダート' | '障害',
-          race.distance, race.track_condition as any,
-          race.racecourse_name, race.grade,
-          horseInputs,
-        );
-
-        await savePrediction(prediction);
-        generated++;
-      } catch (error) {
-        errors.push(`${race.name}: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-
-    // 結果確定レースがあれば再照合
-    const evalResults = await evaluateAllPendingRaces();
-
-    return NextResponse.json({
-      message: `${targetDate} の予想を${generated}件再生成しました（当日バイアス反映済み）`,
-      generated,
-      totalRaces: allRaces.length,
-      evaluated: evalResults.length,
-      errors: errors.length > 0 ? errors : undefined,
-    });
-  }
-
   // バルクインポートの状態確認
   if (type === 'bulk_status') {
     const progress = getBulkImportProgress();
@@ -364,7 +292,7 @@ export async function POST(request: NextRequest) {
 
   // For single-item operations, execute synchronously (within maxDuration=60s)
   // For bulk operations, fire-and-forget with background processing
-  const isBulkOperation = type === 'full' || type === 'races';
+  const isBulkOperation = type === 'full' || type === 'races' || type === 'regenerate_predictions';
 
   if (isBulkOperation) {
     executeSyncInBackground(syncEntry, type, date, raceId, horseId);
@@ -416,6 +344,9 @@ async function executeSyncInBackground(
         break;
       case 'full':
         await syncFull(entry, date);
+        break;
+      case 'regenerate_predictions':
+        await syncRegeneratePredictions(entry, date);
         break;
     }
     entry.status = 'completed';
@@ -756,6 +687,75 @@ async function syncFull(entry: SyncLogEntry, date?: string): Promise<void> {
   } else {
     entry.details = `フル同期完了: ${targetDate} - ${buildStatsSummary(entry.stats)}`;
   }
+}
+
+// ==================== Sync: Regenerate Predictions ====================
+
+async function syncRegeneratePredictions(entry: SyncLogEntry, date?: string): Promise<void> {
+  const targetDate = date || new Date().toISOString().split('T')[0];
+  entry.details = `予想再生成開始: ${targetDate}`;
+
+  // 校正済み重みがあれば適用
+  await ensureCalibrationLoaded();
+
+  // 対象レースを取得
+  const races = await dbAll<{ id: string; name: string; track_type: string; distance: number; track_condition: string; racecourse_name: string; grade: string }>(
+    `SELECT id, name, track_type, distance, track_condition, racecourse_name, grade
+     FROM races WHERE date = ? AND status IN ('出走確定', '結果確定')`,
+    [targetDate],
+  );
+
+  if (races.length === 0) {
+    entry.details = `予想再生成完了: ${targetDate} - 対象レースなし`;
+    return;
+  }
+
+  entry.details = `[1/2] 既存予想を削除中: ${races.length}レース`;
+  const raceIds = races.map(r => r.id);
+  const placeholders = raceIds.map(() => '?').join(',');
+  await dbRun(`DELETE FROM predictions WHERE race_id IN (${placeholders})`, raceIds);
+
+  entry.details = `[2/2] 予想を再生成中: ${races.length}レース`;
+  for (const race of races) {
+    try {
+      const raceData = await getRaceById(race.id);
+      if (!raceData || !raceData.entries || raceData.entries.length === 0) continue;
+
+      const horseInputs = [];
+      for (const re of raceData.entries) {
+        const pastPerfs = await getHorsePastPerformances(re.horseId, 100);
+        const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
+        const jockeyStats = await getJockeyStats(re.jockeyId);
+        horseInputs.push({
+          entry: re,
+          pastPerformances: pastPerfs,
+          jockeyWinRate: jockeyStats.winRate,
+          jockeyPlaceRate: jockeyStats.placeRate,
+          fatherName: horseData?.father_name || '',
+        });
+      }
+
+      const prediction = await generatePrediction(
+        race.id,
+        race.name,
+        targetDate,
+        race.track_type as import('@/types').TrackType,
+        race.distance,
+        race.track_condition as import('@/types').TrackCondition | undefined,
+        race.racecourse_name,
+        race.grade,
+        horseInputs,
+      );
+
+      await savePrediction(prediction);
+      entry.stats.predictionsGenerated++;
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      entry.errors.push(`予想再生成失敗 (${race.id}): ${errMsg}`);
+    }
+  }
+
+  entry.details = `予想再生成完了: ${targetDate} - ${entry.stats.predictionsGenerated}件生成`;
 }
 
 // ==================== Type import for Race (used in upsertRace grade cast) ====================
