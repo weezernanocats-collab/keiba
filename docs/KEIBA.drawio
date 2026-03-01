@@ -1,0 +1,127 @@
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" version="29.6.0">
+  <diagram name="ページ-1" id="wOZ9Iv3K7ylTMzRdojTe">
+    <mxGraphModel dx="2355" dy="1378" grid="1" gridSize="11" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-27" connectable="0" parent="1" style="group" value="" vertex="1">
+          <mxGeometry height="1639" width="2259" x="44" y="44" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-28" connectable="0" parent="LZAh2siEs2l2QqUGHGOL-27" style="group" value="" vertex="1">
+          <mxGeometry height="1439.04" width="2277" x="-18" y="199.96" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-1" parent="LZAh2siEs2l2QqUGHGOL-28" style="swimlane;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="データ取得" vertex="1">
+          <mxGeometry height="202.31" width="480.88" x="11" y="534.69" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-2" parent="LZAh2siEs2l2QqUGHGOL-1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f5f5f5;fontColor=#333333;strokeColor=#666666;" value="netkeiba.com&lt;br&gt;&lt;font style=&quot;font-size: 10px;&quot;&gt;(Scraper/API)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="92.74" width="93.83" x="23.46" y="73.99000000000001" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-3" parent="LZAh2siEs2l2QqUGHGOL-1" style="shape=datastore;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" value="Turso DB&lt;br&gt;(SQLite)" vertex="1">
+          <mxGeometry height="107.2" width="117.29" x="321.37" y="66.76" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-4" parent="LZAh2siEs2l2QqUGHGOL-1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="scraper.ts&lt;br&gt;scheduler.ts" vertex="1">
+          <mxGeometry height="67.29" width="140.75" x="152.47" y="86.71" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-5" edge="1" parent="LZAh2siEs2l2QqUGHGOL-1" source="LZAh2siEs2l2QqUGHGOL-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="LZAh2siEs2l2QqUGHGOL-4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-6" edge="1" parent="LZAh2siEs2l2QqUGHGOL-1" source="LZAh2siEs2l2QqUGHGOL-4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="LZAh2siEs2l2QqUGHGOL-3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-15" parent="LZAh2siEs2l2QqUGHGOL-28" style="swimlane;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" value="テキスト生成" vertex="1">
+          <mxGeometry height="202.32" width="323" x="1206" y="581.04" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-17" parent="LZAh2siEs2l2QqUGHGOL-28" style="swimlane;whiteSpace=wrap;html=1;fillColor=#f5f5f5;fontColor=#333333;strokeColor=#666666;" value="アウトプット&amp;amp;フィードバック" vertex="1">
+          <mxGeometry height="231.22" width="708" x="1569" y="570.04" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-18" parent="LZAh2siEs2l2QqUGHGOL-17" style="rounded=0;whiteSpace=wrap;html=1;" value="保存&lt;div&gt;(信頼度・分析)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="86.71" width="151.08" x="46.92" y="79.48" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-19" parent="LZAh2siEs2l2QqUGHGOL-17" style="rounded=0;whiteSpace=wrap;html=1;fontSize=11;" value="予想と結果の照合・集計・評価" vertex="1">
+          <mxGeometry height="86.71" width="166.59" x="253.00000000000003" y="79.48" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-20" parent="LZAh2siEs2l2QqUGHGOL-17" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="&lt;span style=&quot;background-color: rgba(0, 0, 0, 0); font-family: &amp;quot;Monaspace Neon&amp;quot;, ui-monospace, SFMono-Regular, &amp;quot;SF Mono&amp;quot;, Menlo, Consolas, &amp;quot;Liberation Mono&amp;quot;, monospace; font-size: 13.6px; text-align: start;&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;自動キャリブレーション&lt;/font&gt;&lt;/span&gt;&lt;div&gt;(過去データから最適な重みを推定・保存)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="86.70724883924777" width="187.66015173591921" x="473.0054931417375" y="79.48164476931045" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-23" edge="1" parent="LZAh2siEs2l2QqUGHGOL-28" source="LZAh2siEs2l2QqUGHGOL-16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=-0.013;entryY=0.542;entryDx=0;entryDy=0;entryPerimeter=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" target="LZAh2siEs2l2QqUGHGOL-18">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1503" y="697" />
+              <mxPoint x="1614" y="697" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-24" edge="1" parent="LZAh2siEs2l2QqUGHGOL-28" source="LZAh2siEs2l2QqUGHGOL-18" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="LZAh2siEs2l2QqUGHGOL-19">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-25" edge="1" parent="LZAh2siEs2l2QqUGHGOL-28" source="LZAh2siEs2l2QqUGHGOL-19" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="LZAh2siEs2l2QqUGHGOL-20">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-7" parent="LZAh2siEs2l2QqUGHGOL-28" style="swimlane;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="AI予測エンジン" vertex="1">
+          <mxGeometry height="404.63" width="594" x="561" y="454.8" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-8" parent="LZAh2siEs2l2QqUGHGOL-7" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;" value="16-Factor スコアリング&lt;br&gt;&lt;font style=&quot;font-size: 9px;&quot;&gt;(個別能力/走法・位置/統計・血統)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="86.71" width="184.08" x="46.92" y="72.26" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-9" parent="LZAh2siEs2l2QqUGHGOL-7" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;" value="ベイズ推定 &amp;amp; 動的重み調整" vertex="1">
+          <mxGeometry height="86.71" width="195.81" x="41.059999999999995" y="196.25" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-10" parent="LZAh2siEs2l2QqUGHGOL-7" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" value="XGBoost ML Blend&lt;br&gt;(Python API / Vercel)&lt;br&gt;※実装予定" vertex="1">
+          <mxGeometry height="86.71" width="195.81" x="41.059999999999995" y="306.25" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-11" parent="LZAh2siEs2l2QqUGHGOL-7" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;fontStyle=1" value="最終ランキング生成&lt;div&gt;Top6推奨馬＋分析&lt;/div&gt;" vertex="1">
+          <mxGeometry height="86.70724883924777" width="234.575189669899" x="318.99774657086874" y="196.2517465177433" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-12" edge="1" parent="LZAh2siEs2l2QqUGHGOL-7" source="LZAh2siEs2l2QqUGHGOL-8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="LZAh2siEs2l2QqUGHGOL-9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-13" edge="1" parent="LZAh2siEs2l2QqUGHGOL-7" source="LZAh2siEs2l2QqUGHGOL-9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="LZAh2siEs2l2QqUGHGOL-10">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-14" edge="1" parent="LZAh2siEs2l2QqUGHGOL-7" source="LZAh2siEs2l2QqUGHGOL-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="275" y="350" />
+              <mxPoint x="275" y="240" />
+            </Array>
+            <mxPoint x="319.00143981644305" y="240.24266004385208" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-21" edge="1" parent="LZAh2siEs2l2QqUGHGOL-28" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="LZAh2siEs2l2QqUGHGOL-8">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="528" y="651" />
+              <mxPoint x="528" y="570" />
+            </Array>
+            <mxPoint x="450" y="651.04" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-26" edge="1" parent="LZAh2siEs2l2QqUGHGOL-28" source="LZAh2siEs2l2QqUGHGOL-20" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;entryX=-0.003;entryY=0.604;entryDx=0;entryDy=0;entryPerimeter=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" target="LZAh2siEs2l2QqUGHGOL-9">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2136" y="922" />
+              <mxPoint x="579" y="922" />
+              <mxPoint x="579" y="703" />
+            </Array>
+            <mxPoint x="777.9208327052874" y="283.08821422170047" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-32" connectable="0" parent="LZAh2siEs2l2QqUGHGOL-26" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;最新レースを随時分析条件として追加&lt;/font&gt;" vertex="1">
+          <mxGeometry relative="1" x="0.3851" y="-3" as="geometry">
+            <mxPoint x="420" y="3" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-22" edge="1" parent="LZAh2siEs2l2QqUGHGOL-28" source="LZAh2siEs2l2QqUGHGOL-11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=10;entryDy=0;entryPerimeter=0;" target="LZAh2siEs2l2QqUGHGOL-16">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1115" y="697" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="LZAh2siEs2l2QqUGHGOL-16" parent="LZAh2siEs2l2QqUGHGOL-28" style="shape=module;align=left;spacingLeft=20;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="Gemini Flash API&lt;br&gt;(サマリ &amp;amp; 推奨理由等)" vertex="1">
+          <mxGeometry height="101.52" width="158" x="1283" y="646.48" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
