@@ -293,7 +293,7 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
     // =============================================
     if (config.importResults !== false) {
       const today = new Date().toISOString().split('T')[0];
-      const pastRaces = allRaces.filter(r => r.date < today);
+      const pastRaces = allRaces.filter(r => r.date <= today);
 
       progress.phase = 'レース結果取得';
       progress.total = pastRaces.length;
@@ -822,7 +822,7 @@ async function processChunkPhase(
       state.phaseLabel = 'レース結果取得';
       const today = new Date().toISOString().split('T')[0];
       const unprocessed = await dbAll<{ id: string }>(
-        "SELECT id FROM races WHERE status = '出走確定' AND date < ? AND date BETWEEN ? AND ? ORDER BY date",
+        "SELECT id FROM races WHERE status = '出走確定' AND date <= ? AND date BETWEEN ? AND ? ORDER BY date",
         [today, state.config.startDate, state.config.endDate]
       );
 
@@ -866,7 +866,7 @@ async function processChunkPhase(
 
       // 残りを再確認
       const remainingRow = await dbGet<{ c: number }>(
-        "SELECT COUNT(*) as c FROM races WHERE status = '出走確定' AND date < ? AND date BETWEEN ? AND ?",
+        "SELECT COUNT(*) as c FROM races WHERE status = '出走確定' AND date <= ? AND date BETWEEN ? AND ?",
         [today, state.config.startDate, state.config.endDate]
       );
       const remainingCount = remainingRow?.c ?? 0;
