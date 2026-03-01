@@ -60,7 +60,7 @@ const DEFAULT_WEIGHTS: Record<string, number> = {
   speedRating: 0.10,
   classPerformance: 0.04,
   runningStyle: 0.05,
-  postPositionBias: 0.03,
+  postPositionBias: 0.02,
   rotation: 0.04,
   lastThreeFurlongs: 0.08,
   consistency: 0.05,
@@ -68,7 +68,8 @@ const DEFAULT_WEIGHTS: Record<string, number> = {
   sireAptitude: 0.05,
   jockeyTrainerCombo: 0.03,
   historicalPostBias: 0.03,
-  seasonalPattern: 0.04,
+  seasonalPattern: 0.03,
+  handicapAdvantage: 0.03,
 };
 
 // WEIGHTS はキャリブレーション結果で上書き可能
@@ -140,6 +141,7 @@ const POPULATION_PRIORS: Record<string, number> = {
   jockeyTrainerCombo: 50,  // コンボは中立prior
   historicalPostBias: 50,  // 枠バイアスは中立
   seasonalPattern: 50,     // 季節は中立
+  handicapAdvantage: 50,   // 斤量は中立prior
 };
 
 /**
@@ -261,16 +263,21 @@ export async function generatePrediction(
     })),
   );
 
+  // 平均斤量を算出（斤量ファクター用）
+  const avgHandicapWeight = horses.length > 0
+    ? horses.reduce((sum, h) => sum + (h.entry.handicapWeight || 55), 0) / horses.length
+    : 55;
+
   // 各馬をスコアリング
   const scoredHorses = horses.map(h =>
-    scoreHorse(h, trackType, distance, cond, racecourseName, grade, horses.length, ctx, month)
+    scoreHorse(h, trackType, distance, cond, racecourseName, grade, horses.length, ctx, month, avgHandicapWeight)
   );
 
   // 展開予想から脚質ボーナスを付与
   applyPaceBonus(scoredHorses, distance);
 
-  // 当日馬場バイアスを反映（同場・同日の完走レースから推定）
-  const todayBias = await calculateTodayTrackBias(racecourseName, date);
+  // 当日馬場バイアスを反映（同場・同日・同トラックの完走レースから推定）
+  const todayBias = await calculateTodayTrackBias(racecourseName, date, trackType);
   if (todayBias) {
     applyTodayTrackBias(scoredHorses, todayBias, horses.length);
   }
@@ -409,6 +416,7 @@ function scoreHorse(
   fieldSize: number,
   ctx: RaceHistoricalContext,
   month: number,
+  avgHandicapWeight: number,
 ): ScoredHorse {
   const { entry, pastPerformances: pp, jockeyWinRate, jockeyPlaceRate, fatherName } = input;
   const reasons: string[] = [];
@@ -515,6 +523,18 @@ function scoreHorse(
     reasons.push(`${month}月は成績が振るわない傾向`);
   }
 
+  // 17. 斤量（ハンデ）アドバンテージ (0-100)
+  // レース出走馬の平均斤量との差分をスコア化（軽い=有利）
+  // 55kg基準、±2kgで±15点程度のスケール
+  {
+    const weight = entry.handicapWeight || 55;
+    const diff = avgHandicapWeight - weight; // 正=平均より軽い=有利
+    // ±4kgで0-100にスケール (中央50)
+    scores.handicapAdvantage = Math.max(0, Math.min(100, 50 + diff * 7.5));
+    if (diff >= 1.5) reasons.push(`斤量${weight}kgで軽量有利（平均${avgHandicapWeight.toFixed(1)}kg）`);
+    else if (diff <= -2) reasons.push(`斤量${weight}kgでトップハンデ不利`);
+  }
+
   // 叩き良化ボーナス（ローテーションスコアに加算）
   const secondStartBonus = ctx.secondStartMap.get(entry.horseId);
   if (secondStartBonus && pp.length >= 2) {
@@ -565,6 +585,7 @@ function scoreHorse(
     { factor: 'jockeyTrainerCombo', reliability: calcFactorReliability('jockeyTrainerCombo', comboData?.totalRaces || 0), dataPoints: comboData?.totalRaces || 0 },
     { factor: 'historicalPostBias', reliability: calcFactorReliability('historicalPostBias', ctx.courseDistStats?.totalRaces || 0), dataPoints: ctx.courseDistStats?.totalRaces || 0 },
     { factor: 'seasonalPattern', reliability: calcFactorReliability('seasonalPattern', seasonalData?.reduce((s, m) => s + m.races, 0) || 0), dataPoints: seasonalData?.reduce((s, m) => s + m.races, 0) || 0 },
+    { factor: 'handicapAdvantage', reliability: 1.0, dataPoints: 1 },
   );
 
   // ベイズ推定でスコアを補正
@@ -1436,18 +1457,17 @@ function generateSummary(topPicks: PredictionPick[], analysis: RaceAnalysis, rac
 
 // ==================== ユーティリティ ====================
 
+/**
+ * 着順スコア: 頭数を考慮した連続関数
+ * 1着=100、最下位=0、中間は線形補間
+ * 例: 18頭立て2着=94, 8頭立て2着=86
+ */
 function positionToScore(position: number, entries: number): number {
-  if (entries <= 0) return 50;
-  const ratio = position / entries;
-  if (ratio <= 0.05) return 100;
-  if (position === 1) return 95;
-  if (position === 2) return 85;
-  if (position === 3) return 75;
-  if (ratio <= 0.25) return 65;
-  if (ratio <= 0.40) return 50;
-  if (ratio <= 0.55) return 38;
-  if (ratio <= 0.75) return 22;
-  return 8;
+  if (entries <= 1) return position === 1 ? 100 : 50;
+  if (position <= 0) return 50;
+  // 1着=100, 最下位=0 の線形スケール
+  const raw = 100 * (1 - (position - 1) / (entries - 1));
+  return Math.max(0, Math.min(100, Math.round(raw)));
 }
 
 function ratioToScore(ratio: number): number {

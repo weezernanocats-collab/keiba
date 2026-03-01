@@ -186,12 +186,20 @@ function traverseTree(tree: XGBTree, features: number[]): number {
 
 /**
  * XGBoostモデルで推論し、確率を返す (binary:logistic 前提)
+ *
+ * base_score は確率空間の値（デフォルト0.5）。
+ * 木のリーフ値は log-odds 空間なので、base_score も log-odds に変換して加算する。
+ * log(0.5 / 0.5) = 0 なので、デフォルト時は影響なし。
  */
 function predictProba(model: XGBModel, features: number[]): number {
-  const baseScore = parseFloat(model.learner.learner_model_param.base_score) || 0.5;
+  const baseScoreProb = parseFloat(model.learner.learner_model_param.base_score) || 0.5;
+  // 確率 → log-odds 変換（0や1の場合のクランプ付き）
+  const clampedProb = Math.max(1e-7, Math.min(1 - 1e-7, baseScoreProb));
+  const baseMargin = Math.log(clampedProb / (1 - clampedProb));
+
   const trees = model.learner.gradient_booster.model.trees;
 
-  let sum = baseScore;
+  let sum = baseMargin;
   for (const tree of trees) {
     sum += traverseTree(tree, features);
   }

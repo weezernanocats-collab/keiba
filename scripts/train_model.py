@@ -121,8 +121,23 @@ def main():
     with open(os.path.join(MODEL_DIR, "feature_names.json"), "w", encoding="utf-8") as f:
         json.dump(feature_names, f, ensure_ascii=False, indent=2)
 
+    # 検証セットでの正解率を meta.json に保存
+    win_acc = float(np.mean((model_win.predict_proba(X_val)[:, 1] >= 0.5) == y_win_val))
+    place_acc = float(np.mean((model_place.predict_proba(X_val)[:, 1] >= 0.5) == y_place_val))
+    meta = {
+        "train_samples": len(train_idx),
+        "val_samples": len(val_idx),
+        "win_auc": round(win_auc, 4),
+        "place_auc": round(place_auc, 4),
+        "win_accuracy": round(win_acc, 4),
+        "place_accuracy": round(place_acc, 4),
+        "feature_count": len(feature_names),
+    }
+    with open(os.path.join(MODEL_DIR, "meta.json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
     print(f"\n=== 完了 ===")
-    print(f"勝利 AUC: {win_auc:.4f}, 複勝 AUC: {place_auc:.4f}")
+    print(f"勝利 AUC: {win_auc:.4f} (Acc: {win_acc:.4f}), 複勝 AUC: {place_auc:.4f} (Acc: {place_acc:.4f})")
     print(f"モデル保存先: {MODEL_DIR}")
 
 

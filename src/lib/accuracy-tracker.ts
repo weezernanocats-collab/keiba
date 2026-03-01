@@ -364,6 +364,7 @@ export async function calibrateWeights(): Promise<CalibrationResult | null> {
     'jockeyAbility', 'speedRating', 'classPerformance', 'runningStyle',
     'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
     'sireAptitude', 'jockeyTrainerCombo', 'historicalPostBias', 'seasonalPattern',
+    'handicapAdvantage',
   ];
 
   const currentWeights: Record<string, number> = {
@@ -372,7 +373,7 @@ export async function calibrateWeights(): Promise<CalibrationResult | null> {
     classPerformance: 0.04, runningStyle: 0.07, postPositionBias: 0.04,
     rotation: 0.05, lastThreeFurlongs: 0.07, consistency: 0.04,
     sireAptitude: 0.06, jockeyTrainerCombo: 0.04, historicalPostBias: 0.04,
-    seasonalPattern: 0.03,
+    seasonalPattern: 0.03, handicapAdvantage: 0.03,
   };
 
   // 各レースで予想上位と実際の勝ち馬のスコアパターンを比較
@@ -494,7 +495,7 @@ export async function calibrateWeights(): Promise<CalibrationResult | null> {
 // ==================== 自動キャリブレーション適用 ====================
 
 /** 最低レース数を満たしていれば自動校正を実行し、重みを適用する */
-const MIN_RACES_FOR_AUTO_CALIBRATION = 20;
+const MIN_RACES_FOR_AUTO_CALIBRATION = 100;
 
 export async function autoCalibrate(): Promise<{ applied: boolean; message: string }> {
   const total = await dbGet<{ c: number }>('SELECT COUNT(*) as c FROM prediction_results');

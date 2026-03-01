@@ -41,7 +41,15 @@ interface CompletedRaceEntry {
 export async function calculateTodayTrackBias(
   racecourseName: string,
   date: string,
+  trackType?: string,
 ): Promise<TodayTrackBias | null> {
+  const params: (string | number)[] = [racecourseName, date];
+  let trackTypeFilter = '';
+  if (trackType) {
+    trackTypeFilter = 'AND r.track_type = ?';
+    params.push(trackType);
+  }
+
   const rows = await dbAll<CompletedRaceEntry>(
     `SELECT
        re.race_id,
@@ -55,10 +63,11 @@ export async function calculateTodayTrackBias(
      WHERE r.racecourse_name = ?
        AND r.date = ?
        AND r.status = '結果確定'
+       ${trackTypeFilter}
        AND re.result_position IS NOT NULL
        AND re.result_position > 0
      ORDER BY re.race_id, re.result_position`,
-    [racecourseName, date],
+    params,
   );
 
   if (rows.length === 0) return null;
