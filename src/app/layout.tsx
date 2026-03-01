@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import SyncStatusBanner from "@/components/SyncStatusBanner";
 
 export const metadata: Metadata = {
   title: "競馬予想AI - KEIBA MASTER",
@@ -18,6 +19,7 @@ export default function RootLayout({
     <html lang="ja">
       <body className="antialiased min-h-screen flex flex-col">
         <Header />
+        <SyncStatusBanner />
         <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6">
           {children}
         </main>

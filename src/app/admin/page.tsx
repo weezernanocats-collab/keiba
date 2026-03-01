@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 
 interface SyncLogEntry {
   id: string;
@@ -48,7 +48,12 @@ interface BulkProgress {
 }
 
 export default function AdminPage() {
-  const [syncKey, setSyncKey] = useState('');
+  const [syncKey, setSyncKey] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('keiba-sync-key') || '';
+    }
+    return '';
+  });
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -65,6 +70,11 @@ export default function AdminPage() {
   const [bulkProgress, setBulkProgress] = useState<BulkProgress | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const abortChunkedRef = useRef(false);
+
+  // syncKeyをlocalStorageに永続化（SyncStatusBannerで利用）
+  useEffect(() => {
+    localStorage.setItem('keiba-sync-key', syncKey);
+  }, [syncKey]);
 
   const headers = useCallback(() => {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
