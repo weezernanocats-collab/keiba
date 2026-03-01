@@ -572,7 +572,7 @@ export interface BulkChunkedState {
   phaseRemaining: number;
 }
 
-const CHUNK_TIME_BUDGET_MS = 50_000; // 50秒（Vercel 60秒制限に余裕を持たせる）
+const CHUNK_TIME_BUDGET_MS = 35_000; // 35秒（Gemini 2.5-flash thinking対応、Vercel 60秒制限に余裕）
 const CHUNK_RATE_LIMIT_MS = 1200;
 const MAX_CHUNK_ERRORS = 100;
 
