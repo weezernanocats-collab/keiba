@@ -330,6 +330,7 @@ const SCHEMA_STATEMENTS: InStatement[] = [
   `CREATE INDEX IF NOT EXISTS idx_race_entries_race ON race_entries(race_id)`,
   `CREATE INDEX IF NOT EXISTS idx_race_entries_horse ON race_entries(horse_id)`,
   `CREATE INDEX IF NOT EXISTS idx_past_performances_horse ON past_performances(horse_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_odds_unique ON odds(race_id, bet_type, horse_number1)`,
   `CREATE INDEX IF NOT EXISTS idx_odds_race ON odds(race_id)`,
   `CREATE INDEX IF NOT EXISTS idx_predictions_race ON predictions(race_id)`,
   `CREATE INDEX IF NOT EXISTS idx_horse_traits_horse ON horse_traits(horse_id)`,

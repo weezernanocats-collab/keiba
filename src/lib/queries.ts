@@ -481,6 +481,12 @@ export async function upsertOdds(raceId: string, betType: string, horses: number
   `, [raceId, betType, horses[0] || null, horses[1] || null, horses[2] || null, oddsValue, minOdds || null, maxOdds || null]);
 }
 
+export async function upsertRaceEntryOdds(raceId: string, horseNumber: number, odds: number, popularity: number) {
+  await dbRun(`
+    UPDATE race_entries SET odds = ?, popularity = ? WHERE race_id = ? AND horse_number = ?
+  `, [odds, popularity, raceId, horseNumber]);
+}
+
 // ==================== AI予想 ====================
 
 export async function getPredictionByRaceId(raceId: string) {

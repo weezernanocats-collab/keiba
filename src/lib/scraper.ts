@@ -280,6 +280,8 @@ export async function scrapeRaceResult(raceId: string): Promise<ScrapedResult[]>
     const horseName = $(tds[3]).find('a').text().trim();
     const time = $(tds[7]).text().trim();
     const margin = $(tds[8]).text().trim();
+    const popularity = parseInt($(tds[9]).text().trim()) || 0;
+    const odds = parseFloat($(tds[10]).text().trim()) || 0;
     const lastThreeFurlongs = $(tds[11]).text().trim();
     const cornerPositions = $(tds[12]).text().trim();
 
@@ -292,6 +294,8 @@ export async function scrapeRaceResult(raceId: string): Promise<ScrapedResult[]>
         margin,
         lastThreeFurlongs,
         cornerPositions,
+        odds,
+        popularity,
       });
     }
   });
@@ -478,6 +482,8 @@ export interface ScrapedResult {
   margin: string;
   lastThreeFurlongs: string;
   cornerPositions: string;
+  odds: number;
+  popularity: number;
 }
 
 export interface ScrapedHorseDetail {

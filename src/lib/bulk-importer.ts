@@ -25,6 +25,7 @@ import {
   upsertRace,
   upsertRaceEntry,
   upsertOdds,
+  upsertRaceEntryOdds,
   upsertHorse,
   insertPastPerformance,
   getHorsePastPerformances,
@@ -317,6 +318,10 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
                 cornerPositions: r.cornerPositions,
               },
             });
+            if (r.odds > 0) {
+              await upsertOdds(race.id, '単勝', [r.horseNumber], r.odds);
+              await upsertRaceEntryOdds(race.id, r.horseNumber, r.odds, r.popularity);
+            }
             progress.stats.resultsScraped++;
           }
           if (results.length > 0) {
@@ -834,6 +839,10 @@ async function processChunkPhase(
                 cornerPositions: r.cornerPositions,
               },
             });
+            if (r.odds > 0) {
+              await upsertOdds(race.id, '単勝', [r.horseNumber], r.odds);
+              await upsertRaceEntryOdds(race.id, r.horseNumber, r.odds, r.popularity);
+            }
             state.stats.resultsScraped++;
           }
           await upsertRace({ id: race.id, status: '結果確定' });

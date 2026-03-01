@@ -25,6 +25,7 @@ import {
   upsertRace,
   upsertRaceEntry,
   upsertOdds,
+  upsertRaceEntryOdds,
   upsertHorse,
   insertPastPerformance,
   getHorsePastPerformances,
@@ -464,6 +465,11 @@ async function executeResultFetch(date: string): Promise<void> {
               lastThreeFurlongs: r.lastThreeFurlongs, cornerPositions: r.cornerPositions,
             },
           });
+          // オッズ・人気も保存
+          if (r.odds > 0) {
+            await upsertOdds(race.id, '単勝', [r.horseNumber], r.odds);
+            await upsertRaceEntryOdds(race.id, r.horseNumber, r.odds, r.popularity);
+          }
         }
         if (results.length > 0) {
           await upsertRace({ id: race.id, status: '結果確定' });
