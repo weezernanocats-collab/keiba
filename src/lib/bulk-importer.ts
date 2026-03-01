@@ -677,7 +677,7 @@ async function processChunkPhase(
     case 'race_details': {
       state.phaseLabel = '出馬表取得';
       const unprocessed = await dbAll<{ id: string; name: string }>(
-        "SELECT id, name FROM races WHERE status = '予定' AND date BETWEEN ? AND ? ORDER BY date",
+        "SELECT id, name FROM races WHERE (status = '予定' OR (status = '出走確定' AND distance = 0)) AND date BETWEEN ? AND ? ORDER BY date",
         [state.config.startDate, state.config.endDate]
       );
 
@@ -732,7 +732,7 @@ async function processChunkPhase(
 
       // 残りを再確認
       const remaining = await dbGet<{ c: number }>(
-        "SELECT COUNT(*) as c FROM races WHERE status = '予定' AND date BETWEEN ? AND ?",
+        "SELECT COUNT(*) as c FROM races WHERE (status = '予定' OR (status = '出走確定' AND distance = 0)) AND date BETWEEN ? AND ?",
         [state.config.startDate, state.config.endDate]
       );
       state.phaseRemaining = remaining?.c ?? 0;

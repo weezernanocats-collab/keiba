@@ -133,8 +133,11 @@ export async function scrapeRaceCard(raceId: string): Promise<ScrapedRaceDetail>
   // レース情報
   const raceInfo = $('div.RaceData01').text().trim();
   const raceName = $('h1.RaceName').text().trim();
-  const distMatch = raceInfo.match(/(芝|ダート|障害)(\d+)m/);
-  const condMatch = raceInfo.match(/(良|稍重|重|不良)/);
+  // netkeiba uses abbreviated forms: ダ for ダート, 障 for 障害, 稍 for 稍重
+  const distMatch = raceInfo.match(/(芝|ダート|ダ|障害|障)(\d+)m/);
+  const condMatch = raceInfo.match(/(良|稍重|稍|重|不良|不)/);
+  // Normalize abbreviated track condition
+  const normalizedCond = condMatch?.[1] === '稍' ? '稍重' : condMatch?.[1] === '不' ? '不良' : condMatch?.[1];
   const weatherMatch = raceInfo.match(/(晴|曇|小雨|雨|小雪|雪)/);
   const timeMatch = raceInfo.match(/(\d{1,2}:\d{2})/);
 
@@ -186,9 +189,9 @@ export async function scrapeRaceCard(raceId: string): Promise<ScrapedRaceDetail>
     name: raceName,
     racecourseName: inferRacecourseName(racecourseId),
     racecourseId,
-    trackType: (distMatch?.[1] || 'ダート') as '芝' | 'ダート' | '障害',
+    trackType: (distMatch?.[1] === 'ダ' ? 'ダート' : distMatch?.[1] === '障' ? '障害' : distMatch?.[1] || 'ダート') as '芝' | 'ダート' | '障害',
     distance: parseInt(distMatch?.[2] || '0'),
-    trackCondition: condMatch?.[1] as '良' | '稍重' | '重' | '不良' | undefined,
+    trackCondition: normalizedCond as '良' | '稍重' | '重' | '不良' | undefined,
     weather: weatherMatch?.[1] as '晴' | '曇' | '小雨' | '雨' | '小雪' | '雪' | undefined,
     time: timeMatch?.[1],
     grade,
@@ -332,7 +335,7 @@ export async function scrapeHorseDetail(horseId: string): Promise<ScrapedHorseDe
       const jockeyName = $r(tds[13]).find('a').text().trim();
       const handicapWeight = parseFloat($r(tds[14]).text().trim()) || 0;
       const distText = $r(tds[15]).text().trim();
-      const trackMatch = distText.match(/(芝|ダート|障)(\d+)/);
+      const trackMatch = distText.match(/(芝|ダート|ダ|障害|障)(\d+)/);
       const condText = $r(tds[16]).text().trim();
       const time = $r(tds[17]).text().trim();
       const margin = $r(tds[18]).text().trim();
@@ -346,7 +349,7 @@ export async function scrapeHorseDetail(horseId: string): Promise<ScrapedHorseDe
           date: date.replace(/\//g, '-'),
           racecourseName,
           raceName,
-          trackType: (trackMatch?.[1] === '障' ? '障害' : trackMatch?.[1] || 'ダート') as '芝' | 'ダート' | '障害',
+          trackType: (trackMatch?.[1] === '障' || trackMatch?.[1] === '障害' ? '障害' : trackMatch?.[1] === 'ダ' || trackMatch?.[1] === 'ダート' ? 'ダート' : trackMatch?.[1] || 'ダート') as '芝' | 'ダート' | '障害',
           distance: parseInt(trackMatch?.[2] || '0'),
           trackCondition: (condText || '良') as '良' | '稍重' | '重' | '不良',
           entries,
