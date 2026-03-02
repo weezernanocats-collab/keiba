@@ -32,9 +32,13 @@ function isAuthorized(request: NextRequest): boolean {
   return provided === syncKey;
 }
 
-interface PredictionRow {
+interface PredictionWithRace {
   race_id: string;
   analysis_json: string;
+  grade: string | null;
+  track_type: string;
+  distance: number;
+  track_condition: string | null;
 }
 
 interface EntryRow {
@@ -49,14 +53,6 @@ interface EntryRow {
   popularity: number | null;
 }
 
-interface RaceRow {
-  id: string;
-  grade: string | null;
-  track_type: string;
-  distance: number;
-  track_condition: string | null;
-}
-
 export async function GET(request: NextRequest) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -66,15 +62,28 @@ export async function GET(request: NextRequest) {
   const from = searchParams.get('from') || '2020-01-01';
   const to = searchParams.get('to') || '2099-12-31';
 
-  // 結果確定済み + 予想生成済みのレースを取得
-  const predictions = await dbAll<PredictionRow>(`
-    SELECT p.race_id, p.analysis_json
-    FROM predictions p
-    JOIN races r ON r.id = p.race_id
-    WHERE r.status = '結果確定'
-      AND r.date BETWEEN ? AND ?
-      AND p.id = (SELECT MAX(p2.id) FROM predictions p2 WHERE p2.race_id = r.id)
-  `, [from, to]);
+  // 予想+レース情報を1クエリで取得、出走馬はJOINで並列取得
+  // WHERE IN (858+プレースホルダー) を排除し、JOINベースに変更
+  const [predictions, allEntries] = await Promise.all([
+    dbAll<PredictionWithRace>(`
+      SELECT p.race_id, p.analysis_json,
+             r.grade, r.track_type, r.distance, r.track_condition
+      FROM predictions p
+      JOIN races r ON r.id = p.race_id
+      WHERE r.status = '結果確定'
+        AND r.date BETWEEN ? AND ?
+        AND p.id = (SELECT MAX(p2.id) FROM predictions p2 WHERE p2.race_id = r.id)
+    `, [from, to]),
+    dbAll<EntryRow>(`
+      SELECT re.race_id, re.horse_number, re.post_position, re.age, re.sex,
+             re.handicap_weight, re.result_position, re.odds, re.popularity
+      FROM race_entries re
+      JOIN races r ON r.id = re.race_id
+      WHERE r.status = '結果確定'
+        AND r.date BETWEEN ? AND ?
+        AND re.result_position IS NOT NULL
+    `, [from, to]),
+  ]);
 
   if (predictions.length === 0) {
     return NextResponse.json({
@@ -84,25 +93,6 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  // 対象レースIDを収集
-  const raceIds = predictions.map(p => p.race_id);
-  const placeholders = raceIds.map(() => '?').join(',');
-
-  // レース情報を一括取得（N回 → 1回）
-  const allRaces = await dbAll<RaceRow>(
-    `SELECT id, grade, track_type, distance, track_condition FROM races WHERE id IN (${placeholders})`,
-    raceIds,
-  );
-  const racesById = new Map(allRaces.map(r => [r.id, r]));
-
-  // 出走馬を一括取得（N回 → 1回）
-  const allEntries = await dbAll<EntryRow>(
-    `SELECT race_id, horse_number, post_position, age, sex,
-            handicap_weight, result_position, odds, popularity
-     FROM race_entries
-     WHERE race_id IN (${placeholders}) AND result_position IS NOT NULL`,
-    raceIds,
-  );
   const entriesByRace = new Map<string, EntryRow[]>();
   for (const e of allEntries) {
     const arr = entriesByRace.get(e.race_id) || [];
@@ -129,9 +119,6 @@ export async function GET(request: NextRequest) {
 
     if (Object.keys(horseScores).length === 0) continue;
 
-    const race = racesById.get(pred.race_id);
-    if (!race) continue;
-
     const entries = entriesByRace.get(pred.race_id) || [];
     if (entries.length === 0) continue;
 
@@ -153,10 +140,10 @@ export async function GET(request: NextRequest) {
           case 'sex_encoded': return SEX_ENCODE[entry.sex] ?? 0;
           case 'handicapWeight': return entry.handicap_weight ?? 54;
           case 'postPosition': return entry.post_position ?? 1;
-          case 'grade_encoded': return GRADE_ENCODE[race.grade ?? ''] ?? 3;
-          case 'trackType_encoded': return TRACK_TYPE_ENCODE[race.track_type] ?? 0;
-          case 'distance': return race.distance;
-          case 'trackCondition_encoded': return TRACK_CONDITION_ENCODE[race.track_condition ?? '良'] ?? 0;
+          case 'grade_encoded': return GRADE_ENCODE[pred.grade ?? ''] ?? 3;
+          case 'trackType_encoded': return TRACK_TYPE_ENCODE[pred.track_type] ?? 0;
+          case 'distance': return pred.distance;
+          case 'trackCondition_encoded': return TRACK_CONDITION_ENCODE[pred.track_condition ?? '良'] ?? 0;
           case 'oddsLogTransform': return Math.log1p(odds);
           case 'popularityRatio': return fieldSize > 0 ? popularity / fieldSize : 0.5;
           default: return scores[name] ?? 50;
