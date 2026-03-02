@@ -41,14 +41,14 @@ async function main() {
   console.log(`Current predictions: ${predCount.rows[0].count}`);
   console.log(`Today's races: ${raceCount.rows[0].count}`);
 
-  // Step 2: Delete all predictions
-  console.log('\nDeleting all existing predictions...');
-  const deleteResult = await db.execute('DELETE FROM predictions');
-  console.log(`Deleted ${deleteResult.rowsAffected} predictions`);
-
-  // Also delete prediction_results to avoid stale evaluation data
+  // Step 2: Delete prediction_results first (FK references predictions), then predictions
+  console.log('\nDeleting prediction results (FK child)...');
   const deleteEval = await db.execute('DELETE FROM prediction_results');
   console.log(`Deleted ${deleteEval.rowsAffected} prediction results`);
+
+  console.log('Deleting all existing predictions...');
+  const deleteResult = await db.execute('DELETE FROM predictions');
+  console.log(`Deleted ${deleteResult.rowsAffected} predictions`);
 
   // Step 3: Call bulk_chunked API, starting directly at 'predictions' phase
   console.log('\nTriggering prediction regeneration via bulk_chunked API...');

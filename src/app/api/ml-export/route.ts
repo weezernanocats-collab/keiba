@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { dbAll, dbGet } from '@/lib/database';
+import { dbAll } from '@/lib/database';
 
 export const maxDuration = 60;
 
@@ -84,6 +84,32 @@ export async function GET(request: NextRequest) {
     });
   }
 
+  // 対象レースIDを収集
+  const raceIds = predictions.map(p => p.race_id);
+  const placeholders = raceIds.map(() => '?').join(',');
+
+  // レース情報を一括取得（N回 → 1回）
+  const allRaces = await dbAll<RaceRow>(
+    `SELECT id, grade, track_type, distance, track_condition FROM races WHERE id IN (${placeholders})`,
+    raceIds,
+  );
+  const racesById = new Map(allRaces.map(r => [r.id, r]));
+
+  // 出走馬を一括取得（N回 → 1回）
+  const allEntries = await dbAll<EntryRow>(
+    `SELECT race_id, horse_number, post_position, age, sex,
+            handicap_weight, result_position, odds, popularity
+     FROM race_entries
+     WHERE race_id IN (${placeholders}) AND result_position IS NOT NULL`,
+    raceIds,
+  );
+  const entriesByRace = new Map<string, EntryRow[]>();
+  for (const e of allEntries) {
+    const arr = entriesByRace.get(e.race_id) || [];
+    arr.push(e);
+    entriesByRace.set(e.race_id, arr);
+  }
+
   const rows: Array<{
     race_id: string;
     horse_number: number;
@@ -103,21 +129,10 @@ export async function GET(request: NextRequest) {
 
     if (Object.keys(horseScores).length === 0) continue;
 
-    // レース情報
-    const race = await dbGet<RaceRow>(
-      'SELECT id, grade, track_type, distance, track_condition FROM races WHERE id = ?',
-      [pred.race_id],
-    );
+    const race = racesById.get(pred.race_id);
     if (!race) continue;
 
-    // 出走馬（結果あり）
-    const entries = await dbAll<EntryRow>(`
-      SELECT race_id, horse_number, post_position, age, sex,
-             handicap_weight, result_position, odds, popularity
-      FROM race_entries
-      WHERE race_id = ? AND result_position IS NOT NULL
-    `, [pred.race_id]);
-
+    const entries = entriesByRace.get(pred.race_id) || [];
     if (entries.length === 0) continue;
 
     const fieldSize = entries.length;
