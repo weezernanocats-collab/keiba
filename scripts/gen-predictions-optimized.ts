@@ -20,7 +20,7 @@ for (const line of envContent.split('\n')) {
 delete process.env.GEMINI_API_KEY;
 
 import { ensureInitialized, dbAll, dbRun } from '../src/lib/database';
-import { generatePrediction } from '../src/lib/prediction-engine';
+import { generatePrediction, type HorseAnalysisInput } from '../src/lib/prediction-engine';
 import { savePrediction } from '../src/lib/queries';
 import type { TrackType, TrackCondition, Prediction } from '../src/types';
 
@@ -531,20 +531,20 @@ async function main() {
             horseId: re.horse_id,
             horseName: re.horse_name,
             age: re.age || 0,
-            sex: re.sex || '牡',
-            weight: re.weight,
+            sex: (re.sex || '牡') as '牡' | '牝' | 'セ',
+            weight: re.weight ?? undefined,
             jockeyId: re.jockey_id || '',
             jockeyName: re.jockey_name || '',
             trainerName: re.trainer_name || '',
             handicapWeight: re.handicap_weight || 0,
-            odds: re.odds,
-            popularity: re.popularity,
+            odds: re.odds ?? undefined,
+            popularity: re.popularity ?? undefined,
             result: re.result_position != null ? {
               position: re.result_position,
-              time: re.result_time,
-              margin: re.result_margin,
-              lastThreeFurlongs: re.result_last_three_furlongs,
-              cornerPositions: re.result_corner_positions,
+              time: re.result_time ?? undefined,
+              margin: re.result_margin ?? undefined,
+              lastThreeFurlongs: re.result_last_three_furlongs ?? undefined,
+              cornerPositions: re.result_corner_positions ?? undefined,
             } : undefined,
           },
           pastPerformances: perfs.slice(0, 100).map(p => ({
@@ -589,7 +589,7 @@ async function main() {
         race.track_condition as TrackCondition | undefined,
         race.racecourse_name,
         race.grade || undefined,
-        horseInputs,
+        horseInputs as HorseAnalysisInput[],
       );
 
       // 保存（これだけTursoに書き込み）
