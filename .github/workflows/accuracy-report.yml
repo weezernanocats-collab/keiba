@@ -21,14 +21,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Create .env.local
-        run: |
-          echo "TURSO_DATABASE_URL=\"${{ secrets.TURSO_DATABASE_URL }}\"" > .env.local
-          echo "TURSO_AUTH_TOKEN=\"${{ secrets.TURSO_AUTH_TOKEN }}\"" >> .env.local
-
       - name: Run accuracy report
         run: npx tsx -r tsconfig-paths/register scripts/report-accuracy.ts
-
-      - name: Cleanup
-        if: always()
-        run: rm -f .env.local
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
