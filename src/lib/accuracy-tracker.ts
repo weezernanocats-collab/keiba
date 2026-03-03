@@ -548,6 +548,99 @@ export async function autoCalibrate(): Promise<{ applied: boolean; message: stri
   };
 }
 
+// ==================== bets_json オッズ修復 ====================
+
+/**
+ * 既存 predictions の bets_json にオッズが埋め込まれていないものを
+ * odds テーブルから補完し、対応する prediction_results を再評価する。
+ */
+export async function repairBetsOdds(): Promise<{ repaired: number; reEvaluated: number }> {
+  // オッズ未埋め込みの predictions を取得
+  const predictions = await dbAll<{ id: number; race_id: string; bets_json: string }>(
+    `SELECT id, race_id, bets_json FROM predictions WHERE bets_json IS NOT NULL AND bets_json != '[]'`
+  );
+
+  let repaired = 0;
+  const racesToReEvaluate: string[] = [];
+
+  for (const pred of predictions) {
+    let bets: { type: string; selections: number[]; reasoning: string; expectedValue: number; odds?: number }[];
+    try {
+      bets = JSON.parse(pred.bets_json);
+    } catch { continue; }
+    if (!Array.isArray(bets) || bets.length === 0) continue;
+
+    // オッズが欠落しているベットがあるか
+    const needsRepair = bets.some(b => !b.odds || b.odds <= 0);
+    if (!needsRepair) continue;
+
+    // この race の単勝オッズを取得
+    const winOdds = await dbAll<{ horse_number1: number; odds: number }>(
+      `SELECT horse_number1, odds FROM odds WHERE race_id = ? AND bet_type = '単勝'`,
+      [pred.race_id]
+    );
+    if (winOdds.length === 0) continue;
+
+    const oddsMap = new Map(winOdds.map(o => [o.horse_number1, o.odds]));
+
+    let changed = false;
+    for (const bet of bets) {
+      if (bet.odds && bet.odds > 0) continue;
+      const sels = bet.selections || [];
+      if (sels.length === 0) continue;
+
+      if (bet.type === '単勝') {
+        const o = oddsMap.get(sels[0]);
+        if (o) { bet.odds = o; changed = true; }
+      } else if (bet.type === '複勝') {
+        const o = oddsMap.get(sels[0]);
+        if (o) { bet.odds = Math.max(1.1, o * 0.35); changed = true; }
+      } else if (bet.type === '馬連' && sels.length >= 2) {
+        const o1 = oddsMap.get(sels[0]);
+        const o2 = oddsMap.get(sels[1]);
+        if (o1 && o2) { bet.odds = o1 * o2 * 0.5; changed = true; }
+      } else if (bet.type === 'ワイド' && sels.length >= 2) {
+        const o1 = oddsMap.get(sels[0]);
+        const o2 = oddsMap.get(sels[1]);
+        if (o1 && o2) { bet.odds = o1 * o2 * 0.25; changed = true; }
+      } else if (bet.type === '馬単' && sels.length >= 2) {
+        const o1 = oddsMap.get(sels[0]);
+        const o2 = oddsMap.get(sels[1]);
+        if (o1 && o2) { bet.odds = o1 * o2 * 0.9; changed = true; }
+      } else if (bet.type === '三連複' && sels.length >= 3) {
+        const o1 = oddsMap.get(sels[0]);
+        const o2 = oddsMap.get(sels[1]);
+        const o3 = oddsMap.get(sels[2]);
+        if (o1 && o2 && o3) { bet.odds = o1 * o2 * o3 * 0.3; changed = true; }
+      } else if (bet.type === '三連単' && sels.length >= 3) {
+        const o1 = oddsMap.get(sels[0]);
+        const o2 = oddsMap.get(sels[1]);
+        const o3 = oddsMap.get(sels[2]);
+        if (o1 && o2 && o3) { bet.odds = o1 * o2 * o3 * 0.6; changed = true; }
+      }
+    }
+
+    if (changed) {
+      await dbRun(
+        `UPDATE predictions SET bets_json = ? WHERE id = ?`,
+        [JSON.stringify(bets), pred.id]
+      );
+      repaired++;
+      racesToReEvaluate.push(pred.race_id);
+    }
+  }
+
+  // 修復した prediction に対応する prediction_results を削除して再評価
+  let reEvaluated = 0;
+  for (const raceId of racesToReEvaluate) {
+    await dbRun(`DELETE FROM prediction_results WHERE race_id = ?`, [raceId]);
+    const result = await evaluateRacePrediction(raceId);
+    if (result) reEvaluated++;
+  }
+
+  return { repaired, reEvaluated };
+}
+
 /**
  * 起動時にDBからキャリブレーション済み重みがあれば読み込んで適用する。
  * 各エンドポイントの初回呼び出し時に一度だけ実行する。
