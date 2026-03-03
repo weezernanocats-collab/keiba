@@ -550,18 +550,28 @@ export async function autoCalibrate(): Promise<{ applied: boolean; message: stri
 
 // ==================== bets_json オッズ修復 ====================
 
+export interface RepairBetsOddsResult {
+  repaired: number;
+  reEvaluated: number;
+  done: boolean;
+  phase: 'repair' | 'reeval';
+}
+
 /**
  * 既存 predictions の bets_json にオッズが埋め込まれていないものを
- * odds テーブルから補完し、対応する prediction_results を再評価する。
+ * odds テーブルから補完する（修復フェーズのみ、再評価は別途）。
+ * チャンク方式: 1回の呼び出しで最大 CHUNK_SIZE 件を処理し、残件を返す。
  */
-export async function repairBetsOdds(): Promise<{ repaired: number; reEvaluated: number }> {
-  // オッズ未埋め込みの predictions を取得
+const REPAIR_CHUNK_SIZE = 10;
+
+export async function repairBetsOdds(offset = 0): Promise<RepairBetsOddsResult> {
+  // オッズ未埋め込みの predictions を取得（LIMIT+OFFSETでチャンク化）
   const predictions = await dbAll<{ id: number; race_id: string; bets_json: string }>(
-    `SELECT id, race_id, bets_json FROM predictions WHERE bets_json IS NOT NULL AND bets_json != '[]'`
+    `SELECT id, race_id, bets_json FROM predictions WHERE bets_json IS NOT NULL AND bets_json != '[]' ORDER BY id LIMIT ? OFFSET ?`,
+    [REPAIR_CHUNK_SIZE, offset]
   );
 
   let repaired = 0;
-  const racesToReEvaluate: string[] = [];
 
   for (const pred of predictions) {
     let bets: { type: string; selections: number[]; reasoning: string; expectedValue: number; odds?: number }[];
@@ -570,11 +580,9 @@ export async function repairBetsOdds(): Promise<{ repaired: number; reEvaluated:
     } catch { continue; }
     if (!Array.isArray(bets) || bets.length === 0) continue;
 
-    // オッズが欠落しているベットがあるか
     const needsRepair = bets.some(b => !b.odds || b.odds <= 0);
     if (!needsRepair) continue;
 
-    // この race の単勝オッズを取得
     const winOdds = await dbAll<{ horse_number1: number; odds: number }>(
       `SELECT horse_number1, odds FROM odds WHERE race_id = ? AND bet_type = '単勝'`,
       [pred.race_id]
@@ -626,19 +634,35 @@ export async function repairBetsOdds(): Promise<{ repaired: number; reEvaluated:
         [JSON.stringify(bets), pred.id]
       );
       repaired++;
-      racesToReEvaluate.push(pred.race_id);
     }
   }
 
-  // 修復した prediction に対応する prediction_results を削除して再評価
+  return { repaired, reEvaluated: 0, done: predictions.length < REPAIR_CHUNK_SIZE, phase: 'repair' };
+}
+
+/**
+ * 修復済みpredictionの再評価をチャンクで行う。
+ * prediction_results が存在しない prediction を対象にする。
+ */
+const REEVAL_CHUNK_SIZE = 5;
+
+export async function reEvaluateRepairedChunk(): Promise<RepairBetsOddsResult> {
+  // prediction_results が存在しない prediction の race_id を取得
+  const pending = await dbAll<{ race_id: string }>(
+    `SELECT DISTINCT p.race_id FROM predictions p
+     LEFT JOIN prediction_results pr ON p.race_id = pr.race_id
+     WHERE p.bets_json IS NOT NULL AND p.bets_json != '[]' AND pr.id IS NULL
+     LIMIT ?`,
+    [REEVAL_CHUNK_SIZE]
+  );
+
   let reEvaluated = 0;
-  for (const raceId of racesToReEvaluate) {
-    await dbRun(`DELETE FROM prediction_results WHERE race_id = ?`, [raceId]);
-    const result = await evaluateRacePrediction(raceId);
+  for (const row of pending) {
+    const result = await evaluateRacePrediction(row.race_id);
     if (result) reEvaluated++;
   }
 
-  return { repaired, reEvaluated };
+  return { repaired: 0, reEvaluated, done: pending.length < REEVAL_CHUNK_SIZE, phase: 'reeval' };
 }
 
 /**

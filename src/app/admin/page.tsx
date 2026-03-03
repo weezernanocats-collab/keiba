@@ -797,6 +797,7 @@ function AccuracyPanel({ headers, triggerSync }: {
 }) {
   const [acc, setAcc] = useState<AccuracyData | null>(null);
   const [cal, setCal] = useState<CalibrationData | null>(null);
+  const [repairStatus, setRepairStatus] = useState<string | null>(null);
 
   const fetchAccuracy = useCallback(async () => {
     try {
@@ -819,6 +820,54 @@ function AccuracyPanel({ headers, triggerSync }: {
       if (data.calibration) setCal(data.calibration);
     } catch { /* ignore */ }
   }, [headers]);
+
+  const runRepairBetsOdds = useCallback(async () => {
+    let offset = 0;
+    let totalRepaired = 0;
+    let totalReEvaluated = 0;
+
+    // Phase 1: オッズ修復（10件ずつ）
+    setRepairStatus('修復中...');
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      try {
+        const res = await fetch('/api/sync', {
+          method: 'POST', headers: headers(),
+          body: JSON.stringify({ type: 'repair_bets_odds', offset }),
+        });
+        const data = await res.json();
+        totalRepaired += data.repaired || 0;
+        if (data.done) break;
+        offset = data.nextOffset || offset + 10;
+        setRepairStatus(`修復中... ${totalRepaired}件修復済`);
+      } catch (e) {
+        setRepairStatus(`修復エラー: ${e instanceof Error ? e.message : String(e)}`);
+        return;
+      }
+    }
+
+    // Phase 2: 再評価（5件ずつ）
+    setRepairStatus(`修復${totalRepaired}件完了。再評価中...`);
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      try {
+        const res = await fetch('/api/sync', {
+          method: 'POST', headers: headers(),
+          body: JSON.stringify({ type: 'reeval_repaired' }),
+        });
+        const data = await res.json();
+        totalReEvaluated += data.reEvaluated || 0;
+        if (data.done) break;
+        setRepairStatus(`再評価中... ${totalReEvaluated}件完了`);
+      } catch (e) {
+        setRepairStatus(`再評価エラー: ${e instanceof Error ? e.message : String(e)}`);
+        return;
+      }
+    }
+
+    setRepairStatus(`完了: ${totalRepaired}件修復、${totalReEvaluated}件再評価`);
+    fetchAccuracy();
+  }, [headers, fetchAccuracy]);
 
   return (
     <div className="bg-card-bg border border-card-border rounded-xl p-4">
@@ -851,10 +900,10 @@ function AccuracyPanel({ headers, triggerSync }: {
           <span className="text-[10px] text-muted">照合データから最適ウェイトを分析</span>
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={() => triggerSync('repair_bets_odds')} className="px-3 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-500 transition-colors">
+          <button onClick={runRepairBetsOdds} disabled={repairStatus !== null && !repairStatus.startsWith('完了') && !repairStatus.startsWith('エラー')} className="px-3 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-500 transition-colors disabled:opacity-50">
             オッズ修復
           </button>
-          <span className="text-[10px] text-muted">bets_jsonにオッズを補完&amp;再評価</span>
+          <span className="text-[10px] text-muted">{repairStatus || 'bets_jsonにオッズを補完&再評価'}</span>
         </div>
       </div>
 

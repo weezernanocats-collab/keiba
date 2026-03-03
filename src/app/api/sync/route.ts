@@ -28,7 +28,7 @@ import {
 import { generatePrediction } from '@/lib/prediction-engine';
 import { dbAll, dbRun } from '@/lib/database';
 import { runBulkImport, getBulkImportProgress, abortBulkImport, type BulkImportConfig, runBulkChunk, createInitialChunkedState, type BulkChunkedState } from '@/lib/bulk-importer';
-import { evaluateRacePrediction, evaluateAllPendingRaces, getAccuracyStats, calibrateWeights, autoCalibrate, ensureCalibrationLoaded, repairBetsOdds } from '@/lib/accuracy-tracker';
+import { evaluateRacePrediction, evaluateAllPendingRaces, getAccuracyStats, calibrateWeights, autoCalibrate, ensureCalibrationLoaded, repairBetsOdds, reEvaluateRepairedChunk } from '@/lib/accuracy-tracker';
 import { calculateTodayTrackBias } from '@/lib/track-bias';
 import type { PastPerformance } from '@/types';
 
@@ -37,7 +37,7 @@ export const maxDuration = 60;
 
 // ==================== Types ====================
 
-type SyncType = 'races' | 'race_detail' | 'odds' | 'results' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort' | 'bulk_chunked' | 'accuracy' | 'evaluate_all' | 'calibrate' | 'regenerate_predictions' | 'repair_bets_odds';
+type SyncType = 'races' | 'race_detail' | 'odds' | 'results' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort' | 'bulk_chunked' | 'accuracy' | 'evaluate_all' | 'calibrate' | 'regenerate_predictions' | 'repair_bets_odds' | 'reeval_repaired';
 
 interface SyncRequest {
   type: SyncType;
@@ -51,6 +51,8 @@ interface SyncRequest {
   maxPastPerformances?: number;
   // チャンクバルクインポート用
   state?: BulkChunkedState;
+  // repair_bets_odds チャンク用
+  offset?: number;
 }
 
 interface SyncLogEntry {
@@ -150,7 +152,7 @@ export async function POST(request: NextRequest) {
   const { type, date, raceId, horseId } = body;
 
   // Validate type
-  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'bulk_chunked', 'accuracy', 'evaluate_all', 'calibrate', 'regenerate_predictions', 'repair_bets_odds'];
+  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'bulk_chunked', 'accuracy', 'evaluate_all', 'calibrate', 'regenerate_predictions', 'repair_bets_odds', 'reeval_repaired'];
   if (!type || !validTypes.includes(type)) {
     return NextResponse.json(
       {
@@ -193,15 +195,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ calibration, autoApplied: autoResult });
   }
 
-  // bets_json のオッズ修復 & 再評価
+  // bets_json のオッズ修復（チャンク方式、再評価なし）
   if (type === 'repair_bets_odds') {
-    const result = await repairBetsOdds();
-    const stats = await getAccuracyStats();
+    const result = await repairBetsOdds(body.offset || 0);
     return NextResponse.json({
-      message: `${result.repaired}件の予想のオッズを修復し、${result.reEvaluated}件を再評価しました`,
       ...result,
-      stats,
+      nextOffset: (body.offset || 0) + 10,
     });
+  }
+
+  // 修復済みpredictionの再評価（チャンク方式、5件ずつ）
+  if (type === 'reeval_repaired') {
+    const result = await reEvaluateRepairedChunk();
+    return NextResponse.json(result);
   }
 
   // バルクインポートの状態確認
