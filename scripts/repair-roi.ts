@@ -13,7 +13,7 @@ for (const line of envContent.split('\n')) {
   if (match && !process.env[match[1]]) process.env[match[1]] = match[2];
 }
 
-import { createClient } from '@libsql/client';
+import { createClient, type InValue } from '@libsql/client';
 
 const db = createClient({
   url: process.env.TURSO_DATABASE_URL!,
@@ -88,7 +88,7 @@ async function main() {
   let totalReturn = 0;
 
   const BATCH_SIZE = 50;
-  let batch: { sql: string; args: unknown[] }[] = [];
+  let batch: { sql: string; args: InValue[] }[] = [];
 
   for (const row of preds.rows) {
     const pred: PredRow = {
