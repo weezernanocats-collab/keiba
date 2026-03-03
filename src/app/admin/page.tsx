@@ -839,7 +839,7 @@ function AccuracyPanel({ headers, triggerSync }: {
         totalRepaired += data.repaired || 0;
         if (data.done) break;
         offset = data.nextOffset || offset + 10;
-        setRepairStatus(`修復中... ${totalRepaired}件修復済（残り約${data.remaining}件）`);
+        setRepairStatus(`修復中... ${totalRepaired}件修復済`);
       } catch (e) {
         setRepairStatus(`修復エラー: ${e instanceof Error ? e.message : String(e)}`);
         return;
@@ -858,7 +858,7 @@ function AccuracyPanel({ headers, triggerSync }: {
         const data = await res.json();
         totalReEvaluated += data.reEvaluated || 0;
         if (data.done) break;
-        setRepairStatus(`再評価中... ${totalReEvaluated}件完了（残り約${data.remaining}件）`);
+        setRepairStatus(`再評価中... ${totalReEvaluated}件完了`);
       } catch (e) {
         setRepairStatus(`再評価エラー: ${e instanceof Error ? e.message : String(e)}`);
         return;

@@ -553,7 +553,6 @@ export async function autoCalibrate(): Promise<{ applied: boolean; message: stri
 export interface RepairBetsOddsResult {
   repaired: number;
   reEvaluated: number;
-  remaining: number;
   done: boolean;
   phase: 'repair' | 'reeval';
 }
@@ -571,12 +570,6 @@ export async function repairBetsOdds(offset = 0): Promise<RepairBetsOddsResult> 
     `SELECT id, race_id, bets_json FROM predictions WHERE bets_json IS NOT NULL AND bets_json != '[]' ORDER BY id LIMIT ? OFFSET ?`,
     [REPAIR_CHUNK_SIZE, offset]
   );
-
-  // 全件数を取得して残件計算用に使う
-  const totalRow = await dbGet<{ c: number }>(
-    `SELECT COUNT(*) as c FROM predictions WHERE bets_json IS NOT NULL AND bets_json != '[]'`
-  );
-  const total = totalRow?.c ?? 0;
 
   let repaired = 0;
 
@@ -644,10 +637,7 @@ export async function repairBetsOdds(offset = 0): Promise<RepairBetsOddsResult> 
     }
   }
 
-  const nextOffset = offset + REPAIR_CHUNK_SIZE;
-  const remaining = Math.max(0, total - nextOffset);
-
-  return { repaired, reEvaluated: 0, remaining, done: predictions.length < REPAIR_CHUNK_SIZE, phase: 'repair' };
+  return { repaired, reEvaluated: 0, done: predictions.length < REPAIR_CHUNK_SIZE, phase: 'repair' };
 }
 
 /**
@@ -672,15 +662,7 @@ export async function reEvaluateRepairedChunk(): Promise<RepairBetsOddsResult> {
     if (result) reEvaluated++;
   }
 
-  // 残件
-  const remainRow = await dbGet<{ c: number }>(
-    `SELECT COUNT(DISTINCT p.race_id) as c FROM predictions p
-     LEFT JOIN prediction_results pr ON p.race_id = pr.race_id
-     WHERE p.bets_json IS NOT NULL AND p.bets_json != '[]' AND pr.id IS NULL`
-  );
-  const remaining = (remainRow?.c ?? 0) - reEvaluated;
-
-  return { repaired: 0, reEvaluated, remaining: Math.max(0, remaining), done: pending.length < REEVAL_CHUNK_SIZE, phase: 'reeval' };
+  return { repaired: 0, reEvaluated, done: pending.length < REEVAL_CHUNK_SIZE, phase: 'reeval' };
 }
 
 /**
