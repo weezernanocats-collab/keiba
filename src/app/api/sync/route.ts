@@ -28,7 +28,7 @@ import {
 import { generatePrediction } from '@/lib/prediction-engine';
 import { dbAll, dbRun } from '@/lib/database';
 import { runBulkImport, getBulkImportProgress, abortBulkImport, type BulkImportConfig, runBulkChunk, createInitialChunkedState, type BulkChunkedState } from '@/lib/bulk-importer';
-import { evaluateRacePrediction, evaluateAllPendingRaces, getAccuracyStats, calibrateWeights, autoCalibrate, ensureCalibrationLoaded } from '@/lib/accuracy-tracker';
+import { evaluateRacePrediction, evaluateAllPendingRaces, getAccuracyStats, calibrateWeights, autoCalibrate, ensureCalibrationLoaded, repairBetsOdds } from '@/lib/accuracy-tracker';
 import { calculateTodayTrackBias } from '@/lib/track-bias';
 import type { PastPerformance } from '@/types';
 
@@ -37,7 +37,7 @@ export const maxDuration = 60;
 
 // ==================== Types ====================
 
-type SyncType = 'races' | 'race_detail' | 'odds' | 'results' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort' | 'bulk_chunked' | 'accuracy' | 'evaluate_all' | 'calibrate' | 'regenerate_predictions';
+type SyncType = 'races' | 'race_detail' | 'odds' | 'results' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort' | 'bulk_chunked' | 'accuracy' | 'evaluate_all' | 'calibrate' | 'regenerate_predictions' | 'repair_bets_odds';
 
 interface SyncRequest {
   type: SyncType;
@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
   const { type, date, raceId, horseId } = body;
 
   // Validate type
-  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'bulk_chunked', 'accuracy', 'evaluate_all', 'calibrate', 'regenerate_predictions'];
+  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'bulk_chunked', 'accuracy', 'evaluate_all', 'calibrate', 'regenerate_predictions', 'repair_bets_odds'];
   if (!type || !validTypes.includes(type)) {
     return NextResponse.json(
       {
@@ -191,6 +191,17 @@ export async function POST(request: NextRequest) {
     // 自動適用を試行
     const autoResult = await autoCalibrate();
     return NextResponse.json({ calibration, autoApplied: autoResult });
+  }
+
+  // bets_json のオッズ修復 & 再評価
+  if (type === 'repair_bets_odds') {
+    const result = await repairBetsOdds();
+    const stats = await getAccuracyStats();
+    return NextResponse.json({
+      message: `${result.repaired}件の予想のオッズを修復し、${result.reEvaluated}件を再評価しました`,
+      ...result,
+      stats,
+    });
   }
 
   // バルクインポートの状態確認

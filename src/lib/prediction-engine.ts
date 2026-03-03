@@ -1285,6 +1285,9 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
 
   // --- 通常の馬券推奨（従来ロジック + EV表示） ---
 
+  // オッズ取得ヘルパー（0以下はundefined）
+  const oddsOf = (h: ScoredHorse) => (h.entry.odds && h.entry.odds > 0) ? h.entry.odds : undefined;
+
   if (gap12 > 5 && confidence >= 50) {
     const ev = evOf(top);
     bets.push({
@@ -1292,6 +1295,7 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
       selections: [top.entry.horseNumber],
       reasoning: `${top.entry.horseName}が総合力で群を抜いている。${top.reasons[0] || ''}。信頼度${confidence}%。${ev >= 1.0 ? `期待値${ev.toFixed(2)}で妙味あり。` : ''}`,
       expectedValue: ev,
+      odds: oddsOf(top),
     });
   }
 
@@ -1300,6 +1304,7 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
     selections: [top.entry.horseNumber],
     reasoning: `${top.entry.horseName}の3着以内は堅い。安定感重視の馬券。${top.scores.consistency >= 70 ? '着順も安定しており信頼できる。' : ''}`,
     expectedValue: evOf(top) * 0.7,
+    odds: oddsOf(top) ? Math.max(1.1, oddsOf(top)! * 0.35) : undefined,
   });
 
   bets.push({
@@ -1307,6 +1312,7 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
     selections: [top.entry.horseNumber, second.entry.horseNumber],
     reasoning: `${top.entry.horseName}と${second.entry.horseName}の上位2頭。${second.reasons[0] || ''}`,
     expectedValue: (evOf(top) + evOf(second)) / 2,
+    odds: (oddsOf(top) && oddsOf(second)) ? oddsOf(top)! * oddsOf(second)! * 0.5 : undefined,
   });
 
   if (third.totalScore > 40) {
@@ -1315,6 +1321,7 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
       selections: [top.entry.horseNumber, third.entry.horseNumber],
       reasoning: `${top.entry.horseName}軸で${third.entry.horseName}へ。${third.reasons[0] || '好走条件が揃っている'}`,
       expectedValue: (evOf(top) + evOf(third)) / 2,
+      odds: (oddsOf(top) && oddsOf(third)) ? oddsOf(top)! * oddsOf(third)! * 0.25 : undefined,
     });
   }
 
@@ -1324,6 +1331,7 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
       selections: [top.entry.horseNumber, second.entry.horseNumber, third.entry.horseNumber],
       reasoning: `上位3頭で堅く決まる想定。${confidence >= 60 ? '信頼度高め。' : '波乱の余地あり、抑え程度に。'}`,
       expectedValue: (evOf(top) + evOf(second) + evOf(third)) / 3,
+      odds: (oddsOf(top) && oddsOf(second) && oddsOf(third)) ? oddsOf(top)! * oddsOf(second)! * oddsOf(third)! * 0.3 : undefined,
     });
   }
 
@@ -1333,6 +1341,7 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
       selections: [top.entry.horseNumber, second.entry.horseNumber],
       reasoning: `${top.entry.horseName}が頭鉄板。2着に${second.entry.horseName}。${gap12 > 10 ? '1着は堅い。' : ''}`,
       expectedValue: evOf(top) * 1.5,
+      odds: (oddsOf(top) && oddsOf(second)) ? oddsOf(top)! * oddsOf(second)! * 0.9 : undefined,
     });
   }
 
@@ -1342,6 +1351,7 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
       selections: [top.entry.horseNumber, second.entry.horseNumber, third.entry.horseNumber],
       reasoning: `高配当狙い。着順まで予想。${top.entry.horseName}→${second.entry.horseName}→${third.entry.horseName}の順。`,
       expectedValue: (evOf(top) + evOf(second) + evOf(third)) / 3 * 2,
+      odds: (oddsOf(top) && oddsOf(second) && oddsOf(third)) ? oddsOf(top)! * oddsOf(second)! * oddsOf(third)! * 0.6 : undefined,
     });
   }
 
@@ -1362,6 +1372,7 @@ function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: num
       selections: [horse.entry.horseNumber],
       reasoning: `【バリューベット】${horse.entry.horseName}（${rank}番人気相当）。推定勝率${(prob * 100).toFixed(1)}%に対しオッズ${horse.entry.odds.toFixed(1)}倍は過小評価。期待値${ev.toFixed(2)}。${horse.reasons[0] || ''}`,
       expectedValue: ev,
+      odds: oddsOf(horse),
     });
   }
 

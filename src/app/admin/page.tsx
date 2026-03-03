@@ -850,6 +850,12 @@ function AccuracyPanel({ headers, triggerSync }: {
           </button>
           <span className="text-[10px] text-muted">照合データから最適ウェイトを分析</span>
         </div>
+        <div className="flex items-center gap-1">
+          <button onClick={() => triggerSync('repair_bets_odds')} className="px-3 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-500 transition-colors">
+            オッズ修復
+          </button>
+          <span className="text-[10px] text-muted">bets_jsonにオッズを補完&amp;再評価</span>
+        </div>
       </div>
 
       {!acc ? (
