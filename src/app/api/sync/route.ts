@@ -51,6 +51,8 @@ interface SyncRequest {
   maxPastPerformances?: number;
   // チャンクバルクインポート用
   state?: BulkChunkedState;
+  // repair_bets_odds チャンク用
+  offset?: number;
 }
 
 interface SyncLogEntry {
@@ -193,14 +195,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ calibration, autoApplied: autoResult });
   }
 
-  // bets_json のオッズ修復 & 再評価
+  // bets_json のオッズ修復 & 再評価（チャンク方式）
   if (type === 'repair_bets_odds') {
-    const result = await repairBetsOdds();
-    const stats = await getAccuracyStats();
+    const result = await repairBetsOdds(body.offset || 0);
     return NextResponse.json({
-      message: `${result.repaired}件の予想のオッズを修復し、${result.reEvaluated}件を再評価しました`,
+      message: result.done
+        ? `修復完了: ${result.repaired}件修復、${result.reEvaluated}件再評価`
+        : `チャンク処理中: ${result.repaired}件修復（残り約${result.remaining}件）`,
       ...result,
-      stats,
+      nextOffset: (body.offset || 0) + 50,
     });
   }
 

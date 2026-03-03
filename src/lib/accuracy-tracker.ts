@@ -550,15 +550,32 @@ export async function autoCalibrate(): Promise<{ applied: boolean; message: stri
 
 // ==================== bets_json オッズ修復 ====================
 
+export interface RepairBetsOddsResult {
+  repaired: number;
+  reEvaluated: number;
+  remaining: number;
+  done: boolean;
+}
+
 /**
  * 既存 predictions の bets_json にオッズが埋め込まれていないものを
  * odds テーブルから補完し、対応する prediction_results を再評価する。
+ * チャンク方式: 1回の呼び出しで最大 CHUNK_SIZE 件を処理し、残件を返す。
  */
-export async function repairBetsOdds(): Promise<{ repaired: number; reEvaluated: number }> {
-  // オッズ未埋め込みの predictions を取得
+const REPAIR_CHUNK_SIZE = 50;
+
+export async function repairBetsOdds(offset = 0): Promise<RepairBetsOddsResult> {
+  // オッズ未埋め込みの predictions を取得（LIMIT+OFFSETでチャンク化）
   const predictions = await dbAll<{ id: number; race_id: string; bets_json: string }>(
-    `SELECT id, race_id, bets_json FROM predictions WHERE bets_json IS NOT NULL AND bets_json != '[]'`
+    `SELECT id, race_id, bets_json FROM predictions WHERE bets_json IS NOT NULL AND bets_json != '[]' ORDER BY id LIMIT ? OFFSET ?`,
+    [REPAIR_CHUNK_SIZE, offset]
   );
+
+  // 全件数を取得して残件計算用に使う
+  const totalRow = await dbGet<{ c: number }>(
+    `SELECT COUNT(*) as c FROM predictions WHERE bets_json IS NOT NULL AND bets_json != '[]'`
+  );
+  const total = totalRow?.c ?? 0;
 
   let repaired = 0;
   const racesToReEvaluate: string[] = [];
@@ -570,11 +587,9 @@ export async function repairBetsOdds(): Promise<{ repaired: number; reEvaluated:
     } catch { continue; }
     if (!Array.isArray(bets) || bets.length === 0) continue;
 
-    // オッズが欠落しているベットがあるか
     const needsRepair = bets.some(b => !b.odds || b.odds <= 0);
     if (!needsRepair) continue;
 
-    // この race の単勝オッズを取得
     const winOdds = await dbAll<{ horse_number1: number; odds: number }>(
       `SELECT horse_number1, odds FROM odds WHERE race_id = ? AND bet_type = '単勝'`,
       [pred.race_id]
@@ -638,7 +653,10 @@ export async function repairBetsOdds(): Promise<{ repaired: number; reEvaluated:
     if (result) reEvaluated++;
   }
 
-  return { repaired, reEvaluated };
+  const nextOffset = offset + REPAIR_CHUNK_SIZE;
+  const remaining = Math.max(0, total - nextOffset);
+
+  return { repaired, reEvaluated, remaining, done: predictions.length < REPAIR_CHUNK_SIZE };
 }
 
 /**
