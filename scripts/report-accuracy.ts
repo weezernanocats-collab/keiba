@@ -9,6 +9,18 @@
  */
 
 import { createClient } from '@libsql/client';
+import { readFileSync, existsSync } from 'fs';
+
+// Load .env.local (GitHub Actions で作成される)
+if (existsSync('.env.local')) {
+  const envContent = readFileSync('.env.local', 'utf-8');
+  for (const line of envContent.split('\n')) {
+    const match = line.match(/^(\w+)="?([^"]*)"?$/);
+    if (match && !process.env[match[1]]) {
+      process.env[match[1]] = match[2];
+    }
+  }
+}
 
 async function main() {
   const url = process.env.TURSO_DATABASE_URL;
