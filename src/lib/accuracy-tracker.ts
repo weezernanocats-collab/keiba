@@ -80,9 +80,9 @@ export async function evaluateRacePrediction(raceId: string): Promise<Prediction
 
   if (!prediction) return null;
 
-  // レース結果を取得
-  const results = await dbAll<{ horse_id: string; horse_number: number; result_position: number }>(
-    'SELECT horse_id, horse_number, result_position FROM race_entries WHERE race_id = ? AND result_position IS NOT NULL ORDER BY result_position',
+  // レース結果を取得（オッズ含む）
+  const results = await dbAll<{ horse_id: string; horse_number: number; result_position: number; odds: number | null }>(
+    'SELECT horse_id, horse_number, result_position, odds FROM race_entries WHERE race_id = ? AND result_position IS NOT NULL ORDER BY result_position',
     [raceId]
   );
 
@@ -126,61 +126,15 @@ export async function evaluateRacePrediction(raceId: string): Promise<Prediction
     }
   }
 
-  // 推奨馬券のROI計算（各100円均一、bets_json内のoddsを使用 → 追加DBクエリなし）
-  let betInvestment = 0;
+  // ROI計算: 本命馬に単勝100円を仮定し、実オッズで計算
+  const BET_AMOUNT = 100;
+  const betInvestment = BET_AMOUNT;
   let betReturn = 0;
-  try {
-    const bets = JSON.parse(prediction.bets_json || '[]');
-    const positionMap = new Map(results.map(r => [r.horse_number, r.result_position]));
-
-    const UNIT = 100;
-    for (const bet of bets) {
-      const sels: number[] = bet.selections || [];
-      const odds = (bet.odds as number) || 0;
-      if (sels.length === 0 || odds <= 0) continue;
-      betInvestment += UNIT;
-
-      let hit = false;
-      if (bet.type === '単勝') {
-        hit = positionMap.get(sels[0]) === 1;
-      } else if (bet.type === '複勝') {
-        const pos = positionMap.get(sels[0]);
-        hit = pos !== undefined && pos <= 3;
-      } else if (bet.type === '馬連') {
-        if (sels.length >= 2) {
-          const p1 = positionMap.get(sels[0]);
-          const p2 = positionMap.get(sels[1]);
-          hit = p1 !== undefined && p2 !== undefined && p1 <= 2 && p2 <= 2;
-        }
-      } else if (bet.type === 'ワイド') {
-        if (sels.length >= 2) {
-          const p1 = positionMap.get(sels[0]);
-          const p2 = positionMap.get(sels[1]);
-          hit = p1 !== undefined && p2 !== undefined && p1 <= 3 && p2 <= 3;
-        }
-      } else if (bet.type === '馬単') {
-        hit = sels.length >= 2 && positionMap.get(sels[0]) === 1 && positionMap.get(sels[1]) === 2;
-      } else if (bet.type === '三連複') {
-        if (sels.length >= 3) {
-          const positions = sels.slice(0, 3).map(s => positionMap.get(s));
-          hit = positions.every(p => p !== undefined && p! <= 3);
-        }
-      } else if (bet.type === '三連単') {
-        hit = sels.length >= 3 &&
-          positionMap.get(sels[0]) === 1 &&
-          positionMap.get(sels[1]) === 2 &&
-          positionMap.get(sels[2]) === 3;
-      }
-
-      if (hit) {
-        betReturn += UNIT * odds;
-      }
-    }
-  } catch {
-    // bets parsing failed
+  if (winHit) {
+    const topPickOdds = topPickResult?.odds ?? 0;
+    betReturn = BET_AMOUNT * topPickOdds;
   }
-
-  const betRoi = betInvestment > 0 ? betReturn / betInvestment : 0;
+  const betRoi = betReturn / betInvestment;
 
   // DB に記録
   await dbRun(`
