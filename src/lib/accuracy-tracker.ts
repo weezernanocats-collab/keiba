@@ -555,14 +555,15 @@ export interface RepairBetsOddsResult {
   reEvaluated: number;
   remaining: number;
   done: boolean;
+  phase: 'repair' | 'reeval';
 }
 
 /**
  * 既存 predictions の bets_json にオッズが埋め込まれていないものを
- * odds テーブルから補完し、対応する prediction_results を再評価する。
+ * odds テーブルから補完する（修復フェーズのみ、再評価は別途）。
  * チャンク方式: 1回の呼び出しで最大 CHUNK_SIZE 件を処理し、残件を返す。
  */
-const REPAIR_CHUNK_SIZE = 50;
+const REPAIR_CHUNK_SIZE = 10;
 
 export async function repairBetsOdds(offset = 0): Promise<RepairBetsOddsResult> {
   // オッズ未埋め込みの predictions を取得（LIMIT+OFFSETでチャンク化）
@@ -578,7 +579,6 @@ export async function repairBetsOdds(offset = 0): Promise<RepairBetsOddsResult> 
   const total = totalRow?.c ?? 0;
 
   let repaired = 0;
-  const racesToReEvaluate: string[] = [];
 
   for (const pred of predictions) {
     let bets: { type: string; selections: number[]; reasoning: string; expectedValue: number; odds?: number }[];
@@ -641,22 +641,46 @@ export async function repairBetsOdds(offset = 0): Promise<RepairBetsOddsResult> 
         [JSON.stringify(bets), pred.id]
       );
       repaired++;
-      racesToReEvaluate.push(pred.race_id);
     }
-  }
-
-  // 修復した prediction に対応する prediction_results を削除して再評価
-  let reEvaluated = 0;
-  for (const raceId of racesToReEvaluate) {
-    await dbRun(`DELETE FROM prediction_results WHERE race_id = ?`, [raceId]);
-    const result = await evaluateRacePrediction(raceId);
-    if (result) reEvaluated++;
   }
 
   const nextOffset = offset + REPAIR_CHUNK_SIZE;
   const remaining = Math.max(0, total - nextOffset);
 
-  return { repaired, reEvaluated, remaining, done: predictions.length < REPAIR_CHUNK_SIZE };
+  return { repaired, reEvaluated: 0, remaining, done: predictions.length < REPAIR_CHUNK_SIZE, phase: 'repair' };
+}
+
+/**
+ * 修復済みpredictionの再評価をチャンクで行う。
+ * prediction_results が存在しない prediction を対象にする。
+ */
+const REEVAL_CHUNK_SIZE = 5;
+
+export async function reEvaluateRepairedChunk(): Promise<RepairBetsOddsResult> {
+  // prediction_results が存在しない prediction の race_id を取得
+  const pending = await dbAll<{ race_id: string }>(
+    `SELECT DISTINCT p.race_id FROM predictions p
+     LEFT JOIN prediction_results pr ON p.race_id = pr.race_id
+     WHERE p.bets_json IS NOT NULL AND p.bets_json != '[]' AND pr.id IS NULL
+     LIMIT ?`,
+    [REEVAL_CHUNK_SIZE]
+  );
+
+  let reEvaluated = 0;
+  for (const row of pending) {
+    const result = await evaluateRacePrediction(row.race_id);
+    if (result) reEvaluated++;
+  }
+
+  // 残件
+  const remainRow = await dbGet<{ c: number }>(
+    `SELECT COUNT(DISTINCT p.race_id) as c FROM predictions p
+     LEFT JOIN prediction_results pr ON p.race_id = pr.race_id
+     WHERE p.bets_json IS NOT NULL AND p.bets_json != '[]' AND pr.id IS NULL`
+  );
+  const remaining = (remainRow?.c ?? 0) - reEvaluated;
+
+  return { repaired: 0, reEvaluated, remaining: Math.max(0, remaining), done: pending.length < REEVAL_CHUNK_SIZE, phase: 'reeval' };
 }
 
 /**

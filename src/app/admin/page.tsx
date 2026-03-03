@@ -825,7 +825,9 @@ function AccuracyPanel({ headers, triggerSync }: {
     let offset = 0;
     let totalRepaired = 0;
     let totalReEvaluated = 0;
-    setRepairStatus('開始中...');
+
+    // Phase 1: オッズ修復（10件ずつ）
+    setRepairStatus('修復中...');
     // eslint-disable-next-line no-constant-condition
     while (true) {
       try {
@@ -835,19 +837,36 @@ function AccuracyPanel({ headers, triggerSync }: {
         });
         const data = await res.json();
         totalRepaired += data.repaired || 0;
-        totalReEvaluated += data.reEvaluated || 0;
-        if (data.done) {
-          setRepairStatus(`完了: ${totalRepaired}件修復、${totalReEvaluated}件再評価`);
-          fetchAccuracy();
-          break;
-        }
-        offset = data.nextOffset || offset + 50;
-        setRepairStatus(`処理中... ${totalRepaired}件修復済（残り約${data.remaining}件）`);
+        if (data.done) break;
+        offset = data.nextOffset || offset + 10;
+        setRepairStatus(`修復中... ${totalRepaired}件修復済（残り約${data.remaining}件）`);
       } catch (e) {
-        setRepairStatus(`エラー: ${e instanceof Error ? e.message : String(e)}`);
-        break;
+        setRepairStatus(`修復エラー: ${e instanceof Error ? e.message : String(e)}`);
+        return;
       }
     }
+
+    // Phase 2: 再評価（5件ずつ）
+    setRepairStatus(`修復${totalRepaired}件完了。再評価中...`);
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      try {
+        const res = await fetch('/api/sync', {
+          method: 'POST', headers: headers(),
+          body: JSON.stringify({ type: 'reeval_repaired' }),
+        });
+        const data = await res.json();
+        totalReEvaluated += data.reEvaluated || 0;
+        if (data.done) break;
+        setRepairStatus(`再評価中... ${totalReEvaluated}件完了（残り約${data.remaining}件）`);
+      } catch (e) {
+        setRepairStatus(`再評価エラー: ${e instanceof Error ? e.message : String(e)}`);
+        return;
+      }
+    }
+
+    setRepairStatus(`完了: ${totalRepaired}件修復、${totalReEvaluated}件再評価`);
+    fetchAccuracy();
   }, [headers, fetchAccuracy]);
 
   return (
