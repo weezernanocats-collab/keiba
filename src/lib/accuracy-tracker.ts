@@ -126,94 +126,54 @@ export async function evaluateRacePrediction(raceId: string): Promise<Prediction
     }
   }
 
-  // 推奨馬券のROI計算（各100円均一で仮想計算、実オッズをDBから取得）
+  // 推奨馬券のROI計算（各100円均一、bets_json内のoddsを使用 → 追加DBクエリなし）
   let betInvestment = 0;
   let betReturn = 0;
   try {
     const bets = JSON.parse(prediction.bets_json || '[]');
     const positionMap = new Map(results.map(r => [r.horse_number, r.result_position]));
 
-    // 実オッズをDBから取得
-    const oddsRows = await dbAll<{
-      bet_type: string; horse_number1: number; horse_number2: number | null;
-      horse_number3: number | null; odds: number; min_odds: number | null;
-    }>(
-      'SELECT bet_type, horse_number1, horse_number2, horse_number3, odds, min_odds FROM odds WHERE race_id = ?',
-      [raceId]
-    );
-    // オッズ検索用ヘルパー
-    const findOdds = (betType: string, h1: number, h2?: number, h3?: number): number => {
-      const row = oddsRows.find(r =>
-        r.bet_type === betType && r.horse_number1 === h1 &&
-        (h2 === undefined || r.horse_number2 === h2) &&
-        (h3 === undefined || r.horse_number3 === h3)
-      );
-      return row?.odds ?? 0;
-    };
-    const findMinOdds = (h: number): number => {
-      const row = oddsRows.find(r => r.bet_type === '複勝' && r.horse_number1 === h);
-      return row?.min_odds ?? row?.odds ?? 1.5;
-    };
-
     const UNIT = 100;
     for (const bet of bets) {
       const sels: number[] = bet.selections || [];
-      if (sels.length === 0) continue;
+      const odds = (bet.odds as number) || 0;
+      if (sels.length === 0 || odds <= 0) continue;
       betInvestment += UNIT;
 
+      let hit = false;
       if (bet.type === '単勝') {
-        if (positionMap.get(sels[0]) === 1) {
-          const odds = findOdds('単勝', sels[0]) || (bet.expectedOdds as number) || 0;
-          if (odds > 0) betReturn += UNIT * odds;
-        }
+        hit = positionMap.get(sels[0]) === 1;
       } else if (bet.type === '複勝') {
         const pos = positionMap.get(sels[0]);
-        if (pos !== undefined && pos <= 3) {
-          const odds = findMinOdds(sels[0]);
-          betReturn += UNIT * odds;
-        }
+        hit = pos !== undefined && pos <= 3;
       } else if (bet.type === '馬連') {
         if (sels.length >= 2) {
           const p1 = positionMap.get(sels[0]);
           const p2 = positionMap.get(sels[1]);
-          if (p1 !== undefined && p2 !== undefined && p1 <= 2 && p2 <= 2) {
-            const [s1, s2] = [sels[0], sels[1]].sort((a, b) => a - b);
-            const odds = findOdds('馬連', s1, s2);
-            if (odds > 0) betReturn += UNIT * odds;
-          }
+          hit = p1 !== undefined && p2 !== undefined && p1 <= 2 && p2 <= 2;
         }
       } else if (bet.type === 'ワイド') {
         if (sels.length >= 2) {
           const p1 = positionMap.get(sels[0]);
           const p2 = positionMap.get(sels[1]);
-          if (p1 !== undefined && p2 !== undefined && p1 <= 3 && p2 <= 3) {
-            const [s1, s2] = [sels[0], sels[1]].sort((a, b) => a - b);
-            const odds = findOdds('ワイド', s1, s2);
-            if (odds > 0) betReturn += UNIT * odds;
-          }
+          hit = p1 !== undefined && p2 !== undefined && p1 <= 3 && p2 <= 3;
         }
       } else if (bet.type === '馬単') {
-        if (sels.length >= 2 && positionMap.get(sels[0]) === 1 && positionMap.get(sels[1]) === 2) {
-          const odds = findOdds('馬単', sels[0], sels[1]);
-          if (odds > 0) betReturn += UNIT * odds;
-        }
+        hit = sels.length >= 2 && positionMap.get(sels[0]) === 1 && positionMap.get(sels[1]) === 2;
       } else if (bet.type === '三連複') {
         if (sels.length >= 3) {
           const positions = sels.slice(0, 3).map(s => positionMap.get(s));
-          if (positions.every(p => p !== undefined && p! <= 3)) {
-            const sorted = [...sels.slice(0, 3)].sort((a, b) => a - b);
-            const odds = findOdds('三連複', sorted[0], sorted[1], sorted[2]);
-            if (odds > 0) betReturn += UNIT * odds;
-          }
+          hit = positions.every(p => p !== undefined && p! <= 3);
         }
       } else if (bet.type === '三連単') {
-        if (sels.length >= 3 &&
-            positionMap.get(sels[0]) === 1 &&
-            positionMap.get(sels[1]) === 2 &&
-            positionMap.get(sels[2]) === 3) {
-          const odds = findOdds('三連単', sels[0], sels[1], sels[2]);
-          if (odds > 0) betReturn += UNIT * odds;
-        }
+        hit = sels.length >= 3 &&
+          positionMap.get(sels[0]) === 1 &&
+          positionMap.get(sels[1]) === 2 &&
+          positionMap.get(sels[2]) === 3;
+      }
+
+      if (hit) {
+        betReturn += UNIT * odds;
       }
     }
   } catch {

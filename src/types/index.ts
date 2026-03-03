@@ -169,6 +169,7 @@ export interface RecommendedBet {
   selections: number[];
   reasoning: string;
   expectedValue: number;
+  odds?: number;
 }
 
 // 過去成績
