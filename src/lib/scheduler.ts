@@ -293,10 +293,12 @@ async function executeMorningFetch(date: string): Promise<void> {
 
     // 2. 出馬表
     const raceDetails: ScrapedRaceDetail[] = [];
+    let totalEntries = 0;
     for (const race of races) {
       try {
         const detail = await scrapeRaceCard(race.id);
         raceDetails.push(detail);
+        totalEntries += detail.entries.length;
         await upsertRace({
           id: detail.id, name: detail.name, racecourseName: detail.racecourseName,
           racecourseId: detail.racecourseId, trackType: detail.trackType,
@@ -319,16 +321,20 @@ async function executeMorningFetch(date: string): Promise<void> {
       }
       await sleep(currentConfig.rateLimitMs);
     }
+    addLog('出馬表取得', `${raceDetails.length}レース, ${totalEntries}頭`, true);
 
     // 3. 馬詳細
     const horseIds = new Set<string>();
     for (const d of raceDetails) {
       for (const e of d.entries) horseIds.add(e.horseId);
     }
+    let horseCount = 0;
+    let newPerfCount = 0;
     for (const hid of horseIds) {
       try {
         const horse = await scrapeHorseDetail(hid);
         if (horse) {
+          horseCount++;
           await upsertHorse({
             id: horse.id, name: horse.name, birthDate: horse.birthDate,
             fatherName: horse.fatherName, motherName: horse.motherName,
@@ -339,6 +345,7 @@ async function executeMorningFetch(date: string): Promise<void> {
           for (const perf of horse.pastPerformances.slice(0, 50)) {
             const key = `${perf.date}_${perf.raceName}`;
             if (existingKeys.has(key)) continue;
+            newPerfCount++;
             await insertPastPerformance(horse.id, {
               date: perf.date, racecourseName: perf.racecourseName, raceName: perf.raceName,
               trackType: perf.trackType, distance: perf.distance, trackCondition: perf.trackCondition,
@@ -355,10 +362,12 @@ async function executeMorningFetch(date: string): Promise<void> {
       }
       await sleep(currentConfig.rateLimitMs);
     }
+    addLog('馬詳細取得', `${horseCount}/${horseIds.size}頭, 新規戦績${newPerfCount}件`, true);
 
     // 4. AI予想生成（校正済み重みがあれば適用）
     await ensureCalibrationLoaded();
 
+    let predictionCount = 0;
     for (const detail of raceDetails) {
       try {
         const raceData = await getRaceById(detail.id);
@@ -379,12 +388,14 @@ async function executeMorningFetch(date: string): Promise<void> {
           detail.trackCondition, detail.racecourseName, detail.grade, horseInputs,
         );
         await savePrediction(prediction);
+        predictionCount++;
       } catch (error) {
         addLog('予想生成失敗', `${detail.id}: ${errMsg(error)}`, false);
       }
     }
+    addLog('予想生成', `${predictionCount}/${raceDetails.length}レース`, true);
 
-    const detail = `${date}: レース${races.length}件, 馬${horseIds.size}頭`;
+    const detail = `${date}: レース${races.length}件, 馬${horseIds.size}頭, 予想${predictionCount}件`;
     addLog('朝のデータ取得完了', detail, true);
     await updateSchedulerRun(runId, 'completed', detail);
   } catch (error) {
@@ -408,6 +419,7 @@ async function executeOddsFetch(date: string): Promise<void> {
       "SELECT id, name FROM races WHERE date = ? AND status IN ('予定', '出走確定')",
       [date]
     );
+    addLog('オッズ取得対象', `${date}: ${races.length}レース`, true);
 
     let count = 0;
     for (const race of races) {
@@ -450,10 +462,12 @@ async function executeResultFetch(date: string): Promise<void> {
       "SELECT id, name FROM races WHERE date = ? AND status != '結果確定'",
       [date]
     );
+    addLog('結果取得対象', `${date}: ${races.length}レース`, true);
 
     // 結果取得はレスポンスが軽いので 500ms 間隔で十分（60秒制限対応）
     const resultRateMs = 500;
     let resultCount = 0;
+    let entryResultCount = 0;
     for (const race of races) {
       try {
         const results = await scrapeRaceResult(race.id);
@@ -465,6 +479,7 @@ async function executeResultFetch(date: string): Promise<void> {
               lastThreeFurlongs: r.lastThreeFurlongs, cornerPositions: r.cornerPositions,
             },
           });
+          entryResultCount++;
           // オッズ・人気も保存
           if (r.odds > 0) {
             await upsertOdds(race.id, '単勝', [r.horseNumber], r.odds);
@@ -480,11 +495,13 @@ async function executeResultFetch(date: string): Promise<void> {
       }
       await sleep(resultRateMs);
     }
+    addLog('結果スクレイピング完了', `${resultCount}レース確定, ${entryResultCount}頭分`, true);
 
     // 予想 vs 実結果の自動照合
     const evalResults = await evaluateAllPendingRaces();
     const wins = evalResults.filter(r => r.winHit).length;
     const places = evalResults.filter(r => r.placeHit).length;
+    addLog('予想照合', `${evalResults.length}件照合 → 単勝${wins}的中, 複勝${places}的中`, true);
 
     const detail = `${date}: ${resultCount}レース確定, 照合${evalResults.length}件 (単勝${wins}的中, 複勝${places}的中)`;
     addLog('結果取得完了', detail, true);
@@ -492,9 +509,7 @@ async function executeResultFetch(date: string): Promise<void> {
 
     // 結果取得後に自動キャリブレーションを試行
     const calibResult = await autoCalibrate();
-    if (calibResult.applied) {
-      addLog('自動キャリブレーション', calibResult.message, true);
-    }
+    addLog('自動キャリブレーション', calibResult.message, calibResult.applied);
   } catch (error) {
     addLog('結果取得失敗', errMsg(error), false);
     await updateSchedulerRun(runId, 'failed', undefined, errMsg(error));
@@ -504,12 +519,12 @@ async function executeResultFetch(date: string): Promise<void> {
 // ==================== ヘルパー ====================
 
 function addLog(action: string, detail: string, success: boolean): void {
-  schedulerLogs.unshift({
-    timestamp: new Date().toISOString(),
-    action,
-    detail,
-    success,
-  });
+  const timestamp = new Date().toISOString();
+  const prefix = success ? '✓' : '✗';
+  const msg = detail ? `${prefix} [${action}] ${detail}` : `${prefix} [${action}]`;
+  console.log(msg);
+
+  schedulerLogs.unshift({ timestamp, action, detail, success });
   if (schedulerLogs.length > MAX_LOGS) {
     schedulerLogs.length = MAX_LOGS;
   }
