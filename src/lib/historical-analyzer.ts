@@ -48,6 +48,19 @@ export interface JockeyTrainerCombo {
   placeRate: number;
 }
 
+export interface TrainerStats {
+  trainerName: string;
+  totalRaces: number;
+  wins: number;
+  places: number;
+  winRate: number;
+  placeRate: number;
+  turfWinRate: number;
+  dirtWinRate: number;
+  recentWinRate: number;  // 直近1年の勝率
+  recentRaces: number;
+}
+
 export interface SeasonalStats {
   month: number;
   races: number;
@@ -69,6 +82,7 @@ export interface RaceHistoricalContext {
   courseDistStats: CourseDistanceStats | null;
   sireStatsMap: Map<string, SireStats>;
   jockeyTrainerMap: Map<string, JockeyTrainerCombo>;
+  trainerStatsMap: Map<string, TrainerStats>;
   seasonalMap: Map<string, SeasonalStats[]>;
   secondStartMap: Map<string, SecondStartBonus | null>;
 }
@@ -106,6 +120,13 @@ export async function buildRaceContext(
     }
   }
 
+  const trainerStatsMap = new Map<string, TrainerStats>();
+  const uniqueTrainers = [...new Set(horses.map(h => h.trainerName).filter(Boolean))];
+  for (const trainer of uniqueTrainers) {
+    const stats = await getTrainerStats(trainer);
+    if (stats) trainerStatsMap.set(trainer, stats);
+  }
+
   const seasonalMap = new Map<string, SeasonalStats[]>();
   for (const h of horses) {
     const stats = await getHorseSeasonalStats(h.horseId);
@@ -117,7 +138,7 @@ export async function buildRaceContext(
     secondStartMap.set(h.horseId, await getSecondStartBonus(h.horseId));
   }
 
-  return { courseDistStats, sireStatsMap, jockeyTrainerMap, seasonalMap, secondStartMap };
+  return { courseDistStats, sireStatsMap, jockeyTrainerMap, trainerStatsMap, seasonalMap, secondStartMap };
 }
 
 // ==================== 個別統計関数 ====================
@@ -289,6 +310,59 @@ async function getJockeyTrainerCombo(jockeyId: string, trainerName: string): Pro
   };
 }
 
+async function getTrainerStats(trainerName: string): Promise<TrainerStats | null> {
+  // race_entries + races から調教師の成績を集計
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: any[] = await dbAll(`
+    SELECT re.result_position, r.track_type, r.date
+    FROM race_entries re
+    JOIN races r ON r.id = re.race_id
+    WHERE r.status = '結果確定'
+      AND re.trainer_name = ?
+      AND re.result_position IS NOT NULL
+  `, [trainerName]);
+
+  if (rows.length < 5) return null;
+
+  let wins = 0, places = 0;
+  let turfWins = 0, turfRaces = 0;
+  let dirtWins = 0, dirtRaces = 0;
+  let recentWins = 0, recentRaces = 0;
+
+  // 直近1年の閾値
+  const oneYearAgo = new Date();
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+  const oneYearAgoStr = oneYearAgo.toISOString().slice(0, 10);
+
+  for (const r of rows) {
+    const isWin = r.result_position === 1;
+    const isPlace = r.result_position <= 3;
+    if (isWin) wins++;
+    if (isPlace) places++;
+
+    if (r.track_type === '芝') { turfRaces++; if (isWin) turfWins++; }
+    if (r.track_type === 'ダート') { dirtRaces++; if (isWin) dirtWins++; }
+
+    if (r.date >= oneYearAgoStr) {
+      recentRaces++;
+      if (isWin) recentWins++;
+    }
+  }
+
+  return {
+    trainerName,
+    totalRaces: rows.length,
+    wins,
+    places,
+    winRate: wins / rows.length,
+    placeRate: places / rows.length,
+    turfWinRate: turfRaces > 0 ? turfWins / turfRaces : 0,
+    dirtWinRate: dirtRaces > 0 ? dirtWins / dirtRaces : 0,
+    recentWinRate: recentRaces > 0 ? recentWins / recentRaces : 0,
+    recentRaces,
+  };
+}
+
 async function getHorseSeasonalStats(horseId: string): Promise<SeasonalStats[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: any[] = await dbAll(`
@@ -412,6 +486,39 @@ export function calcSireAptitudeScore(
   // 道悪適性
   if ((trackCondition === '重' || trackCondition === '不良') && sireStats.heavyStats.races >= 3) {
     score += (sireStats.heavyStats.winRate - sireStats.winRate) * 100;
+  }
+
+  return Math.min(100, Math.max(10, score));
+}
+
+/**
+ * 調教師能力スコア (0-100)
+ * 全体勝率 + トラック別勝率 + 直近成績を総合評価
+ */
+export function calcTrainerAbilityScore(
+  stats: TrainerStats | undefined,
+  trackType: string,
+): number {
+  if (!stats || stats.totalRaces < 10) return 50;
+
+  // 基準: 平均勝率 ~8%、トップ調教師 ~15-20%
+  let score = 30;
+
+  // 全体勝率ベース (8%=+20, 15%=+55)
+  score += stats.winRate * 400;
+
+  // トラック別適性ボーナス
+  const trackWinRate = trackType === '芝' ? stats.turfWinRate : stats.dirtWinRate;
+  if (trackWinRate > stats.winRate) {
+    score += (trackWinRate - stats.winRate) * 200;
+  } else if (trackWinRate < stats.winRate) {
+    score += (trackWinRate - stats.winRate) * 100;
+  }
+
+  // 直近成績による補正 (好調/不調)
+  if (stats.recentRaces >= 10) {
+    const recentDiff = stats.recentWinRate - stats.winRate;
+    score += recentDiff * 100;
   }
 
   return Math.min(100, Math.max(10, score));

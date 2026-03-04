@@ -268,6 +268,12 @@ function installCacheInterceptor(client: any) {
       return mockResult(computeSirePerfs(args[0]));
     }
 
+    // --- getTrainerStats (race_entries + races by trainer_name) ---
+    if (sqlNorm.includes('from race_entries re') && sqlNorm.includes('join races r') && sqlNorm.includes('re.trainer_name') && sqlNorm.includes('result_position is not null')) {
+      cacheHits++;
+      return mockResult(computeTrainerPerfs(args[0]));
+    }
+
     // --- getJockeyTrainerCombo ---
     if (sqlNorm.includes('from past_performances pp') && sqlNorm.includes('join horses h') && sqlNorm.includes('jockey_name') && sqlNorm.includes('trainer_name')) {
       cacheHits++;
@@ -396,6 +402,24 @@ function computeJockeyTrainerPerfs(jockeyId: string, trainerName: string) {
     for (const p of perfs) {
       if (p.jockey_name === jockeyName && p.entries > 0) {
         results.push({ position: p.position, entries: p.entries });
+      }
+    }
+  }
+  return results;
+}
+
+function computeTrainerPerfs(trainerName: string) {
+  const results: any[] = [];
+  for (const [raceId, entries] of entriesByRace) {
+    const race = racesById.get(raceId);
+    if (!race || race.status !== '結果確定') continue;
+    for (const e of entries) {
+      if (e.trainer_name === trainerName && e.result_position != null) {
+        results.push({
+          result_position: e.result_position,
+          track_type: race.track_type,
+          date: race.date,
+        });
       }
     }
   }

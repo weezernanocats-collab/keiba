@@ -1,34 +1,32 @@
 /**
- * AI予想エンジン v4
+ * AI予想エンジン v4.2
  *
- * 過去の成績データを16の観点から多角的に分析し、レースの予想を生成する。
+ * 過去の成績データを18の観点から多角的に分析し、レースの予想を生成する。
  * v4: ベイズ推定フォールバック + 動的ウェイト調整 + データ充実度ベース信頼度
- *
- * v4の改善点:
- *   - データ不足時に「50点デフォルト」ではなく母集団事前分布を使用
- *   - データ充実度に応じてファクター重みを動的に再配分
- *   - 信頼度計算にデータ量・カバレッジを組み込み
+ * v4.2: 調教師能力ファクター追加
  *
  * スコアリング要素と重み:
- *   === 個体分析 (従来) ===
- *   1.  直近成績        (15%) - 直近5走の着順を重み付け評価
- *   2.  コース適性      (7%)  - 同競馬場での過去成績
- *   3.  距離適性        (10%) - 同距離帯での過去成績
- *   4.  馬場状態適性    (5%)  - 同馬場状態での成績
- *   5.  騎手能力        (7%)  - 騎手の勝率・複勝率
- *   6.  スピード指数    (8%)  - タイムベースの速度評価
+ *   === 個体分析 ===
+ *   1.  直近成績        (18%) - 直近5走の着順を重み付け評価
+ *   2.  コース適性      (6%)  - 同競馬場での過去成績
+ *   3.  距離適性        (12%) - 同距離帯での過去成績
+ *   4.  馬場状態適性    (4%)  - 同馬場状態での成績
+ *   5.  騎手能力        (6%)  - 騎手の勝率・複勝率
+ *   6.  スピード指数    (10%) - タイムベースの速度評価
  *   7.  クラス実績      (4%)  - 重賞など上位クラスでの成績
- *   8.  脚質適性        (7%)  - 展開との相性（逃げ/先行/差し/追込）
- *   9.  枠順分析        (4%)  - コース形態に応じた枠の有利不利
- *   10. ローテーション  (5%)  - 前走からの間隔と叩き良化パターン
- *   11. 上がり3F        (7%)  - 末脚の切れ味評価
+ *   8.  脚質適性        (5%)  - 展開との相性（逃げ/先行/差し/追込）
+ *   9.  枠順分析        (2%)  - コース形態に応じた枠の有利不利
+ *   10. ローテーション  (4%)  - 前走からの間隔と叩き良化パターン
+ *   11. 上がり3F        (8%)  - 末脚の切れ味評価
  *   12. 安定性          (4%)  - 着順のバラつきの少なさ
  *
- *   === 統計ベース分析 (v3新規) ===
- *   13. 血統適性        (6%)  - 種牡馬産駒の統計的なコース/距離/馬場適性
- *   14. 騎手×調教師     (4%)  - コンビの過去成績統計
- *   15. 統計的枠順バイアス (4%) - 過去データから算出した枠別勝率
- *   16. 季節パターン    (3%)  - 馬ごとの季節別成績傾向
+ *   === 統計ベース分析 ===
+ *   13. 血統適性        (5%)  - 種牡馬産駒の統計的なコース/距離/馬場適性
+ *   14. 調教師能力      (4%)  - 調教師の勝率・トラック別成績・直近成績
+ *   15. 騎手×調教師     (2%)  - コンビの過去成績統計
+ *   16. 統計的枠順バイアス (3%) - 過去データから算出した枠別勝率
+ *   17. 季節パターン    (2%)  - 馬ごとの季節別成績傾向
+ *   18. 斤量アドバンテージ (2%) - 平均斤量との差分
  */
 
 import type {
@@ -40,6 +38,7 @@ import {
   buildRaceContext,
   calcSireAptitudeScore,
   calcJockeyTrainerScore,
+  calcTrainerAbilityScore,
   calcHistoricalPostBias,
   calcSeasonalScore,
   calcSecondStartScore,
@@ -49,7 +48,7 @@ import { enhancePredictionWithGemini, type GeminiRaceContext } from './gemini-en
 import { callMLPredict, buildMLFeatures, type MLHorseInput } from './ml-client';
 import { calculateTodayTrackBias, type TodayTrackBias } from './track-bias';
 
-// デフォルト重み設定 (v4.1: 的中率最適化 — 直近成績・距離・スピードの重みを増加)
+// デフォルト重み設定 (v4.2: 調教師能力を追加、的中率最適化)
 const DEFAULT_WEIGHTS: Record<string, number> = {
   // 個体分析 (直近・距離・速度の重み強化)
   recentForm: 0.18,
@@ -63,13 +62,14 @@ const DEFAULT_WEIGHTS: Record<string, number> = {
   postPositionBias: 0.02,
   rotation: 0.04,
   lastThreeFurlongs: 0.08,
-  consistency: 0.05,
+  consistency: 0.04,
   // 統計ベース分析
   sireAptitude: 0.05,
-  jockeyTrainerCombo: 0.03,
+  trainerAbility: 0.04,
+  jockeyTrainerCombo: 0.02,
   historicalPostBias: 0.03,
-  seasonalPattern: 0.03,
-  handicapAdvantage: 0.03,
+  seasonalPattern: 0.02,
+  handicapAdvantage: 0.02,
 };
 
 // WEIGHTS はキャリブレーション結果で上書き可能
@@ -138,6 +138,7 @@ const POPULATION_PRIORS: Record<string, number> = {
   lastThreeFurlongs: 45,   // 上がり3Fデータなし → やや不利
   consistency: 45,         // 走数少 → 安定感不明は不利寄り
   sireAptitude: 50,        // 血統は中立prior
+  trainerAbility: 45,      // 調教師不明は平均以下
   jockeyTrainerCombo: 50,  // コンボは中立prior
   historicalPostBias: 50,  // 枠バイアスは中立
   seasonalPattern: 50,     // 季節は中立
@@ -164,6 +165,7 @@ function calcFactorReliability(factor: string, dataPoints: number): number {
     lastThreeFurlongs: 3,
     consistency: 5,
     sireAptitude: 10,
+    trainerAbility: 20,
     jockeyTrainerCombo: 5,
     historicalPostBias: 20,
     seasonalPattern: 6,
@@ -518,7 +520,18 @@ function scoreHorse(
     reasons.push(`父${fatherName}産駒のこの条件成績は低調（統計）`);
   }
 
-  // 14. 騎手×調教師コンボ (0-100)
+  // 14. 調教師能力 (0-100)
+  const trainerStats = ctx.trainerStatsMap.get(entry.trainerName);
+  scores.trainerAbility = calcTrainerAbilityScore(trainerStats, trackType);
+  if (trainerStats && trainerStats.totalRaces >= 20) {
+    if (scores.trainerAbility >= 70) {
+      reasons.push(`${entry.trainerName}厩舎は高勝率（${(trainerStats.winRate * 100).toFixed(1)}%）`);
+    } else if (scores.trainerAbility <= 35) {
+      reasons.push(`${entry.trainerName}厩舎の勝率は低調`);
+    }
+  }
+
+  // 15. 騎手×調教師コンボ (0-100)
   const comboKey = `${entry.jockeyId}__${entry.trainerName}`;
   const combo = ctx.jockeyTrainerMap.get(comboKey);
   scores.jockeyTrainerCombo = calcJockeyTrainerScore(combo);
@@ -526,14 +539,14 @@ function scoreHorse(
     reasons.push(`${entry.jockeyName}×${entry.trainerName}コンビ好相性（勝率${Math.round(combo.winRate * 100)}%）`);
   }
 
-  // 15. 統計的枠順バイアス (0-100)
+  // 16. 統計的枠順バイアス (0-100)
   scores.historicalPostBias = calcHistoricalPostBias(ctx.courseDistStats, entry.postPosition);
   if (ctx.courseDistStats && ctx.courseDistStats.totalRaces >= 30) {
     if (scores.historicalPostBias >= 70) reasons.push(`${racecourseName}${distance}mでこの枠は統計的に好成績`);
     else if (scores.historicalPostBias <= 35) reasons.push(`${racecourseName}${distance}mでこの枠は統計的に不利`);
   }
 
-  // 16. 季節パターン (0-100)
+  // 17. 季節パターン (0-100)
   const seasonal = ctx.seasonalMap.get(entry.horseId);
   scores.seasonalPattern = calcSeasonalScore(seasonal, month);
   if (seasonal && scores.seasonalPattern >= 70) {
@@ -542,7 +555,7 @@ function scoreHorse(
     reasons.push(`${month}月は成績が振るわない傾向`);
   }
 
-  // 17. 斤量（ハンデ）アドバンテージ (0-100)
+  // 18. 斤量（ハンデ）アドバンテージ (0-100)
   // レース出走馬の平均斤量との差分をスコア化（軽い=有利）
   // 55kg基準、±2kgで±15点程度のスケール
   {
@@ -601,6 +614,7 @@ function scoreHorse(
     { factor: 'lastThreeFurlongs', reliability: calcFactorReliability('lastThreeFurlongs', countL3F), dataPoints: countL3F },
     { factor: 'consistency', reliability: calcFactorReliability('consistency', pp.length), dataPoints: pp.length },
     { factor: 'sireAptitude', reliability: calcFactorReliability('sireAptitude', sireData?.totalRaces || 0), dataPoints: sireData?.totalRaces || 0 },
+    { factor: 'trainerAbility', reliability: calcFactorReliability('trainerAbility', trainerStats?.totalRaces || 0), dataPoints: trainerStats?.totalRaces || 0 },
     { factor: 'jockeyTrainerCombo', reliability: calcFactorReliability('jockeyTrainerCombo', comboData?.totalRaces || 0), dataPoints: comboData?.totalRaces || 0 },
     { factor: 'historicalPostBias', reliability: calcFactorReliability('historicalPostBias', ctx.courseDistStats?.totalRaces || 0), dataPoints: ctx.courseDistStats?.totalRaces || 0 },
     { factor: 'seasonalPattern', reliability: calcFactorReliability('seasonalPattern', seasonalData?.reduce((s, m) => s + m.races, 0) || 0), dataPoints: seasonalData?.reduce((s, m) => s + m.races, 0) || 0 },

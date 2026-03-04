@@ -153,6 +153,7 @@ export function makeEmptyContext() {
     courseDistStats: null,
     sireStatsMap: new Map(),
     jockeyTrainerMap: new Map(),
+    trainerStatsMap: new Map(),
     seasonalMap: new Map(),
     secondStartMap: new Map(),
   };
