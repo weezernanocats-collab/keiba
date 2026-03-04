@@ -270,7 +270,7 @@ export async function upsertRaceEntry(raceId: string, entry: Partial<RaceEntry>)
 // ==================== 馬 ====================
 
 export async function getHorseById(horseId: string) {
-  const horse = await dbGet<Record<string, unknown>>('SELECT * FROM horses WHERE id = ?', [horseId]);
+  const horse = await dbGet<Record<string, unknown> & { id: string; name: string; age: number }>('SELECT * FROM horses WHERE id = ?', [horseId]);
   if (!horse) return null;
 
   const traits = await dbAll<{ trait_type: string; description: string }>('SELECT * FROM horse_traits WHERE horse_id = ?', [horseId]);

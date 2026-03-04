@@ -629,6 +629,7 @@ describe('calculateConfidence', () => {
       courseDistStats: { totalRaces: 50 } as never,
       sireStatsMap: new Map(Array.from({ length: 6 }, (_, i) => [`sire${i}`, {} as never])),
       jockeyTrainerMap: new Map(Array.from({ length: 4 }, (_, i) => [`jt${i}`, {} as never])),
+      trainerStatsMap: new Map(),
       seasonalMap: new Map(Array.from({ length: 4 }, (_, i) => [`h${i}`, [] as never])),
       secondStartMap: new Map(),
     };
