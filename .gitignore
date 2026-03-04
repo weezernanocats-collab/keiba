@@ -45,3 +45,6 @@ next-env.d.ts
 /data/*.db-wal
 /data/*.db-shm
 .env*.local
+
+# ML training data (large file, regenerate with export-training-data.ts)
+model/training_data.json

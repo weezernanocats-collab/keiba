@@ -21,6 +21,7 @@ VERCEL_URL = os.environ.get("VERCEL_URL", "").rstrip("/")
 SYNC_KEY = os.environ.get("SYNC_KEY", "")
 MIN_SAMPLES = 100  # 最低サンプル数（これ未満なら学習スキップ）
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "model")
+LOCAL_DATA_FILE = os.path.join(MODEL_DIR, "training_data.json")
 
 
 def fetch_chunk(url, headers, retries=2):
@@ -120,13 +121,22 @@ def train_model(X_train, y_train, X_val, y_val, label_name, max_depth):
     return model, auc
 
 
-def main():
-    if not VERCEL_URL:
-        print("ERROR: APP_URL secret が未設定です")
-        sys.exit(1)
+def load_local_data():
+    """ローカルの training_data.json から読み込む"""
+    print(f"ローカルデータ読み込み: {LOCAL_DATA_FILE}")
+    with open(LOCAL_DATA_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-    # データ取得
-    data = fetch_data()
+
+def main():
+    # ローカルデータがあればそちらを優先
+    if os.path.exists(LOCAL_DATA_FILE):
+        data = load_local_data()
+    elif VERCEL_URL:
+        data = fetch_data()
+    else:
+        print("ERROR: ローカルデータ (model/training_data.json) も VERCEL_URL も見つかりません")
+        sys.exit(1)
     feature_names = data["feature_names"]
     rows = data["rows"]
 

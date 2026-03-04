@@ -9,7 +9,8 @@ const FEATURE_NAMES = [
   'recentForm', 'courseAptitude', 'distanceAptitude', 'trackConditionAptitude',
   'jockeyAbility', 'speedRating', 'classPerformance', 'runningStyle',
   'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
-  'sireAptitude', 'jockeyTrainerCombo', 'historicalPostBias', 'seasonalPattern',
+  'sireAptitude', 'trainerAbility', 'jockeyTrainerCombo', 'historicalPostBias', 'seasonalPattern',
+  'handicapAdvantage',
   // コンテキスト特徴量
   'fieldSize', 'odds', 'popularity', 'age', 'sex_encoded',
   'handicapWeight', 'postPosition', 'grade_encoded', 'trackType_encoded',
