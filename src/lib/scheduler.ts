@@ -33,6 +33,10 @@ import {
   getRaceById,
   savePrediction,
   getJockeyStats,
+  getTrainerStats,
+  getSireTrackWinRate,
+  getJockeyDistanceWinRate,
+  getJockeyCourseWinRate,
   recordSchedulerRun,
   updateSchedulerRun,
   hasSchedulerRunToday,
@@ -377,15 +381,27 @@ async function executeMorningFetch(date: string): Promise<void> {
           const pastPerfs = await getHorsePastPerformances(re.horseId, 100);
           const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
           const jockeyStats = await getJockeyStats(re.jockeyId);
+          const trainerStats = await getTrainerStats(re.trainerName);
+          const fatherName = horseData?.father_name || '';
+          const [sireTrackWR, jockeyDistWR, jockeyCourseWR] = await Promise.all([
+            getSireTrackWinRate(fatherName, detail.trackType),
+            getJockeyDistanceWinRate(re.jockeyId, detail.distance),
+            getJockeyCourseWinRate(re.jockeyId, detail.racecourseName),
+          ]);
           horseInputs.push({
             entry: re, pastPerformances: pastPerfs,
             jockeyWinRate: jockeyStats.winRate, jockeyPlaceRate: jockeyStats.placeRate,
-            fatherName: horseData?.father_name || '',
+            fatherName,
+            trainerWinRate: trainerStats.winRate, trainerPlaceRate: trainerStats.placeRate,
+            sireTrackWinRate: sireTrackWR,
+            jockeyDistanceWinRate: jockeyDistWR,
+            jockeyCourseWinRate: jockeyCourseWR,
           });
         }
         const prediction = await generatePrediction(
           detail.id, detail.name, date, detail.trackType, detail.distance,
           detail.trackCondition, detail.racecourseName, detail.grade, horseInputs,
+          detail.weather,
         );
         await savePrediction(prediction);
         predictionCount++;

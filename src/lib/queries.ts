@@ -597,6 +597,101 @@ export async function getJockeyStats(jockeyId: string): Promise<{ winRate: numbe
   return { winRate: DEFAULT_WIN_RATE, placeRate: DEFAULT_PLACE_RATE };
 }
 
+// ==================== 調教師統計（予想エンジン用） ====================
+
+/**
+ * 調教師名からDB上の勝率・複勝率を race_entries から計算する。
+ */
+export async function getTrainerStats(trainerName: string): Promise<{ winRate: number; placeRate: number }> {
+  const DEFAULT_WIN_RATE = 0.08;
+  const DEFAULT_PLACE_RATE = 0.20;
+
+  if (!trainerName) return { winRate: DEFAULT_WIN_RATE, placeRate: DEFAULT_PLACE_RATE };
+
+  const stats = await dbGet<{ total: number; wins: number; places: number }>(`
+    SELECT
+      COUNT(*) as total,
+      SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN e.result_position <= 2 THEN 1 ELSE 0 END) as places
+    FROM race_entries e
+    JOIN races r ON e.race_id = r.id
+    WHERE e.trainer_name = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL
+  `, [trainerName]);
+
+  if (stats && stats.total >= 10) {
+    return {
+      winRate: stats.wins / stats.total,
+      placeRate: stats.places / stats.total,
+    };
+  }
+
+  return { winRate: DEFAULT_WIN_RATE, placeRate: DEFAULT_PLACE_RATE };
+}
+
+// ==================== 交互作用統計（予想エンジン用） ====================
+
+/**
+ * 種牡馬×馬場タイプの勝率を取得
+ */
+export async function getSireTrackWinRate(fatherName: string, trackType: string): Promise<number> {
+  if (!fatherName) return 0.07;
+
+  const stats = await dbGet<{ total: number; wins: number }>(`
+    SELECT COUNT(*) as total,
+           SUM(CASE WHEN pp.position = 1 THEN 1 ELSE 0 END) as wins
+    FROM past_performances pp
+    JOIN horses h ON pp.horse_id = h.id
+    WHERE h.father_name = ? AND pp.track_type = ? AND pp.position IS NOT NULL
+  `, [fatherName, trackType]);
+
+  if (stats && stats.total >= 10) {
+    return stats.wins / stats.total;
+  }
+  return 0.07;
+}
+
+/**
+ * 騎手×距離帯の勝率を取得
+ */
+export async function getJockeyDistanceWinRate(jockeyId: string, distance: number): Promise<number> {
+  if (!jockeyId) return 0.08;
+
+  // 距離帯: ±200m
+  const stats = await dbGet<{ total: number; wins: number }>(`
+    SELECT COUNT(*) as total,
+           SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins
+    FROM race_entries e
+    JOIN races r ON e.race_id = r.id
+    WHERE e.jockey_id = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL
+      AND ABS(r.distance - ?) <= 200
+  `, [jockeyId, distance]);
+
+  if (stats && stats.total >= 10) {
+    return stats.wins / stats.total;
+  }
+  return 0.08;
+}
+
+/**
+ * 騎手×コースの勝率を取得
+ */
+export async function getJockeyCourseWinRate(jockeyId: string, racecourseName: string): Promise<number> {
+  if (!jockeyId) return 0.08;
+
+  const stats = await dbGet<{ total: number; wins: number }>(`
+    SELECT COUNT(*) as total,
+           SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins
+    FROM race_entries e
+    JOIN races r ON e.race_id = r.id
+    WHERE e.jockey_id = ? AND r.racecourse_name = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL
+  `, [jockeyId, racecourseName]);
+
+  if (stats && stats.total >= 10) {
+    return stats.wins / stats.total;
+  }
+  return 0.08;
+}
+
 // ==================== キャリブレーション ====================
 
 /** 最新の適用済みキャリブレーション重みを取得 */
