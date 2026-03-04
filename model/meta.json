@@ -1,9 +1,9 @@
 {
   "train_samples": 73008,
   "val_samples": 12884,
-  "win_auc": 0.869,
-  "place_auc": 0.8336,
-  "win_accuracy": 0.7723,
-  "place_accuracy": 0.7439,
-  "feature_count": 29
+  "win_auc": 0.9108,
+  "place_auc": 0.8413,
+  "win_accuracy": 0.8223,
+  "place_accuracy": 0.7685,
+  "feature_count": 36
 }

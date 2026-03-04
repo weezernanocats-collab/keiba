@@ -27,5 +27,12 @@
   "distance",
   "trackCondition_encoded",
   "oddsLogTransform",
-  "popularityRatio"
+  "popularityRatio",
+  "weather_encoded",
+  "weightChange",
+  "trainerWinRate",
+  "trainerPlaceRate",
+  "sireTrackWinRate",
+  "jockeyDistanceWinRate",
+  "jockeyCourseWinRate"
 ]
