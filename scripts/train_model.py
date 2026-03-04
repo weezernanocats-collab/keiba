@@ -24,16 +24,38 @@ MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "model")
 
 
 def fetch_data():
-    """Vercel API から学習データを取得"""
+    """Vercel API から学習データを年単位で分割取得（タイムアウト対策）"""
     headers = {}
     if SYNC_KEY:
         headers["x-sync-key"] = SYNC_KEY
 
-    url = f"{VERCEL_URL}/api/ml-export?from=2020-01-01&to=2099-12-31"
-    print(f"データ取得中: {url}")
-    resp = requests.get(url, headers=headers, timeout=120)
-    resp.raise_for_status()
-    return resp.json()
+    from datetime import date
+
+    current_year = date.today().year
+    all_rows = []
+    feature_names = None
+
+    for year in range(2020, current_year + 1):
+        from_date = f"{year}-01-01"
+        to_date = f"{year}-12-31"
+        url = f"{VERCEL_URL}/api/ml-export?from={from_date}&to={to_date}"
+        print(f"データ取得中: {url}")
+        resp = requests.get(url, headers=headers, timeout=120)
+        resp.raise_for_status()
+        chunk = resp.json()
+
+        if feature_names is None and chunk.get("feature_names"):
+            feature_names = chunk["feature_names"]
+
+        rows = chunk.get("rows", [])
+        print(f"  {year}年: {len(rows)}件")
+        all_rows.extend(rows)
+
+    if feature_names is None:
+        print("ERROR: 特徴量名が取得できませんでした")
+        sys.exit(1)
+
+    return {"feature_names": feature_names, "rows": all_rows}
 
 
 def train_model(X_train, y_train, X_val, y_val, label_name, max_depth):
