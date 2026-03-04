@@ -59,6 +59,7 @@ interface XGBModel {
 const SEX_ENCODE: Record<string, number> = { '牡': 0, '牝': 1, 'セ': 2 };
 const TRACK_TYPE_ENCODE: Record<string, number> = { '芝': 0, 'ダート': 1, '障害': 2 };
 const TRACK_CONDITION_ENCODE: Record<string, number> = { '良': 0, '稍重': 1, '重': 2, '不良': 3 };
+const WEATHER_ENCODE: Record<string, number> = { '晴': 0, '曇': 1, '小雨': 2, '雨': 3, '小雪': 4, '雪': 5 };
 const GRADE_ENCODE: Record<string, number> = {
   '新馬': 0, '未勝利': 1, '1勝クラス': 2, '2勝クラス': 3,
   '3勝クラス': 4, 'リステッド': 5, 'オープン': 5,
@@ -77,10 +78,19 @@ interface ContextualFeatures {
   trackType: string;
   distance: number;
   trackCondition: string;
+  // v4.2 新特徴量（後方互換性のためオプショナル）
+  weather?: string | undefined;
+  weightChange?: number | undefined;
+  trainerWinRate?: number | undefined;
+  trainerPlaceRate?: number | undefined;
+  sireTrackWinRate?: number | undefined;
+  jockeyDistanceWinRate?: number | undefined;
+  jockeyCourseWinRate?: number | undefined;
 }
 
 /**
- * 16ファクタースコア + コンテキスト特徴量 → 29次元の特徴量dictを構築
+ * 16ファクタースコア + コンテキスト特徴量 → 特徴量dictを構築
+ * v4.2: 天候、馬体重変化、調教師統計、交互作用特徴量を追加
  */
 export function buildMLFeatures(
   factorScores: Record<string, number>,
@@ -104,6 +114,15 @@ export function buildMLFeatures(
     trackCondition_encoded: TRACK_CONDITION_ENCODE[ctx.trackCondition] ?? 0,
     oddsLogTransform: Math.log1p(odds),
     popularityRatio: ctx.fieldSize > 0 ? popularity / ctx.fieldSize : 0.5,
+    // v4.2 新特徴量
+    weather_encoded: WEATHER_ENCODE[ctx.weather ?? ''] ?? 0,
+    weightChange: ctx.weightChange ?? 0,
+    trainerWinRate: ctx.trainerWinRate ?? 0.08,
+    trainerPlaceRate: ctx.trainerPlaceRate ?? 0.20,
+    // 交互作用特徴量
+    sireTrackWinRate: ctx.sireTrackWinRate ?? 0.07,
+    jockeyDistanceWinRate: ctx.jockeyDistanceWinRate ?? 0.08,
+    jockeyCourseWinRate: ctx.jockeyCourseWinRate ?? 0.08,
   };
 }
 

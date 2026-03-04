@@ -227,6 +227,11 @@ interface HorseAnalysisInput {
   jockeyWinRate: number;
   jockeyPlaceRate: number;
   fatherName: string;
+  trainerWinRate?: number;
+  trainerPlaceRate?: number;
+  sireTrackWinRate?: number;
+  jockeyDistanceWinRate?: number;
+  jockeyCourseWinRate?: number;
 }
 
 interface ScoredHorse {
@@ -248,6 +253,7 @@ export async function generatePrediction(
   racecourseName: string,
   grade: string | undefined,
   horses: HorseAnalysisInput[],
+  weather?: string,
 ): Promise<Prediction> {
   const cond = trackCondition || '良';
   const month = new Date(date).getMonth() + 1;
@@ -286,27 +292,40 @@ export async function generatePrediction(
   scoredHorses.sort((a, b) => b.totalScore - a.totalScore);
 
   // --- ML推論によるスコアブレンド ---
-  const mlInputs: MLHorseInput[] = scoredHorses.map(sh => ({
-    horseNumber: sh.entry.horseNumber,
-    features: buildMLFeatures(
-      Object.fromEntries(
-        Object.entries(sh.scores).filter(([k]) => !k.startsWith('_'))
+  const horseInputMap = new Map(horses.map(h => [h.entry.horseNumber, h]));
+  const mlInputs: MLHorseInput[] = scoredHorses.map(sh => {
+    const input = horseInputMap.get(sh.entry.horseNumber);
+    return {
+      horseNumber: sh.entry.horseNumber,
+      features: buildMLFeatures(
+        Object.fromEntries(
+          Object.entries(sh.scores).filter(([k]) => !k.startsWith('_'))
+        ),
+        {
+          fieldSize: horses.length,
+          odds: sh.entry.odds,
+          popularity: sh.entry.popularity,
+          age: sh.entry.age,
+          sex: sh.entry.sex,
+          handicapWeight: sh.entry.handicapWeight,
+          postPosition: sh.entry.postPosition,
+          grade,
+          trackType,
+          distance,
+          trackCondition: cond,
+          weather,
+          weightChange: sh.entry.result?.weightChange != null
+            ? sh.entry.result.weightChange
+            : undefined,
+          trainerWinRate: input?.trainerWinRate,
+          trainerPlaceRate: input?.trainerPlaceRate,
+          sireTrackWinRate: input?.sireTrackWinRate,
+          jockeyDistanceWinRate: input?.jockeyDistanceWinRate,
+          jockeyCourseWinRate: input?.jockeyCourseWinRate,
+        },
       ),
-      {
-        fieldSize: horses.length,
-        odds: sh.entry.odds,
-        popularity: sh.entry.popularity,
-        age: sh.entry.age,
-        sex: sh.entry.sex,
-        handicapWeight: sh.entry.handicapWeight,
-        postPosition: sh.entry.postPosition,
-        grade,
-        trackType,
-        distance,
-        trackCondition: cond,
-      },
-    ),
-  }));
+    };
+  });
 
   const mlPredictions = await callMLPredict(mlInputs);
 
