@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { dbAll, dbGet } from '@/lib/database';
+import { dbAll } from '@/lib/database';
 
 export const maxDuration = 60;
 
@@ -64,84 +64,93 @@ interface EntryRow {
   horse_id: string | null;
 }
 
-// 統計キャッシュ（同一リクエスト内で再利用）
-const trainerCache = new Map<string, { winRate: number; placeRate: number }>();
-const sireTrackCache = new Map<string, number>();
-const jockeyDistCache = new Map<string, number>();
-const jockeyCourseCache = new Map<string, number>();
+// allEntries からインメモリで統計を計算（追加DBクエリ不要）
 
-async function getTrainerStatsForExport(trainerName: string): Promise<{ winRate: number; placeRate: number }> {
-  if (!trainerName) return { winRate: 0.08, placeRate: 0.20 };
-  const cached = trainerCache.get(trainerName);
-  if (cached) return cached;
-
-  const stats = await dbGet<{ total: number; wins: number; places: number }>(`
-    SELECT COUNT(*) as total,
-           SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins,
-           SUM(CASE WHEN e.result_position <= 2 THEN 1 ELSE 0 END) as places
-    FROM race_entries e JOIN races r ON e.race_id = r.id
-    WHERE e.trainer_name = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL
-  `, [trainerName]);
-
-  const result = stats && stats.total >= 10
-    ? { winRate: stats.wins / stats.total, placeRate: stats.places / stats.total }
-    : { winRate: 0.08, placeRate: 0.20 };
-  trainerCache.set(trainerName, result);
-  return result;
+function computeTrainerStats(entries: EntryRow[]): Map<string, { winRate: number; placeRate: number }> {
+  const agg = new Map<string, { total: number; wins: number; places: number }>();
+  for (const e of entries) {
+    if (!e.trainer_name) continue;
+    const s = agg.get(e.trainer_name) || { total: 0, wins: 0, places: 0 };
+    s.total++;
+    if (e.result_position === 1) s.wins++;
+    if (e.result_position <= 2) s.places++;
+    agg.set(e.trainer_name, s);
+  }
+  const m = new Map<string, { winRate: number; placeRate: number }>();
+  for (const [name, s] of agg) {
+    if (s.total >= 10) {
+      m.set(name, { winRate: s.wins / s.total, placeRate: s.places / s.total });
+    }
+  }
+  return m;
 }
 
-async function getSireTrackWinRateForExport(horseId: string, trackType: string): Promise<number> {
-  const key = `${horseId}__${trackType}`;
-  const cached = sireTrackCache.get(key);
-  if (cached !== undefined) return cached;
-
-  const stats = await dbGet<{ total: number; wins: number }>(`
-    SELECT COUNT(*) as total,
-           SUM(CASE WHEN pp.position = 1 THEN 1 ELSE 0 END) as wins
-    FROM past_performances pp
-    JOIN horses h ON pp.horse_id = h.id
-    JOIN horses target ON target.id = ? AND h.father_name = target.father_name
-    WHERE pp.track_type = ? AND pp.position IS NOT NULL
-  `, [horseId, trackType]);
-
-  const rate = stats && stats.total >= 10 ? stats.wins / stats.total : 0.07;
-  sireTrackCache.set(key, rate);
-  return rate;
+function computeJockeyDistStats(
+  entries: EntryRow[],
+  raceDistanceMap: Map<string, number>,
+): Map<string, { total: number; wins: number }> {
+  const agg = new Map<string, { total: number; wins: number }>();
+  for (const e of entries) {
+    if (!e.jockey_id) continue;
+    const dist = raceDistanceMap.get(e.race_id);
+    if (dist === undefined) continue;
+    const bucket = Math.round(dist / 200) * 200;
+    const key = `${e.jockey_id}__${bucket}`;
+    const s = agg.get(key) || { total: 0, wins: 0 };
+    s.total++;
+    if (e.result_position === 1) s.wins++;
+    agg.set(key, s);
+  }
+  // 10件未満は除外
+  for (const [key, s] of agg) {
+    if (s.total < 10) agg.delete(key);
+  }
+  return agg;
 }
 
-async function getJockeyDistWinRateForExport(jockeyId: string, distance: number): Promise<number> {
-  const key = `${jockeyId}__${distance}`;
-  const cached = jockeyDistCache.get(key);
-  if (cached !== undefined) return cached;
-
-  const stats = await dbGet<{ total: number; wins: number }>(`
-    SELECT COUNT(*) as total,
-           SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins
-    FROM race_entries e JOIN races r ON e.race_id = r.id
-    WHERE e.jockey_id = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL
-      AND ABS(r.distance - ?) <= 200
-  `, [jockeyId, distance]);
-
-  const rate = stats && stats.total >= 10 ? stats.wins / stats.total : 0.08;
-  jockeyDistCache.set(key, rate);
-  return rate;
+function computeJockeyCourseStats(
+  entries: EntryRow[],
+  raceCourseMap: Map<string, string>,
+): Map<string, { total: number; wins: number }> {
+  const agg = new Map<string, { total: number; wins: number }>();
+  for (const e of entries) {
+    if (!e.jockey_id) continue;
+    const course = raceCourseMap.get(e.race_id);
+    if (!course) continue;
+    const key = `${e.jockey_id}__${course}`;
+    const s = agg.get(key) || { total: 0, wins: 0 };
+    s.total++;
+    if (e.result_position === 1) s.wins++;
+    agg.set(key, s);
+  }
+  for (const [key, s] of agg) {
+    if (s.total < 10) agg.delete(key);
+  }
+  return agg;
 }
 
-async function getJockeyCourseWinRateForExport(jockeyId: string, racecourseName: string): Promise<number> {
-  const key = `${jockeyId}__${racecourseName}`;
-  const cached = jockeyCourseCache.get(key);
-  if (cached !== undefined) return cached;
-
-  const stats = await dbGet<{ total: number; wins: number }>(`
-    SELECT COUNT(*) as total,
-           SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins
-    FROM race_entries e JOIN races r ON e.race_id = r.id
-    WHERE e.jockey_id = ? AND r.racecourse_name = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL
-  `, [jockeyId, racecourseName]);
-
-  const rate = stats && stats.total >= 10 ? stats.wins / stats.total : 0.08;
-  jockeyCourseCache.set(key, rate);
-  return rate;
+function computeSireTrackStats(
+  entries: EntryRow[],
+  horseFatherMap: Map<string, string>,
+  raceTrackTypeMap: Map<string, string>,
+): Map<string, { total: number; wins: number }> {
+  const agg = new Map<string, { total: number; wins: number }>();
+  for (const e of entries) {
+    if (!e.horse_id) continue;
+    const father = horseFatherMap.get(e.horse_id);
+    if (!father) continue;
+    const trackType = raceTrackTypeMap.get(e.race_id);
+    if (!trackType) continue;
+    const key = `${father}__${trackType}`;
+    const s = agg.get(key) || { total: 0, wins: 0 };
+    s.total++;
+    if (e.result_position === 1) s.wins++;
+    agg.set(key, s);
+  }
+  for (const [key, s] of agg) {
+    if (s.total < 10) agg.delete(key);
+  }
+  return agg;
 }
 
 export async function GET(request: NextRequest) {
@@ -152,12 +161,6 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const from = searchParams.get('from') || '2020-01-01';
   const to = searchParams.get('to') || '2099-12-31';
-
-  // キャッシュクリア
-  trainerCache.clear();
-  sireTrackCache.clear();
-  jockeyDistCache.clear();
-  jockeyCourseCache.clear();
 
   const [predictions, allEntries] = await Promise.all([
     dbAll<PredictionWithRace>(`
@@ -188,6 +191,40 @@ export async function GET(request: NextRequest) {
       message: '学習データがありません。予想生成＋結果確定済みのレースが必要です。',
     });
   }
+
+  // レースメタデータのマップを構築（インメモリ統計計算用）
+  const raceDistanceMap = new Map<string, number>();
+  const raceCourseMap = new Map<string, string>();
+  const raceTrackTypeMap = new Map<string, string>();
+  for (const p of predictions) {
+    raceDistanceMap.set(p.race_id, p.distance);
+    raceCourseMap.set(p.race_id, p.racecourse_name);
+    raceTrackTypeMap.set(p.race_id, p.track_type);
+  }
+
+  // horse_id → father_name（唯一の追加DBクエリ）
+  const horseIds = [...new Set(allEntries.map(e => e.horse_id).filter(Boolean))] as string[];
+  const horseFatherMap = new Map<string, string>();
+  if (horseIds.length > 0) {
+    // IN句が大きすぎる場合はチャンク分割
+    const chunkSize = 500;
+    for (let i = 0; i < horseIds.length; i += chunkSize) {
+      const chunk = horseIds.slice(i, i + chunkSize);
+      const placeholders = chunk.map(() => '?').join(',');
+      const horses = await dbAll<{ id: string; father_name: string }>(`
+        SELECT id, father_name FROM horses WHERE id IN (${placeholders}) AND father_name IS NOT NULL
+      `, chunk);
+      for (const h of horses) {
+        horseFatherMap.set(h.id, h.father_name);
+      }
+    }
+  }
+
+  // インメモリで統計を計算（追加DBクエリなし）
+  const trainerMap = computeTrainerStats(allEntries);
+  const jockeyDistMap = computeJockeyDistStats(allEntries, raceDistanceMap);
+  const jockeyCourseMap = computeJockeyCourseStats(allEntries, raceCourseMap);
+  const sireTrackMap = computeSireTrackStats(allEntries, horseFatherMap, raceTrackTypeMap);
 
   const entriesByRace = new Map<string, EntryRow[]>();
   for (const e of allEntries) {
@@ -227,17 +264,16 @@ export async function GET(request: NextRequest) {
       const odds = entry.odds ?? 10;
       const popularity = entry.popularity ?? Math.ceil(fieldSize / 2);
 
-      // 新特徴量の統計取得
-      const trainerStats = await getTrainerStatsForExport(entry.trainer_name ?? '');
-      const sireTrackWR = entry.horse_id
-        ? await getSireTrackWinRateForExport(entry.horse_id, pred.track_type)
-        : 0.07;
-      const jockeyDistWR = entry.jockey_id
-        ? await getJockeyDistWinRateForExport(entry.jockey_id, pred.distance)
-        : 0.08;
-      const jockeyCourseWR = entry.jockey_id
-        ? await getJockeyCourseWinRateForExport(entry.jockey_id, pred.racecourse_name)
-        : 0.08;
+      // 新特徴量の統計ルックアップ（インメモリ計算済み）
+      const trainerStats = trainerMap.get(entry.trainer_name ?? '') ?? { winRate: 0.08, placeRate: 0.20 };
+      const fatherName = entry.horse_id ? horseFatherMap.get(entry.horse_id) : undefined;
+      const sireTrackEntry = fatherName ? sireTrackMap.get(`${fatherName}__${pred.track_type}`) : undefined;
+      const sireTrackWR = sireTrackEntry ? sireTrackEntry.wins / sireTrackEntry.total : 0.07;
+      const distBucket = Math.round(pred.distance / 200) * 200;
+      const jdEntry = entry.jockey_id ? jockeyDistMap.get(`${entry.jockey_id}__${distBucket}`) : undefined;
+      const jockeyDistWR = jdEntry ? jdEntry.wins / jdEntry.total : 0.08;
+      const jcEntry = entry.jockey_id ? jockeyCourseMap.get(`${entry.jockey_id}__${pred.racecourse_name}`) : undefined;
+      const jockeyCourseWR = jcEntry ? jcEntry.wins / jcEntry.total : 0.08;
 
       const features = FEATURE_NAMES.map(name => {
         switch (name) {
