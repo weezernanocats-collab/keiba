@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * 1レース分の予想をテスト生成（DBリード数をカウント）
  *

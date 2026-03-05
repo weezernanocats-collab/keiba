@@ -5,7 +5,7 @@
  * 統計分析v3対応のAI予想を生成する。
  */
 
-import { dbGet, dbAll, dbBatch } from './database';
+import { dbGet, dbAll } from './database';
 import { RACECOURSES } from '@/types';
 import {
   seedRacecourses, upsertHorse, upsertJockey, upsertRace,

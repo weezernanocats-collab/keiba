@@ -1,7 +1,7 @@
 /**
  * テスト用モックデータ
  */
-import type { PastPerformance, RaceEntry, TrackType, TrackCondition } from '@/types';
+import type { PastPerformance, RaceEntry } from '@/types';
 
 // --- PastPerformance ファクトリ ---
 

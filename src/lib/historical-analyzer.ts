@@ -12,7 +12,7 @@
  *   5. 叩き良化パターン（休み明け→2走目の成績変化）
  */
 
-import { dbAll, dbGet } from './database';
+import { dbAll } from './database';
 
 // ==================== 型定義 ====================
 

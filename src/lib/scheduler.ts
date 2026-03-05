@@ -95,7 +95,7 @@ const DEFAULT_CONFIG: SchedulerConfig = {
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 let currentConfig: SchedulerConfig = { ...DEFAULT_CONFIG };
 let lastRunTime: string | null = null;
-let schedulerLogs: SchedulerLog[] = [];
+const schedulerLogs: SchedulerLog[] = [];
 const MAX_LOGS = 100;
 let lastExecutedSlot: string | null = null;
 

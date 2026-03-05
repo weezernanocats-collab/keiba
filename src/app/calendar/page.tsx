@@ -12,7 +12,6 @@ import {
   addMonths,
   subMonths,
   isSameMonth,
-  isSameDay,
   isToday,
   parseISO,
 } from 'date-fns';

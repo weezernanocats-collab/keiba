@@ -276,7 +276,7 @@ async function main() {
             }
             process.stdout.write(`\r    ${raceNum}R ${raceName}: 単勝${apiOdds.win.length}件, 複勝${apiOdds.place.length}件 (API)    `);
           }
-        } catch (e) {
+        } catch {
           errors++;
           process.stdout.write(`\r    ${raceNum}R ${raceName}: ERROR    `);
         }

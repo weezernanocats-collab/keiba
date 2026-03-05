@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
-  ensureInitialized, dbAll, dbGet, dbRun, dbRunNamed, dbBatch, dbExec, closeDatabase,
+  ensureInitialized, dbAll, dbGet, dbRun, dbRunNamed, dbBatch, closeDatabase,
 } from '@/lib/database';
 import {
   upsertRace, getRaceById, getRacesByDate, getUpcomingRaces,
