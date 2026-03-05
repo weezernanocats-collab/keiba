@@ -223,6 +223,7 @@ export async function POST(request: NextRequest) {
   }
 
   // チャンクバルクインポート（Vercel対応）
+  // 自己チェーン: 1チャンク処理後、未完了なら自分自身を再呼び出しして継続
   if (type === 'bulk_chunked') {
     let state: BulkChunkedState;
     if (body.state) {
@@ -243,6 +244,24 @@ export async function POST(request: NextRequest) {
     }
 
     const updatedState = await runBulkChunk(state);
+
+    // 未完了なら自己チェーン: 次のチャンクを fire-and-forget で呼び出す
+    if (updatedState.phase !== 'done') {
+      const selfUrl = request.nextUrl.clone();
+      selfUrl.pathname = '/api/sync';
+      const chainHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      const syncKey = request.headers.get('x-sync-key');
+      if (syncKey) chainHeaders['x-sync-key'] = syncKey;
+
+      fetch(selfUrl.toString(), {
+        method: 'POST',
+        headers: chainHeaders,
+        body: JSON.stringify({ type: 'bulk_chunked', state: updatedState }),
+      }).catch(() => {
+        // fire-and-forget: エラーは無視（次のcron実行で再試行される）
+      });
+    }
+
     return NextResponse.json({ state: updatedState });
   }
 
@@ -271,6 +290,39 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       message: 'バルクインポートを開始しました',
       config,
+    });
+  }
+
+  // 'full' タイプは bulk_chunked に変換（Vercel対応: fire-and-forget では完了しないため）
+  if (type === 'full') {
+    const targetDate = date || new Date(Date.now() + 9 * 60 * 60_000).toISOString().split('T')[0];
+    const state = createInitialChunkedState({
+      startDate: targetDate,
+      endDate: targetDate,
+      clearExisting: false,
+    });
+    const updatedState = await runBulkChunk(state);
+
+    // 未完了なら自己チェーンで継続
+    if (updatedState.phase !== 'done') {
+      const selfUrl = request.nextUrl.clone();
+      selfUrl.pathname = '/api/sync';
+      const chainHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      const syncKey = request.headers.get('x-sync-key');
+      if (syncKey) chainHeaders['x-sync-key'] = syncKey;
+
+      fetch(selfUrl.toString(), {
+        method: 'POST',
+        headers: chainHeaders,
+        body: JSON.stringify({ type: 'bulk_chunked', state: updatedState }),
+      }).catch(() => {});
+    }
+
+    return NextResponse.json({
+      message: updatedState.phase === 'done'
+        ? `フル同期完了: ${targetDate}`
+        : `フル同期開始: ${targetDate} (${updatedState.phaseLabel}を処理中、自動継続します)`,
+      state: updatedState,
     });
   }
 
@@ -310,7 +362,7 @@ export async function POST(request: NextRequest) {
 
   // For single-item operations, execute synchronously (within maxDuration=60s)
   // For bulk operations, fire-and-forget with background processing
-  const isBulkOperation = type === 'full' || type === 'races' || type === 'regenerate_predictions';
+  const isBulkOperation = type === 'races' || type === 'regenerate_predictions';
 
   if (isBulkOperation) {
     executeSyncInBackground(syncEntry, type, date, raceId, horseId);
