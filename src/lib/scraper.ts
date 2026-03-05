@@ -58,16 +58,18 @@ async function fetchHtml(url: string): Promise<string> {
 
 /** URLとHTMLの先頭バイトからエンコーディングを判定 */
 function detectEncoding(url: string, buffer: ArrayBuffer): string {
-  // race_list_sub.html は UTF-8
-  if (url.includes('race_list_sub.html')) return 'utf-8';
+  // race.netkeiba.com のページは基本的にUTF-8
+  // (race_list_sub.html, shutuba.html, result.html など)
+  if (url.includes('race.netkeiba.com')) return 'utf-8';
 
-  // HTMLの先頭部分で charset を確認
-  const preview = new TextDecoder('ascii').decode(buffer.slice(0, 1024));
-  if (preview.includes('charset="UTF-8"') || preview.includes('charset=utf-8')) {
+  // HTMLの先頭部分で charset を確認（大文字小文字を区別しない）
+  const preview = new TextDecoder('ascii').decode(buffer.slice(0, 2048));
+  const previewLower = preview.toLowerCase();
+  if (previewLower.includes('charset=utf-8') || previewLower.includes('charset="utf-8"')) {
     return 'utf-8';
   }
 
-  // デフォルトはEUC-JP (netkeiba の多くのページ)
+  // デフォルトはEUC-JP (db.netkeiba.com の多くのページ)
   return 'euc-jp';
 }
 
@@ -150,38 +152,129 @@ export async function scrapeRaceCard(raceId: string): Promise<ScrapedRaceDetail>
   else if (gradeText.includes('G3') || gradeText.includes('Ｇ３') || gradeClasses.includes('Icon_GradeType3')) grade = 'G3';
 
   // 出走馬
+  // netkeiba の出馬表テーブルは各馬行に class="HorseList" を付与。
+  // 列は td のクラス名で特定（インデックスに依存しない）:
+  //   Waku* Txt_C → 枠番, Umaban* Txt_C → 馬番, HorseInfo → 馬名,
+  //   Barei → 性齢, Jockey → 騎手, Trainer → 調教師
+  //   斤量は Barei の次の Txt_C (class に Waku/Umaban/Popular を含まないもの)
   const entries: ScrapedEntry[] = [];
-  $('table.Shutuba_Table tbody tr').each((_, tr) => {
-    const tds = $(tr).find('td');
-    if (tds.length < 8) return;
+  $('table.Shutuba_Table tr.HorseList').each((_, tr) => {
+    const $tr = $(tr);
 
-    const postPosition = parseInt($(tds[0]).text().trim()) || 0;
-    const horseNumber = parseInt($(tds[1]).text().trim()) || 0;
-    const horseName = $(tds[3]).find('a').text().trim();
-    const horseLink = $(tds[3]).find('a').attr('href') || '';
+    // 枠番: td[class*="Waku"] (Waku1, Waku2, ... Waku8)
+    const postPosition = parseInt($tr.find('td[class*="Waku"]').first().text().trim()) || 0;
+
+    // 馬番: td[class*="Umaban"] (Umaban1, Umaban2, ...)
+    const horseNumber = parseInt($tr.find('td[class*="Umaban"]').first().text().trim()) || 0;
+
+    // 馬名: td.HorseInfo 内の a タグ
+    const horseInfoTd = $tr.find('td.HorseInfo');
+    const horseName = horseInfoTd.find('a').first().text().trim();
+    const horseLink = horseInfoTd.find('a').first().attr('href') || '';
     const horseIdMatch = horseLink.match(/horse\/(\w+)/);
-    const ageSex = $(tds[4]).text().trim();
-    const handicapWeight = parseFloat($(tds[5]).text().trim()) || 0;
-    const jockeyName = $(tds[6]).find('a').text().trim();
-    const jockeyLink = $(tds[6]).find('a').attr('href') || '';
-    const jockeyIdMatch = jockeyLink.match(/jockey\/(?:result\/recent\/)?(\w+)/);
-    const trainerName = $(tds[7]).find('a').text().trim();
 
-    if (horseName) {
-      entries.push({
-        postPosition,
-        horseNumber,
-        horseId: horseIdMatch ? horseIdMatch[1] : `h_${horseNumber}`,
-        horseName,
-        age: parseInt(ageSex.replace(/[^\d]/g, '')) || 0,
-        sex: (ageSex.match(/(牡|牝|セ)/)?.[1] || '牡') as '牡' | '牝' | 'セ',
-        jockeyId: jockeyIdMatch ? jockeyIdMatch[1] : `j_${jockeyName}`,
-        jockeyName,
-        trainerName,
-        handicapWeight,
-      });
+    // 性齢: td.Barei
+    const ageSex = $tr.find('td.Barei').text().trim();
+
+    // 斤量: Barei でも Waku でも Umaban でも Popular でもない Txt_C
+    let handicapWeight = 0;
+    $tr.find('td.Txt_C').each((_, td) => {
+      const cls = $(td).attr('class') || '';
+      if (cls.includes('Waku') || cls.includes('Umaban') || cls.includes('Popular')) return;
+      const val = parseFloat($(td).text().trim());
+      if (val > 0 && handicapWeight === 0) handicapWeight = val;
+    });
+
+    // 騎手: td.Jockey 内の a タグ
+    const jockeyTd = $tr.find('td.Jockey');
+    const jockeyName = jockeyTd.find('a').first().text().trim();
+    const jockeyLink = jockeyTd.find('a').first().attr('href') || '';
+    const jockeyIdMatch = jockeyLink.match(/jockey\/(?:result\/recent\/)?(\w+)/);
+
+    // 調教師: td.Trainer 内の a タグ
+    const trainerName = $tr.find('td.Trainer').find('a').first().text().trim();
+
+    // フォールバック: クラスベースで取得できなかった場合はインデックスベースで試行
+    if (!horseName) {
+      const tds = $tr.find('td');
+      if (tds.length >= 8) {
+        const fbHorseName = $(tds[3]).find('a').text().trim();
+        if (fbHorseName) {
+          const fbHorseLink = $(tds[3]).find('a').attr('href') || '';
+          const fbHorseIdMatch = fbHorseLink.match(/horse\/(\w+)/);
+          const fbAgeSex = $(tds[4]).text().trim();
+          const fbHandicapWeight = parseFloat($(tds[5]).text().trim()) || 0;
+          const fbJockeyName = $(tds[6]).find('a').text().trim();
+          const fbJockeyLink = $(tds[6]).find('a').attr('href') || '';
+          const fbJockeyIdMatch = fbJockeyLink.match(/jockey\/(?:result\/recent\/)?(\w+)/);
+          const fbTrainerName = $(tds[7]).find('a').text().trim();
+          entries.push({
+            postPosition: parseInt($(tds[0]).text().trim()) || 0,
+            horseNumber: parseInt($(tds[1]).text().trim()) || 0,
+            horseId: fbHorseIdMatch ? fbHorseIdMatch[1] : `h_${parseInt($(tds[1]).text().trim()) || 0}`,
+            horseName: fbHorseName,
+            age: parseInt(fbAgeSex.replace(/[^\d]/g, '')) || 0,
+            sex: (fbAgeSex.match(/(牡|牝|セ)/)?.[1] || '牡') as '牡' | '牝' | 'セ',
+            jockeyId: fbJockeyIdMatch ? fbJockeyIdMatch[1] : `j_${fbJockeyName}`,
+            jockeyName: fbJockeyName,
+            trainerName: fbTrainerName,
+            handicapWeight: fbHandicapWeight,
+          });
+          return; // next tr
+        }
+      }
+      return; // skip row with no horse name
     }
+
+    entries.push({
+      postPosition,
+      horseNumber,
+      horseId: horseIdMatch ? horseIdMatch[1] : `h_${horseNumber}`,
+      horseName,
+      age: parseInt(ageSex.replace(/[^\d]/g, '')) || 0,
+      sex: (ageSex.match(/(牡|牝|セ)/)?.[1] || '牡') as '牡' | '牝' | 'セ',
+      jockeyId: jockeyIdMatch ? jockeyIdMatch[1] : `j_${jockeyName}`,
+      jockeyName,
+      trainerName,
+      handicapWeight,
+    });
   });
+
+  // Shutuba_Table tr.HorseList で取得できなかった場合のフォールバック
+  // (テーブルクラス名が変わった場合に備える)
+  if (entries.length === 0) {
+    $('table.Shutuba_Table tbody tr, table.ShutubaTable tbody tr, table.RaceTable01 tbody tr').each((_, tr) => {
+      const tds = $(tr).find('td');
+      if (tds.length < 8) return;
+
+      const postPosition = parseInt($(tds[0]).text().trim()) || 0;
+      const horseNumber = parseInt($(tds[1]).text().trim()) || 0;
+      const horseName = $(tds[3]).find('a').text().trim();
+      const horseLink = $(tds[3]).find('a').attr('href') || '';
+      const horseIdMatch = horseLink.match(/horse\/(\w+)/);
+      const ageSex = $(tds[4]).text().trim();
+      const handicapWeight = parseFloat($(tds[5]).text().trim()) || 0;
+      const jockeyName = $(tds[6]).find('a').text().trim();
+      const jockeyLink = $(tds[6]).find('a').attr('href') || '';
+      const jockeyIdMatch = jockeyLink.match(/jockey\/(?:result\/recent\/)?(\w+)/);
+      const trainerName = $(tds[7]).find('a').text().trim();
+
+      if (horseName && horseNumber > 0) {
+        entries.push({
+          postPosition,
+          horseNumber,
+          horseId: horseIdMatch ? horseIdMatch[1] : `h_${horseNumber}`,
+          horseName,
+          age: parseInt(ageSex.replace(/[^\d]/g, '')) || 0,
+          sex: (ageSex.match(/(牡|牝|セ)/)?.[1] || '牡') as '牡' | '牝' | 'セ',
+          jockeyId: jockeyIdMatch ? jockeyIdMatch[1] : `j_${jockeyName}`,
+          jockeyName,
+          trainerName,
+          handicapWeight,
+        });
+      }
+    });
+  }
 
   // 競馬場ID推定
   const racecourseId = inferRacecourseId(raceId);
