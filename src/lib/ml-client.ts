@@ -4,6 +4,10 @@
  * XGBoost の JSON モデルファイルを直接読み込み、決定木を走査して推論する。
  * Python 不要 — Vercel の 500MB 制限を回避。
  *
+ * v5.2: XGBRanker (ランキングモデル) 対応
+ * - xgb_ranker.json が存在すればランキングモデルを使用
+ * - なければ従来の xgb_win.json + xgb_place.json にフォールバック
+ *
  * モデル未配置時は null を返却し、呼び出し元は加重平均にフォールバックする。
  */
 
@@ -93,8 +97,8 @@ interface ContextualFeatures {
 }
 
 /**
- * 16ファクタースコア + コンテキスト特徴量 → 特徴量dictを構築
- * v4.2: 天候、馬体重変化、調教師統計、交互作用特徴量を追加
+ * ファクタースコア + コンテキスト特徴量 → 特徴量dictを構築
+ * v5.2: marginCompetitiveness, weatherAptitude はfactorScoresに含まれる
  */
 export function buildMLFeatures(
   factorScores: Record<string, number>,
@@ -138,7 +142,9 @@ export function buildMLFeatures(
 
 let cachedWinModel: XGBModel | null | undefined;
 let cachedPlaceModel: XGBModel | null | undefined;
+let cachedRankerModel: XGBModel | null | undefined;
 let cachedFeatureNames: string[] | null = null;
+let modelMode: 'ranker' | 'classifier' | 'none' | undefined;
 
 function getModelDir(): string {
   return join(process.cwd(), 'model');
@@ -167,16 +173,33 @@ function loadFeatureNames(): string[] | null {
 }
 
 function ensureModelsLoaded(): boolean {
-  if (cachedWinModel === undefined) {
-    cachedWinModel = loadModel('xgb_win.json');
+  if (modelMode !== undefined) {
+    return modelMode !== 'none';
   }
-  if (cachedPlaceModel === undefined) {
-    cachedPlaceModel = loadModel('xgb_place.json');
+
+  cachedFeatureNames = loadFeatureNames();
+  if (!cachedFeatureNames) {
+    modelMode = 'none';
+    return false;
   }
-  if (cachedFeatureNames === null) {
-    cachedFeatureNames = loadFeatureNames();
+
+  // ランキングモデルを優先チェック
+  cachedRankerModel = loadModel('xgb_ranker.json');
+  if (cachedRankerModel) {
+    modelMode = 'ranker';
+    return true;
   }
-  return cachedWinModel !== null && cachedPlaceModel !== null;
+
+  // フォールバック: 分類モデル
+  cachedWinModel = loadModel('xgb_win.json');
+  cachedPlaceModel = loadModel('xgb_place.json');
+  if (cachedWinModel && cachedPlaceModel) {
+    modelMode = 'classifier';
+    return true;
+  }
+
+  modelMode = 'none';
+  return false;
 }
 
 // ==================== XGBoost tree inference ====================
@@ -213,14 +236,9 @@ function traverseTree(tree: XGBTree, features: number[]): number {
 
 /**
  * XGBoostモデルで推論し、確率を返す (binary:logistic 前提)
- *
- * base_score は確率空間の値（デフォルト0.5）。
- * 木のリーフ値は log-odds 空間なので、base_score も log-odds に変換して加算する。
- * log(0.5 / 0.5) = 0 なので、デフォルト時は影響なし。
  */
 function predictProba(model: XGBModel, features: number[]): number {
   const baseScoreProb = parseFloat(model.learner.learner_model_param.base_score) || 0.5;
-  // 確率 → log-odds 変換（0や1の場合のクランプ付き）
   const clampedProb = Math.max(1e-7, Math.min(1 - 1e-7, baseScoreProb));
   const baseMargin = Math.log(clampedProb / (1 - clampedProb));
 
@@ -235,6 +253,32 @@ function predictProba(model: XGBModel, features: number[]): number {
 }
 
 /**
+ * XGBRankerモデルで推論し、raw scoreを返す
+ * ランキングモデルのリーフ値はそのままスコア（sigmoidは通さない）
+ */
+function predictRawScore(model: XGBModel, features: number[]): number {
+  const baseScore = parseFloat(model.learner.learner_model_param.base_score) || 0.5;
+  const trees = model.learner.gradient_booster.model.trees;
+
+  let sum = baseScore;
+  for (const tree of trees) {
+    sum += traverseTree(tree, features);
+  }
+
+  return sum;
+}
+
+/**
+ * softmax変換: raw scoresを確率に変換
+ */
+function softmax(scores: number[]): number[] {
+  const maxScore = Math.max(...scores);
+  const exps = scores.map(s => Math.exp(s - maxScore)); // 数値安定化
+  const sumExp = exps.reduce((s, e) => s + e, 0);
+  return exps.map(e => e / sumExp);
+}
+
+/**
  * 特徴量 dict を特徴量名の順序に従って配列に変換
  */
 function featureDictToArray(
@@ -244,32 +288,84 @@ function featureDictToArray(
   return featureNames.map(name => features[name] ?? 0);
 }
 
+// ==================== Ranking prediction ====================
+
+/**
+ * ランキングモデルでレース内全馬の確率を推論
+ */
+function predictWithRanker(model: XGBModel, horses: MLHorseInput[], featureNames: string[]): MLPredictions {
+  // 全馬のraw scoreを計算
+  const rawScores = horses.map(h => {
+    const featureArray = featureDictToArray(h.features, featureNames);
+    return predictRawScore(model, featureArray);
+  });
+
+  // softmaxで確率に変換
+  const probs = softmax(rawScores);
+
+  // 降順ソートしてランク情報を構築
+  const indexed = probs.map((prob, i) => ({ idx: i, prob }));
+  indexed.sort((a, b) => b.prob - a.prob);
+
+  // 上位3頭の確率合計を placeProb の基準とする
+  const top3Sum = indexed.slice(0, 3).reduce((s, item) => s + item.prob, 0);
+
+  const result: MLPredictions = {};
+  for (let i = 0; i < horses.length; i++) {
+    const rank = indexed.findIndex(item => item.idx === i);
+    // winProb: そのまま softmax確率
+    // placeProb: 上位3頭に入る確率として近似
+    // ランクが3位以内なら高確率、それ以外は自分の確率 / top3合計を基に推定
+    const placeProb = rank < 3
+      ? Math.min(0.95, probs[i] / top3Sum + 0.3)  // 上位3頭は高確率
+      : Math.min(0.80, probs[i] * 3);               // 4位以下は確率×3で近似
+
+    result[horses[i].horseNumber] = {
+      winProb: Math.round(probs[i] * 1_000_000) / 1_000_000,
+      placeProb: Math.round(Math.min(1.0, placeProb) * 1_000_000) / 1_000_000,
+    };
+  }
+
+  return result;
+}
+
 // ==================== Public API ====================
 
 /**
  * XGBoost推論を実行する。
+ * ランキングモデル → 分類モデル → null の優先順で推論。
  * モデル未配置・エラー時は null を返却（呼び出し元で加重平均フォールバック）。
  */
 export async function callMLPredict(horses: MLHorseInput[]): Promise<MLPredictions | null> {
   try {
     if (!ensureModelsLoaded()) return null;
-    if (!cachedFeatureNames || !cachedWinModel || !cachedPlaceModel) return null;
+    if (!cachedFeatureNames) return null;
 
-    const result: MLPredictions = {};
-
-    for (const horse of horses) {
-      const featureArray = featureDictToArray(horse.features, cachedFeatureNames);
-
-      const winProb = predictProba(cachedWinModel, featureArray);
-      const placeProb = predictProba(cachedPlaceModel, featureArray);
-
-      result[horse.horseNumber] = {
-        winProb: Math.round(winProb * 1_000_000) / 1_000_000,
-        placeProb: Math.round(placeProb * 1_000_000) / 1_000_000,
-      };
+    // ランキングモデルモード
+    if (modelMode === 'ranker' && cachedRankerModel) {
+      return predictWithRanker(cachedRankerModel, horses, cachedFeatureNames);
     }
 
-    return result;
+    // 分類モデルフォールバック
+    if (modelMode === 'classifier' && cachedWinModel && cachedPlaceModel) {
+      const result: MLPredictions = {};
+
+      for (const horse of horses) {
+        const featureArray = featureDictToArray(horse.features, cachedFeatureNames);
+
+        const winProb = predictProba(cachedWinModel, featureArray);
+        const placeProb = predictProba(cachedPlaceModel, featureArray);
+
+        result[horse.horseNumber] = {
+          winProb: Math.round(winProb * 1_000_000) / 1_000_000,
+          placeProb: Math.round(placeProb * 1_000_000) / 1_000_000,
+        };
+      }
+
+      return result;
+    }
+
+    return null;
   } catch {
     return null;
   }

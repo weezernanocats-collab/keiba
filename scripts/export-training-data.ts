@@ -24,12 +24,13 @@ const db = createClient({
 
 // 特徴量名の順序定義（ml-client.ts の buildMLFeatures と一致）
 const FEATURE_NAMES = [
-  // 18ファクタースコア (v4.2)
+  // 21ファクタースコア (v5.2: 着差+天候追加)
   'recentForm', 'courseAptitude', 'distanceAptitude', 'trackConditionAptitude',
   'jockeyAbility', 'speedRating', 'classPerformance', 'runningStyle',
   'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
   'sireAptitude', 'trainerAbility', 'jockeyTrainerCombo', 'historicalPostBias',
   'seasonalPattern', 'handicapAdvantage', 'marketOdds',
+  'marginCompetitiveness', 'weatherAptitude',
   // コンテキスト特徴量
   'fieldSize', 'odds', 'popularity', 'age', 'sex_encoded',
   'handicapWeight', 'postPosition', 'grade_encoded', 'trackType_encoded',
@@ -202,6 +203,7 @@ async function main() {
     features: number[];
     label_win: number;
     label_place: number;
+    position: number;
   }> = [];
 
   let skippedNoScores = 0;
@@ -270,6 +272,7 @@ async function main() {
         features,
         label_win: entry.result_position === 1 ? 1 : 0,
         label_place: entry.result_position <= 3 ? 1 : 0,
+        position: entry.result_position,
       });
     }
   }

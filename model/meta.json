@@ -1,9 +1,10 @@
 {
+  "model_type": "ranker",
   "train_samples": 73008,
   "val_samples": 12884,
-  "win_auc": 0.8846,
-  "place_auc": 0.8469,
-  "win_accuracy": 0.7779,
-  "place_accuracy": 0.7456,
-  "feature_count": 42
+  "feature_count": 44,
+  "ndcg_1": 0.6002,
+  "ndcg_3": 0.6012,
+  "top1_accuracy": 0.4578,
+  "top3_accuracy": 0.7503
 }

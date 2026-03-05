@@ -136,7 +136,7 @@ export function makeScoredHorse(overrides: Record<string, unknown> = {}) {
       classPerformance: 50, runningStyle: 50, postPositionBias: 50,
       rotation: 60, lastThreeFurlongs: 55, consistency: 55,
       sireAptitude: 50, jockeyTrainerCombo: 50, historicalPostBias: 50,
-      seasonalPattern: 50,
+      seasonalPattern: 50, marginCompetitiveness: 50, weatherAptitude: 50,
       _dataReliability: 70, _totalDataPoints: 30,
       ...(overrides.scores as Record<string, number> || {}),
     },

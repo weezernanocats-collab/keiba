@@ -60,12 +60,15 @@ import { calculateTodayTrackBias, type TodayTrackBias } from './track-bias';
 import { categorizeRace, applyCategoryMultipliers } from './weight-profiles';
 import { calcWeightTrendBonus } from './weight-trend';
 import { applyEnhancedPaceBonus, generatePaceAnalysisText, type HistoricalPaceProfile } from './pace-analyzer';
+import { calcMarginScore } from './margin-score';
+import { calcWeatherScore } from './weather-score';
 import { dbAll } from './database';
 
-// デフォルト重み設定 (v5.0: 精度向上5改善 + オッズファクター, 合計1.00)
+// デフォルト重み設定 (v5.2: v5.1ベース + 着差/天候を最小ウェイトで追加, 合計1.00)
+// 新ファクターの真価は未来レースの自動校正で測定する
 const DEFAULT_WEIGHTS: Record<string, number> = {
-  // 個体分析
-  recentForm: 0.16,
+  // 個体分析 (v5.1据え置き、recentFormのみ-1%で新ファクター2%分を捻出)
+  recentForm: 0.15,
   courseAptitude: 0.06,
   distanceAptitude: 0.10,
   trackConditionAptitude: 0.04,
@@ -77,15 +80,18 @@ const DEFAULT_WEIGHTS: Record<string, number> = {
   rotation: 0.04,
   lastThreeFurlongs: 0.07,
   consistency: 0.04,
-  // 統計ベース分析
+  // 統計ベース分析 (v5.1据え置き)
   sireAptitude: 0.05,
   trainerAbility: 0.03,
   jockeyTrainerCombo: 0.02,
   historicalPostBias: 0.03,
   seasonalPattern: 0.02,
-  handicapAdvantage: 0.02,
-  // 市場シグナル（低ウェイト、オッズ未取得時はフォールバック）
+  handicapAdvantage: 0.01,
+  // 市場シグナル (v5.1据え置き)
   marketOdds: 0.03,
+  // v5.2: 最小ウェイトで追加、自動校正に委ねる
+  marginCompetitiveness: 0.01,
+  weatherAptitude: 0.01,
 };
 
 // WEIGHTS はキャリブレーション結果で上書き可能
@@ -160,6 +166,8 @@ const POPULATION_PRIORS: Record<string, number> = {
   seasonalPattern: 50,     // 季節は中立
   handicapAdvantage: 50,   // 斤量は中立prior
   marketOdds: 50,          // オッズなし → 中立
+  marginCompetitiveness: 48, // 着差データなし → やや不利
+  weatherAptitude: 50,     // 天候データなし → 中立
 };
 
 /**
@@ -187,6 +195,8 @@ function calcFactorReliability(factor: string, dataPoints: number): number {
     historicalPostBias: 20,
     seasonalPattern: 6,
     marketOdds: 1,
+    marginCompetitiveness: 5,
+    weatherAptitude: 3,
   };
   const req = requiredPoints[factor] || 5;
   return Math.min(1.0, dataPoints / req);
@@ -307,7 +317,7 @@ export async function generatePrediction(
 
   // 各馬をスコアリング
   const scoredHorses = horses.map(h =>
-    scoreHorse(h, trackType, distance, cond, racecourseName, grade, horses.length, ctx, month, avgHandicapWeight, oddsMap, categoryWeights)
+    scoreHorse(h, trackType, distance, cond, racecourseName, grade, horses.length, ctx, month, avgHandicapWeight, oddsMap, categoryWeights, weather)
   );
 
   // 展開予想から脚質ボーナスを付与（強化版: コンテキスト依存）
@@ -473,6 +483,7 @@ function scoreHorse(
   avgHandicapWeight: number,
   oddsMap: Map<number, number>,
   categoryWeights: Record<string, number>,
+  currentWeather?: string,
 ): ScoredHorse {
   const { entry, pastPerformances: pp, jockeyWinRate, jockeyPlaceRate, fatherName } = input;
   const reasons: string[] = [];
@@ -623,6 +634,25 @@ function scoreHorse(
     }
   }
 
+  // 20. 着差競争力 (0-100) - v5.2
+  {
+    const marginResult = calcMarginScore(pp);
+    scores.marginCompetitiveness = marginResult.score;
+    if (marginResult.score >= 75) reasons.push('僅差好走が多く競り合いに強い');
+    else if (marginResult.score <= 30) reasons.push('大敗が多く安定感に欠ける');
+  }
+
+  // 21. 天候適性 (0-100) - v5.2
+  {
+    const weatherResult = calcWeatherScore(pp, currentWeather);
+    scores.weatherAptitude = weatherResult.score;
+    if (weatherResult.dataPoints >= 2 && weatherResult.score >= 75) {
+      reasons.push(`${currentWeather || ''}天候で好走実績あり`);
+    } else if (weatherResult.dataPoints >= 2 && weatherResult.score <= 30) {
+      reasons.push(`${currentWeather || ''}天候は苦手傾向`);
+    }
+  }
+
   // 叩き良化ボーナス（ローテーションスコアに加算）
   const secondStartBonus = ctx.secondStartMap.get(entry.horseId);
   if (secondStartBonus && pp.length >= 2) {
@@ -676,6 +706,8 @@ function scoreHorse(
     { factor: 'seasonalPattern', reliability: calcFactorReliability('seasonalPattern', seasonalData?.reduce((s, m) => s + m.races, 0) || 0), dataPoints: seasonalData?.reduce((s, m) => s + m.races, 0) || 0 },
     { factor: 'handicapAdvantage', reliability: 1.0, dataPoints: 1 },
     { factor: 'marketOdds', reliability: oddsMap.has(entry.horseNumber) ? 1.0 : 0.0, dataPoints: oddsMap.has(entry.horseNumber) ? 1 : 0 },
+    { factor: 'marginCompetitiveness', reliability: calcFactorReliability('marginCompetitiveness', pp.filter(p => p.margin !== undefined && p.margin !== '').length), dataPoints: pp.filter(p => p.margin !== undefined && p.margin !== '').length },
+    { factor: 'weatherAptitude', reliability: calcFactorReliability('weatherAptitude', currentWeather ? pp.filter(p => p.weather === currentWeather).length : 0), dataPoints: currentWeather ? pp.filter(p => p.weather === currentWeather).length : 0 },
   );
 
   // ベイズ推定でスコアを補正
