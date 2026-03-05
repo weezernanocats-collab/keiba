@@ -347,18 +347,39 @@ export async function calibrateWeights(): Promise<CalibrationResult | null> {
     'recentForm', 'courseAptitude', 'distanceAptitude', 'trackConditionAptitude',
     'jockeyAbility', 'speedRating', 'classPerformance', 'runningStyle',
     'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
-    'sireAptitude', 'jockeyTrainerCombo', 'historicalPostBias', 'seasonalPattern',
-    'handicapAdvantage',
+    'sireAptitude', 'trainerAbility', 'jockeyTrainerCombo', 'historicalPostBias',
+    'seasonalPattern', 'handicapAdvantage', 'marketOdds',
   ];
 
   const currentWeights: Record<string, number> = {
-    recentForm: 0.15, courseAptitude: 0.07, distanceAptitude: 0.10,
-    trackConditionAptitude: 0.05, jockeyAbility: 0.07, speedRating: 0.08,
-    classPerformance: 0.04, runningStyle: 0.07, postPositionBias: 0.04,
-    rotation: 0.05, lastThreeFurlongs: 0.07, consistency: 0.04,
-    sireAptitude: 0.06, jockeyTrainerCombo: 0.04, historicalPostBias: 0.04,
-    seasonalPattern: 0.03, handicapAdvantage: 0.03,
+    recentForm: 0.16, courseAptitude: 0.06, distanceAptitude: 0.10,
+    trackConditionAptitude: 0.04, jockeyAbility: 0.07, speedRating: 0.10,
+    classPerformance: 0.04, runningStyle: 0.05, postPositionBias: 0.03,
+    rotation: 0.04, lastThreeFurlongs: 0.07, consistency: 0.04,
+    sireAptitude: 0.05, trainerAbility: 0.03, jockeyTrainerCombo: 0.02,
+    historicalPostBias: 0.03, seasonalPattern: 0.02, handicapAdvantage: 0.02,
+    marketOdds: 0.03,
   };
+
+  // 全対象レースの race_entries を一括取得（N+1クエリ回避）
+  const allRaceIds = [...new Set(rows.map(r => r.race_id))];
+  const entriesByRace = new Map<string, { horse_id: string; horse_number: number; result_position: number }[]>();
+
+  // JOINで一括取得（WHERE INだと800+でTursoタイムアウトするのでバッチ分割）
+  const BATCH_SIZE = 200;
+  for (let i = 0; i < allRaceIds.length; i += BATCH_SIZE) {
+    const batch = allRaceIds.slice(i, i + BATCH_SIZE);
+    const placeholders = batch.map(() => '?').join(',');
+    const batchEntries = await dbAll<{ race_id: string; horse_id: string; horse_number: number; result_position: number }>(
+      `SELECT race_id, horse_id, horse_number, result_position FROM race_entries WHERE race_id IN (${placeholders}) AND result_position IS NOT NULL`,
+      batch
+    );
+    for (const e of batchEntries) {
+      const arr = entriesByRace.get(e.race_id) || [];
+      arr.push(e);
+      entriesByRace.set(e.race_id, arr);
+    }
+  }
 
   // 各レースで予想上位と実際の勝ち馬のスコアパターンを比較
   const factorStats: Record<string, { winnerScores: number[]; loserScores: number[] }> = {};
@@ -371,10 +392,7 @@ export async function calibrateWeights(): Promise<CalibrationResult | null> {
       const picks = JSON.parse(row.picks_json || '[]');
       if (!picks || picks.length === 0) continue;
 
-      const entries = await dbAll<{ horse_id: string; horse_number: number; result_position: number }>(
-        'SELECT horse_id, horse_number, result_position FROM race_entries WHERE race_id = ? AND result_position IS NOT NULL',
-        [row.race_id]
-      );
+      const entries = entriesByRace.get(row.race_id) || [];
 
       if (entries.length === 0) continue;
       const winnerNumbers = new Set(entries.filter(e => e.result_position === 1).map(e => e.horse_number));
