@@ -1,0 +1,18 @@
+name: Test Gemini API
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Test gemini-flash-latest
+        run: |
+          curl -s -w "\nHTTP_STATUS:%{http_code}\n" \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${{ secrets.GEMINI_API_KEY }}" \
+            -H 'Content-Type: application/json' \
+            -d '{"contents":[{"parts":[{"text":"Say hello in one word"}]}],"generationConfig":{"maxOutputTokens":10}}' \
+            --max-time 30
