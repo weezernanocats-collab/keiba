@@ -29,7 +29,7 @@ const FEATURE_NAMES = [
   'jockeyAbility', 'speedRating', 'classPerformance', 'runningStyle',
   'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
   'sireAptitude', 'trainerAbility', 'jockeyTrainerCombo', 'historicalPostBias',
-  'seasonalPattern', 'handicapAdvantage',
+  'seasonalPattern', 'handicapAdvantage', 'marketOdds',
   // コンテキスト特徴量
   'fieldSize', 'odds', 'popularity', 'age', 'sex_encoded',
   'handicapWeight', 'postPosition', 'grade_encoded', 'trackType_encoded',

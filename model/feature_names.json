@@ -17,6 +17,7 @@
   "historicalPostBias",
   "seasonalPattern",
   "handicapAdvantage",
+  "marketOdds",
   "fieldSize",
   "odds",
   "popularity",
