@@ -190,15 +190,25 @@
 ### 1.3 取得フロー
 
 ```
-Vercel Cron (vercel.json: 2ジョブ)
+Vercel Cron (vercel.json: 1ジョブ)
 │
-├─ 09:00 JST (0 0 * * *) ── bulk_chunked トリガー
-│    └─ /api/sync にPOST → チェーン実行:
-│       dates → race_details → horses → results → odds → predictions → evaluate
+└─ 09:00 JST (0 0 * * *) ── bulk_chunked トリガー
+     └─ /api/sync にPOST → チェーン実行:
+        dates → race_details → horses → results → odds → predictions → evaluate
+
+GitHub Actions (3ワークフロー)
 │
-└─ 17:00 JST (0 8 * * *) ── 結果取得 + 予想照合
-     └─ scheduler.ts の runCronJob() を実行
+├─ daily-morning.yml  (06:00 JST / 手動) ── データ取得 + 予想生成
+│    └─ daily-pipeline.ts --job morning|odds|results|night
+│
+├─ daily-results.yml  (17:00 JST / 手動) ── 結果取得 + 予想照合 + キャリブレーション
+│    └─ daily-pipeline.ts --job results
+│
+└─ prefetch-races.yml (水・土 09:00 JST / 手動) ── 先行レース取得
+     └─ prefetch-upcoming.ts --days 14
 ```
+
+※ 結果取得はGitHub Actionsに一本化（Vercel Hobbyの60秒制限回避のため）。
 
 各リクエストには **1.2秒間隔のレートリミット**、**10秒タイムアウト**、**最大2回リトライ**（指数バックオフ）を適用し、取得元サーバーに過度な負荷をかけない設計としている。
 
