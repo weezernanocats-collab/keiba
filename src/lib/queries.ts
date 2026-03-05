@@ -1,7 +1,7 @@
 import { dbAll, dbGet, dbRun, dbRunNamed, dbBatch } from './database';
 import type {
   Horse, Jockey, Race, RaceEntry, PastPerformance,
-  Odds, Prediction, PredictionPick, RaceAnalysis, RecommendedBet,
+  Prediction, PredictionPick, RaceAnalysis, RecommendedBet,
   RACECOURSES
 } from '@/types';
 

@@ -183,7 +183,9 @@ async function main() {
   console.log('このシステムの精度向上メカニズム:');
   console.log('');
   console.log('1. XGBoostモデル (定期再学習)');
-  console.log(`   現在: ${(await import('fs')).existsSync(require('path').join(__dirname, '..', 'model', 'meta.json')) ? 'モデル学習済み' : '未学習'}`);
+  const fs = await import('fs');
+  const path = await import('path');
+  console.log(`   現在: ${fs.existsSync(path.join(__dirname, '..', 'model', 'meta.json')) ? 'モデル学習済み' : '未学習'}`);
   console.log(`   学習データ: 約${42597}件 → データ増加で精度向上 ✓`);
   console.log('');
   console.log('2. ファクターウェイト自動校正');

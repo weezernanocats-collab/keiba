@@ -67,7 +67,7 @@ const DEFAULT_WEIGHTS: Record<string, number> = {
   sireAptitude: 0.05,
   trainerAbility: 0.04,
   jockeyTrainerCombo: 0.02,
-  historicalPostBias: 0.03,
+  historicalPostBias: 0.02,
   seasonalPattern: 0.02,
   handicapAdvantage: 0.02,
 };

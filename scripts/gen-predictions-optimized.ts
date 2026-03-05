@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * 最適化版: 過去レースの予想一括生成
  *
@@ -19,10 +20,10 @@ for (const line of envContent.split('\n')) {
 // Gemini無料枠切れ → タイムアウト待ちを回避するため無効化
 delete process.env.GEMINI_API_KEY;
 
-import { ensureInitialized, dbAll, dbRun } from '../src/lib/database';
+import { ensureInitialized, dbAll } from '../src/lib/database';
 import { generatePrediction, type HorseAnalysisInput } from '../src/lib/prediction-engine';
 import { savePrediction } from '../src/lib/queries';
-import type { TrackType, TrackCondition, Prediction } from '../src/types';
+import type { TrackType, TrackCondition } from '../src/types';
 
 // ==================== 型定義 ====================
 

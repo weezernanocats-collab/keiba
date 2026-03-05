@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface SyncInfo {
   isRunning: boolean;
@@ -27,7 +27,8 @@ const TYPE_LABELS: Record<string, string> = {
 export default function SyncStatusBanner() {
   const [syncInfo, setSyncInfo] = useState<SyncInfo | null>(null);
   const [completedMessage, setCompletedMessage] = useState<string | null>(null);
-  const [wasRunning, setWasRunning] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const wasRunningRef = useRef(false);
 
   const fetchSyncStatus = useCallback(async () => {
     try {
@@ -40,6 +41,16 @@ export default function SyncStatusBanner() {
       const res = await fetch('/api/sync', { headers });
       if (!res.ok) return;
       const data: SyncInfo = await res.json();
+
+      // 実行中 → 完了に変わったら完了メッセージを表示
+      if (data.isRunning) {
+        wasRunningRef.current = true;
+        setCompletedMessage(null);
+      } else if (wasRunningRef.current) {
+        wasRunningRef.current = false;
+        setCompletedMessage('同期処理が完了しました');
+      }
+
       setSyncInfo(data);
     } catch {
       // ネットワークエラー時は無視
@@ -47,23 +58,26 @@ export default function SyncStatusBanner() {
   }, []);
 
   useEffect(() => {
-    fetchSyncStatus();
-    const interval = setInterval(fetchSyncStatus, 5000);
-    return () => clearInterval(interval);
+    const id = setInterval(() => {
+      fetchSyncStatus();
+      setNow(Date.now());
+    }, 5000);
+    // 初回取得はintervalに委ねる（すぐにfetchするため0ms後に呼ぶ）
+    const initId = setTimeout(() => {
+      fetchSyncStatus();
+    }, 0);
+    return () => {
+      clearInterval(id);
+      clearTimeout(initId);
+    };
   }, [fetchSyncStatus]);
 
-  // 実行中 → 完了に変わったら完了メッセージを表示
+  // 完了メッセージを8秒後に消す
   useEffect(() => {
-    if (syncInfo?.isRunning) {
-      setWasRunning(true);
-      setCompletedMessage(null);
-    } else if (wasRunning && !syncInfo?.isRunning) {
-      setWasRunning(false);
-      setCompletedMessage('同期処理が完了しました');
-      const timer = setTimeout(() => setCompletedMessage(null), 8000);
-      return () => clearTimeout(timer);
-    }
-  }, [syncInfo?.isRunning, wasRunning]);
+    if (!completedMessage) return;
+    const timer = setTimeout(() => setCompletedMessage(null), 8000);
+    return () => clearTimeout(timer);
+  }, [completedMessage]);
 
   // 実行中でも完了通知でもなければ何も表示しない
   if (!syncInfo?.isRunning && !completedMessage) return null;
@@ -84,7 +98,7 @@ export default function SyncStatusBanner() {
   const current = syncInfo?.currentSync;
   const typeLabel = current ? (TYPE_LABELS[current.type] || current.type) : '同期処理';
   const elapsed = current
-    ? Math.round((Date.now() - new Date(current.startedAt).getTime()) / 1000)
+    ? Math.round((now - new Date(current.startedAt).getTime()) / 1000)
     : 0;
   const elapsedStr = elapsed >= 60
     ? `${Math.floor(elapsed / 60)}分${elapsed % 60}秒`

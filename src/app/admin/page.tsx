@@ -828,7 +828,6 @@ function AccuracyPanel({ headers, triggerSync }: {
 
     // Phase 1: オッズ修復（10件ずつ）
     setRepairStatus('修復中...');
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       try {
         const res = await fetch('/api/sync', {
@@ -848,7 +847,6 @@ function AccuracyPanel({ headers, triggerSync }: {
 
     // Phase 2: 再評価（5件ずつ）
     setRepairStatus(`修復${totalRepaired}件完了。再評価中...`);
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       try {
         const res = await fetch('/api/sync', {

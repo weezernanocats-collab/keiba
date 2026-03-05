@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { _testExports } from '@/lib/prediction-engine';
 import {
-  makePP, makeStrongHorsePP, makeWeakHorsePP,
+  makePP, makeStrongHorsePP,
   makeEscapeHorsePP, makeCloserHorsePP, makeGradeRacePP,
   makeScoredHorse, makeEmptyContext,
 } from './fixtures/mock-data';
@@ -26,24 +26,24 @@ const {
 // ==================== ユーティリティ ====================
 
 describe('positionToScore', () => {
-  it('1着は95点', () => {
-    expect(positionToScore(1, 16)).toBe(95);
+  it('1着は100点', () => {
+    expect(positionToScore(1, 16)).toBe(100);
   });
 
-  it('2着は85点', () => {
-    expect(positionToScore(2, 16)).toBe(85);
+  it('2着は93点', () => {
+    expect(positionToScore(2, 16)).toBe(93);
   });
 
-  it('3着は75点', () => {
-    expect(positionToScore(3, 16)).toBe(75);
+  it('3着は87点', () => {
+    expect(positionToScore(3, 16)).toBe(87);
   });
 
   it('最下位は低スコア', () => {
     expect(positionToScore(16, 16)).toBeLessThanOrEqual(10);
   });
 
-  it('entries=0のとき50を返す', () => {
-    expect(positionToScore(1, 0)).toBe(50);
+  it('entries=0のとき100を返す(1着)', () => {
+    expect(positionToScore(1, 0)).toBe(100);
   });
 
   it('1/20 (上位5%) は100点', () => {
@@ -191,7 +191,7 @@ describe('detectRunningStyle', () => {
   });
 
   it('中団が多いと差し', () => {
-    const pp = Array.from({ length: 10 }, (_, i) => makePP({
+    const pp = Array.from({ length: 10 }, () => makePP({
       cornerPositions: '8-8-7-6',
       entries: 16,
     }));
@@ -681,8 +681,8 @@ describe('WEIGHTS', () => {
     expect(total).toBeCloseTo(1.0, 2);
   });
 
-  it('16個のファクターがある', () => {
-    expect(Object.keys(WEIGHTS).length).toBe(16);
+  it('18個のファクターがある', () => {
+    expect(Object.keys(WEIGHTS).length).toBe(18);
   });
 });
 
