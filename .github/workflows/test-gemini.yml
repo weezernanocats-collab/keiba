@@ -9,10 +9,17 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - name: Test gemini-flash-latest
+      - name: Test Gemini models
         run: |
-          curl -s -w "\nHTTP_STATUS:%{http_code}\n" \
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${{ secrets.GEMINI_API_KEY }}" \
-            -H 'Content-Type: application/json' \
-            -d '{"contents":[{"parts":[{"text":"Say hello in one word"}]}],"generationConfig":{"maxOutputTokens":10}}' \
-            --max-time 30
+          for MODEL in gemini-flash-latest gemini-2.0-flash gemini-2.5-flash gemini-2.5-flash-lite; do
+            echo "=== Testing $MODEL ==="
+            HTTP_CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+              "https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${{ secrets.GEMINI_API_KEY }}" \
+              -H 'Content-Type: application/json' \
+              -d '{"contents":[{"parts":[{"text":"Say hello"}]}],"generationConfig":{"maxOutputTokens":10}}' \
+              --max-time 20 --connect-timeout 10)
+            echo "HTTP: $HTTP_CODE"
+            cat /tmp/resp.json | head -c 300
+            echo ""
+            echo ""
+          done
