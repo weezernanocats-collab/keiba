@@ -720,6 +720,41 @@ export async function saveCalibrationWeights(
   `, [JSON.stringify(weights), evaluatedRaces, applied ? 1 : 0, notes || null]);
 }
 
+// ==================== カテゴリ別キャリブレーション ====================
+
+/** カテゴリ別校正結果を保存 */
+export async function saveCategoryCalibration(
+  category: string,
+  multipliers: Record<string, number>,
+  evaluatedRaces: number,
+  applied: boolean,
+  notes?: string,
+): Promise<void> {
+  await dbRun(`
+    INSERT INTO category_calibration (category, multipliers_json, evaluated_races, applied, notes)
+    VALUES (?, ?, ?, ?, ?)
+  `, [category, JSON.stringify(multipliers), evaluatedRaces, applied ? 1 : 0, notes || null]);
+}
+
+/** 有効なカテゴリ別校正結果を全カテゴリ取得 */
+export async function getActiveCategoryCalibrations(): Promise<Map<string, Record<string, number>> | null> {
+  const rows = await dbAll<{ category: string; multipliers_json: string }>(
+    `SELECT category, multipliers_json FROM category_calibration
+     WHERE applied = 1
+     AND id IN (SELECT MAX(id) FROM category_calibration WHERE applied = 1 GROUP BY category)`
+  );
+  if (rows.length === 0) return null;
+  const result = new Map<string, Record<string, number>>();
+  for (const row of rows) {
+    try {
+      result.set(row.category, JSON.parse(row.multipliers_json));
+    } catch {
+      // パース失敗は無視
+    }
+  }
+  return result.size > 0 ? result : null;
+}
+
 // ==================== スケジューラー実行記録 ====================
 
 /** スケジューラー実行記録を保存 */

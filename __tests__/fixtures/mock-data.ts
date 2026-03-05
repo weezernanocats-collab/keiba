@@ -156,5 +156,8 @@ export function makeEmptyContext() {
     trainerStatsMap: new Map(),
     seasonalMap: new Map(),
     secondStartMap: new Map(),
+    dynamicStdTime: null,
+    jockeyFormMap: new Map(),
+    paceProfile: null,
   };
 }

@@ -77,14 +77,39 @@ const CATEGORY_MULTIPLIERS: Record<RaceCategory, Record<string, number>> = {
   },
 };
 
+// 自動校正済み乗数（calibrateCategoryWeightsから適用）
+let CALIBRATED_MULTIPLIERS: Record<RaceCategory, Record<string, number>> | null = null;
+
+/**
+ * カテゴリ別自動校正結果を適用する
+ */
+export function applyCalibratedCategoryMultipliers(
+  calibrations: Map<string, Record<string, number>>,
+): void {
+  const result = { ...CATEGORY_MULTIPLIERS } as Record<RaceCategory, Record<string, number>>;
+  for (const [category, multipliers] of calibrations.entries()) {
+    if (category in result) {
+      result[category as RaceCategory] = { ...result[category as RaceCategory], ...multipliers };
+    }
+  }
+  CALIBRATED_MULTIPLIERS = result;
+}
+
+/** 校正済み乗数をリセットする */
+export function resetCalibratedMultipliers(): void {
+  CALIBRATED_MULTIPLIERS = null;
+}
+
 /**
  * ベースウェイトにカテゴリ別乗数を適用して正規化
+ * 校正済み乗数が存在すればそちらを優先使用
  */
 export function applyCategoryMultipliers(
   baseWeights: Record<string, number>,
   category: RaceCategory,
 ): Record<string, number> {
-  const multipliers = CATEGORY_MULTIPLIERS[category];
+  const source = CALIBRATED_MULTIPLIERS ?? CATEGORY_MULTIPLIERS;
+  const multipliers = source[category];
   const adjusted: Record<string, number> = {};
 
   for (const [key, weight] of Object.entries(baseWeights)) {

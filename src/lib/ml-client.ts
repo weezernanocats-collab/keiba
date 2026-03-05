@@ -86,6 +86,10 @@ interface ContextualFeatures {
   sireTrackWinRate?: number | undefined;
   jockeyDistanceWinRate?: number | undefined;
   jockeyCourseWinRate?: number | undefined;
+  // v5.1: 馬体重トレンド特徴量
+  weightStability?: number | undefined;
+  weightTrendSlope?: number | undefined;
+  weightOptimalDelta?: number | undefined;
 }
 
 /**
@@ -123,6 +127,10 @@ export function buildMLFeatures(
     sireTrackWinRate: ctx.sireTrackWinRate ?? 0.07,
     jockeyDistanceWinRate: ctx.jockeyDistanceWinRate ?? 0.08,
     jockeyCourseWinRate: ctx.jockeyCourseWinRate ?? 0.08,
+    // v5.1: 馬体重トレンド
+    weightStability: ctx.weightStability ?? 50,
+    weightTrendSlope: ctx.weightTrendSlope ?? 0,
+    weightOptimalDelta: ctx.weightOptimalDelta ?? 0,
   };
 }
 

@@ -58,6 +58,8 @@ import { enhancePredictionWithGemini, type GeminiRaceContext } from './gemini-en
 import { callMLPredict, buildMLFeatures, type MLHorseInput } from './ml-client';
 import { calculateTodayTrackBias, type TodayTrackBias } from './track-bias';
 import { categorizeRace, applyCategoryMultipliers } from './weight-profiles';
+import { calcWeightTrendBonus } from './weight-trend';
+import { applyEnhancedPaceBonus, generatePaceAnalysisText, type HistoricalPaceProfile } from './pace-analyzer';
 import { dbAll } from './database';
 
 // デフォルト重み設定 (v5.0: 精度向上5改善 + オッズファクター, 合計1.00)
@@ -308,8 +310,8 @@ export async function generatePrediction(
     scoreHorse(h, trackType, distance, cond, racecourseName, grade, horses.length, ctx, month, avgHandicapWeight, oddsMap, categoryWeights)
   );
 
-  // 展開予想から脚質ボーナスを付与
-  applyPaceBonus(scoredHorses, distance);
+  // 展開予想から脚質ボーナスを付与（強化版: コンテキスト依存）
+  applyEnhancedPaceBonus(scoredHorses, distance, grade, cond, ctx.paceProfile);
 
   // 当日馬場バイアスを反映（同場・同日・同トラックの完走レースから推定）
   const todayBias = await calculateTodayTrackBias(racecourseName, date, trackType);
@@ -351,6 +353,10 @@ export async function generatePrediction(
           sireTrackWinRate: input?.sireTrackWinRate,
           jockeyDistanceWinRate: input?.jockeyDistanceWinRate,
           jockeyCourseWinRate: input?.jockeyCourseWinRate,
+          // v5.1: 馬体重トレンド特徴量
+          weightStability: sh.scores._weightStability,
+          weightTrendSlope: sh.scores._weightTrendSlope,
+          weightOptimalDelta: sh.scores._weightOptimalDelta,
         },
       ),
     };
@@ -380,7 +386,7 @@ export async function generatePrediction(
     reasons: sh.reasons,
   }));
 
-  // レース分析（当日バイアスも含める）
+  // レース分析（当日バイアス + ペースプロファイルも含める）
   const analysis = analyzeRace(scoredHorses, trackType, distance, cond, racecourseName, ctx, todayBias);
 
   // キャリブレーション用: 全馬のファクタースコアを analysis に格納
@@ -477,8 +483,15 @@ function scoreHorse(
 
   // ==================== 個体分析 ====================
 
-  // 1. 直近成績 (0-100) + グレード補正 + トレンド検出
+  // 1. 直近成績 (0-100) + グレード補正 + トレンド検出 + 馬体重トレンド
   scores.recentForm = calcRecentFormScoreV5(pp);
+  const weightTrend = calcWeightTrendBonus(pp);
+  scores.recentForm = Math.max(0, Math.min(100, scores.recentForm + weightTrend.bonus));
+  scores._weightStability = weightTrend.stability;
+  scores._weightTrendSlope = weightTrend.trendSlope;
+  scores._weightOptimalDelta = weightTrend.optimalDelta;
+  if (weightTrend.bonus >= 3) reasons.push(`馬体重安定・好調（${weightTrend.signal}）`);
+  else if (weightTrend.bonus <= -3) reasons.push(`馬体重に不安（${weightTrend.signal}）`);
   if (scores.recentForm >= 75) reasons.push(`直近成績が優秀（スコア${Math.round(scores.recentForm)}）`);
   else if (scores.recentForm >= 60) reasons.push('直近の調子は悪くない');
   else if (scores.recentForm <= 30) reasons.push('直近成績が低調');
@@ -1391,6 +1404,12 @@ function analyzeRace(
     paceAnalysis = `スローペース予想。逃げ${escapers.length}頭・先行${frontRunners.length}頭と先行勢が少ない。${escapers.length <= 1 ? '逃げ馬が楽にハナを切れそうで、前残りに警戒。' : ''}上がり勝負になりやすく、瞬発力のある馬が有利。`;
   } else {
     paceAnalysis = `ミドルペース予想。脚質分布は逃げ${escapers.length}/先行${frontRunners.length}/差し${stalkers.length}/追込${closers.length}とバランスが取れている。実力通りの決着が見込まれる。`;
+  }
+
+  // ペースプロファイル補足
+  const profileText = generatePaceAnalysisText(scoredHorses, ctx.paceProfile);
+  if (profileText) {
+    paceAnalysis += ` ${profileText}`;
   }
 
   // キーファクター

@@ -38,6 +38,8 @@ const FEATURE_NAMES = [
   'weather_encoded', 'weightChange',
   'trainerWinRate', 'trainerPlaceRate',
   'sireTrackWinRate', 'jockeyDistanceWinRate', 'jockeyCourseWinRate',
+  // v5.1: 馬体重トレンド特徴量
+  'weightStability', 'weightTrendSlope', 'weightOptimalDelta',
 ];
 
 const SEX_ENCODE: Record<string, number> = { '牡': 0, '牝': 1, 'セ': 2 };

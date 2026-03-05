@@ -13,7 +13,8 @@
 
 import { dbAll, dbGet, dbRun } from './database';
 import { applyCalibrationWeights } from './prediction-engine';
-import { saveCalibrationWeights, getActiveCalibrationWeights } from './queries';
+import { saveCalibrationWeights, getActiveCalibrationWeights, saveCategoryCalibration, getActiveCategoryCalibrations } from './queries';
+import { categorizeRace, applyCalibratedCategoryMultipliers, type RaceCategory } from './weight-profiles';
 
 // ==================== 型定義 ====================
 
@@ -514,10 +515,160 @@ export async function autoCalibrate(): Promise<{ applied: boolean; message: stri
   await saveCalibrationWeights(result.suggestedWeights, result.evaluatedRaces, true, '自動校正');
   applyCalibrationWeights(result.suggestedWeights);
 
+  // カテゴリ別校正も実行
+  const categoryResult = await calibrateCategoryWeights();
+  const categoryMsg = categoryResult
+    ? `カテゴリ別校正: ${categoryResult.categories.length}カテゴリ適用`
+    : '';
+
   return {
     applied: true,
-    message: `${result.evaluatedRaces}レースの実績から重みを校正しました。${result.expectedImprovement}`,
+    message: `${result.evaluatedRaces}レースの実績から重みを校正しました。${result.expectedImprovement}${categoryMsg ? ' ' + categoryMsg : ''}`,
   };
+}
+
+// ==================== カテゴリ別自動校正 ====================
+
+interface CategoryCalibrationResult {
+  categories: { category: string; evaluatedRaces: number; multipliers: Record<string, number> }[];
+}
+
+const MIN_CATEGORY_RACES = 20;
+
+/**
+ * カテゴリ別（芝短/マイル/長/ダ短/ダ長）にファクター識別力を分析し、
+ * カテゴリ固有の乗数を算出する。
+ */
+export async function calibrateCategoryWeights(): Promise<CategoryCalibrationResult | null> {
+  const rows = await dbAll<{
+    race_id: string;
+    analysis_json: string;
+    track_type: string;
+    distance: number;
+  }>(`
+    SELECT p.race_id, p.analysis_json, r.track_type, r.distance
+    FROM prediction_results pr
+    JOIN predictions p ON pr.prediction_id = p.id
+    JOIN races r ON pr.race_id = r.id
+  `);
+
+  if (rows.length < MIN_CATEGORY_RACES) return null;
+
+  // レースエントリを一括取得
+  const allRaceIds = [...new Set(rows.map(r => r.race_id))];
+  const entriesByRace = new Map<string, { horse_number: number; result_position: number }[]>();
+  const BATCH_SIZE = 200;
+  for (let i = 0; i < allRaceIds.length; i += BATCH_SIZE) {
+    const batch = allRaceIds.slice(i, i + BATCH_SIZE);
+    const placeholders = batch.map(() => '?').join(',');
+    const batchEntries = await dbAll<{ race_id: string; horse_number: number; result_position: number }>(
+      `SELECT race_id, horse_number, result_position FROM race_entries WHERE race_id IN (${placeholders}) AND result_position IS NOT NULL`,
+      batch
+    );
+    for (const e of batchEntries) {
+      const arr = entriesByRace.get(e.race_id) || [];
+      arr.push(e);
+      entriesByRace.set(e.race_id, arr);
+    }
+  }
+
+  const factorNames = [
+    'recentForm', 'courseAptitude', 'distanceAptitude', 'trackConditionAptitude',
+    'jockeyAbility', 'speedRating', 'classPerformance', 'runningStyle',
+    'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
+    'sireAptitude', 'trainerAbility', 'jockeyTrainerCombo', 'historicalPostBias',
+    'seasonalPattern', 'handicapAdvantage', 'marketOdds',
+  ];
+
+  // カテゴリ別にファクタースコアを収集
+  const categoryData = new Map<RaceCategory, { winnerScores: Record<string, number[]>; loserScores: Record<string, number[]>; count: number }>();
+
+  for (const row of rows) {
+    const category = categorizeRace(row.track_type, row.distance);
+    if (!categoryData.has(category)) {
+      const init = { winnerScores: {} as Record<string, number[]>, loserScores: {} as Record<string, number[]>, count: 0 };
+      for (const f of factorNames) {
+        init.winnerScores[f] = [];
+        init.loserScores[f] = [];
+      }
+      categoryData.set(category, init);
+    }
+    const catData = categoryData.get(category)!;
+    catData.count++;
+
+    let horseScoresMap: Record<string, Record<string, number>> | null = null;
+    try {
+      const analysis = JSON.parse(row.analysis_json || '{}');
+      horseScoresMap = analysis.horseScores || null;
+    } catch { continue; }
+
+    if (!horseScoresMap) continue;
+
+    const entries = entriesByRace.get(row.race_id) || [];
+    const winnerNumbers = new Set(entries.filter(e => e.result_position === 1).map(e => e.horse_number));
+
+    for (const [numStr, scores] of Object.entries(horseScoresMap)) {
+      const horseNum = Number(numStr);
+      const isWinner = winnerNumbers.has(horseNum);
+      for (const f of factorNames) {
+        const val = scores[f];
+        if (val === undefined) continue;
+        if (isWinner) catData.winnerScores[f].push(val);
+        else catData.loserScores[f].push(val);
+      }
+    }
+  }
+
+  // グローバル平均識別力
+  const globalDiscrim: Record<string, number> = {};
+  for (const f of factorNames) {
+    let wSum = 0, wCount = 0, lSum = 0, lCount = 0;
+    for (const catData of categoryData.values()) {
+      wSum += catData.winnerScores[f].reduce((a, b) => a + b, 0);
+      wCount += catData.winnerScores[f].length;
+      lSum += catData.loserScores[f].reduce((a, b) => a + b, 0);
+      lCount += catData.loserScores[f].length;
+    }
+    const avgWin = wCount > 0 ? wSum / wCount : 50;
+    const avgLose = lCount > 0 ? lSum / lCount : 50;
+    globalDiscrim[f] = avgWin - avgLose;
+  }
+
+  // カテゴリ別乗数を算出
+  const results: CategoryCalibrationResult['categories'] = [];
+
+  for (const [category, catData] of categoryData.entries()) {
+    if (catData.count < MIN_CATEGORY_RACES) continue;
+
+    const multipliers: Record<string, number> = {};
+    for (const f of factorNames) {
+      const ws = catData.winnerScores[f];
+      const ls = catData.loserScores[f];
+      if (ws.length < 5 || ls.length < 5) continue;
+
+      const avgWin = ws.reduce((a, b) => a + b, 0) / ws.length;
+      const avgLose = ls.reduce((a, b) => a + b, 0) / ls.length;
+      const catDiscrim = avgWin - avgLose;
+      const globalD = globalDiscrim[f] || 0.1;
+
+      // カテゴリの識別力 / グローバル識別力 → 相対強度
+      const ratio = globalD !== 0 ? catDiscrim / globalD : 1.0;
+      // 保守的ブレンド: 70%現在 + 30%算出値
+      const computed = Math.max(0.5, Math.min(2.0, ratio));
+      multipliers[f] = Math.round((0.7 * 1.0 + 0.3 * computed) * 1000) / 1000;
+    }
+
+    await saveCategoryCalibration(category, multipliers, catData.count, true, `自動校正: ${catData.count}レース`);
+    results.push({ category, evaluatedRaces: catData.count, multipliers });
+  }
+
+  // メモリに適用
+  if (results.length > 0) {
+    const calibMap = new Map(results.map(r => [r.category, r.multipliers]));
+    applyCalibratedCategoryMultipliers(calibMap);
+  }
+
+  return { categories: results };
 }
 
 // ==================== bets_json オッズ修復 ====================
@@ -650,5 +801,11 @@ export async function ensureCalibrationLoaded(): Promise<void> {
   const weights = await getActiveCalibrationWeights();
   if (weights) {
     applyCalibrationWeights(weights);
+  }
+
+  // カテゴリ別校正も読み込み
+  const categoryCalibrations = await getActiveCategoryCalibrations();
+  if (categoryCalibrations) {
+    applyCalibratedCategoryMultipliers(categoryCalibrations);
   }
 }

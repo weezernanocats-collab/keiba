@@ -13,6 +13,7 @@
  */
 
 import { dbAll } from './database';
+import { computePaceProfile, type HistoricalPaceProfile } from './pace-analyzer';
 
 // ==================== 型定義 ====================
 
@@ -87,6 +88,7 @@ export interface RaceHistoricalContext {
   secondStartMap: Map<string, SecondStartBonus | null>;
   dynamicStdTime: DynamicStandardTime | null;
   jockeyFormMap: Map<string, JockeyRecentForm>;
+  paceProfile: HistoricalPaceProfile | null;
 }
 
 // ==================== メイン関数 ====================
@@ -151,7 +153,10 @@ export async function buildRaceContext(
     if (form) jockeyFormMap.set(jid, form);
   }
 
-  return { courseDistStats, sireStatsMap, jockeyTrainerMap, trainerStatsMap, seasonalMap, secondStartMap, dynamicStdTime, jockeyFormMap };
+  // ペースプロファイル（コース×トラック×距離帯の前残り傾向）
+  const paceProfile = await getPaceProfile(racecourseName, trackType, distance);
+
+  return { courseDistStats, sireStatsMap, jockeyTrainerMap, trainerStatsMap, seasonalMap, secondStartMap, dynamicStdTime, jockeyFormMap, paceProfile };
 }
 
 // ==================== 個別統計関数 ====================
@@ -459,6 +464,40 @@ async function getSecondStartBonus(horseId: string): Promise<SecondStartBonus | 
     improvement: firstAvg - secondAvg, // positive = 2走目の方が良い
     sampleSize: Math.min(firstStarts.length, secondStarts.length),
   };
+}
+
+// ==================== ペースプロファイル ====================
+
+/**
+ * コース×トラック×距離帯の過去データからペースプロファイルを算出
+ */
+async function getPaceProfile(
+  racecourseName: string,
+  trackType: string,
+  distance: number,
+): Promise<HistoricalPaceProfile | null> {
+  const tolerance = 200;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: any[] = await dbAll(`
+    SELECT corner_positions, position, entries
+    FROM past_performances
+    WHERE racecourse_name = ? AND track_type = ?
+      AND distance BETWEEN ? AND ?
+      AND entries > 0 AND position > 0
+    ORDER BY date DESC LIMIT 500
+  `, [racecourseName, trackType, distance - tolerance, distance + tolerance]);
+
+  if (rows.length < 20) return null;
+
+  const perfRows = rows
+    .filter((r: { corner_positions: string }) => r.corner_positions && r.corner_positions.includes('-'))
+    .map((r: { corner_positions: string; position: number; entries: number }) => ({
+      cornerPositions: r.corner_positions as string,
+      position: r.position as number,
+      entries: r.entries as number,
+    }));
+
+  return computePaceProfile(perfRows);
 }
 
 // ==================== スコア変換ヘルパー ====================

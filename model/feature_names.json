@@ -37,5 +37,8 @@
   "trainerPlaceRate",
   "sireTrackWinRate",
   "jockeyDistanceWinRate",
-  "jockeyCourseWinRate"
+  "jockeyCourseWinRate",
+  "weightStability",
+  "weightTrendSlope",
+  "weightOptimalDelta"
 ]

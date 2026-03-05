@@ -632,6 +632,9 @@ describe('calculateConfidence', () => {
       trainerStatsMap: new Map(),
       seasonalMap: new Map(Array.from({ length: 4 }, (_, i) => [`h${i}`, [] as never])),
       secondStartMap: new Map(),
+      dynamicStdTime: null,
+      jockeyFormMap: new Map(),
+      paceProfile: null,
     };
 
     const conf = calculateConfidence(horses, ctxRich);

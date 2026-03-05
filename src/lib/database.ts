@@ -333,6 +333,16 @@ const SCHEMA_STATEMENTS: InStatement[] = [
     notes TEXT
   )`,
 
+  `CREATE TABLE IF NOT EXISTS category_calibration (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT DEFAULT (datetime('now')),
+    category TEXT NOT NULL,
+    multipliers_json TEXT NOT NULL,
+    evaluated_races INTEGER NOT NULL,
+    applied INTEGER DEFAULT 0,
+    notes TEXT
+  )`,
+
   // インデックス
   `CREATE INDEX IF NOT EXISTS idx_races_date ON races(date)`,
   `CREATE INDEX IF NOT EXISTS idx_races_racecourse ON races(racecourse_id)`,
