@@ -85,6 +85,8 @@ export interface RaceHistoricalContext {
   trainerStatsMap: Map<string, TrainerStats>;
   seasonalMap: Map<string, SeasonalStats[]>;
   secondStartMap: Map<string, SecondStartBonus | null>;
+  dynamicStdTime: DynamicStandardTime | null;
+  jockeyFormMap: Map<string, JockeyRecentForm>;
 }
 
 // ==================== メイン関数 ====================
@@ -138,7 +140,18 @@ export async function buildRaceContext(
     secondStartMap.set(h.horseId, await getSecondStartBonus(h.horseId));
   }
 
-  return { courseDistStats, sireStatsMap, jockeyTrainerMap, trainerStatsMap, seasonalMap, secondStartMap };
+  // 動的基準タイム（コース×距離×馬場）
+  const dynamicStdTime = await getDynamicStandardTimes(racecourseName, trackType, distance, '良');
+
+  // 騎手直近フォーム
+  const jockeyFormMap = new Map<string, JockeyRecentForm>();
+  const uniqueJockeys = [...new Set(horses.map(h => h.jockeyId).filter(Boolean))];
+  for (const jid of uniqueJockeys) {
+    const form = await getJockeyRecentForm(jid);
+    if (form) jockeyFormMap.set(jid, form);
+  }
+
+  return { courseDistStats, sireStatsMap, jockeyTrainerMap, trainerStatsMap, seasonalMap, secondStartMap, dynamicStdTime, jockeyFormMap };
 }
 
 // ==================== 個別統計関数 ====================
@@ -601,4 +614,176 @@ export function calcSecondStartScore(
     return Math.max(30, 50 + bonus.improvement * 150);
   }
   return 50;
+}
+
+// ==================== コース別動的基準タイム ====================
+
+export interface DynamicStandardTime {
+  racecourseName: string;
+  trackType: string;
+  distance: number;
+  trackCondition: string;
+  avgTimeSeconds: number;
+  medianTimeSeconds: number;
+  sampleSize: number;
+}
+
+/**
+ * コース×距離×馬場状態別の動的基準タイムを算出する。
+ * past_performances の実データから中央値を計算し、ハードコードの基準タイムを置き換える。
+ */
+export async function getDynamicStandardTimes(
+  racecourseName: string,
+  trackType: string,
+  distance: number,
+  trackCondition: string,
+): Promise<DynamicStandardTime | null> {
+  const tolerance = 50; // ±50m（より厳密にマッチ）
+  const condGroup = (trackCondition === '重' || trackCondition === '不良')
+    ? ['重', '不良']
+    : (trackCondition === '稍重' ? ['稍重'] : ['良']);
+
+  const placeholders = condGroup.map(() => '?').join(',');
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: any[] = await dbAll(`
+    SELECT time
+    FROM past_performances
+    WHERE racecourse_name = ?
+    AND track_type = ?
+    AND distance BETWEEN ? AND ?
+    AND track_condition IN (${placeholders})
+    AND time IS NOT NULL AND time != ''
+    AND position <= 5
+    ORDER BY date DESC
+    LIMIT 200
+  `, [racecourseName, trackType, distance - tolerance, distance + tolerance, ...condGroup]);
+
+  if (rows.length < 5) {
+    // コース限定でデータ不足 → 全場の同条件にフォールバック
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fallbackRows: any[] = await dbAll(`
+      SELECT time
+      FROM past_performances
+      WHERE track_type = ?
+      AND distance BETWEEN ? AND ?
+      AND track_condition IN (${placeholders})
+      AND time IS NOT NULL AND time != ''
+      AND position <= 5
+      ORDER BY date DESC
+      LIMIT 300
+    `, [trackType, distance - tolerance, distance + tolerance, ...condGroup]);
+
+    if (fallbackRows.length < 5) return null;
+
+    return buildTimeStats(fallbackRows, '', trackType, distance, trackCondition);
+  }
+
+  return buildTimeStats(rows, racecourseName, trackType, distance, trackCondition);
+}
+
+function buildTimeStats(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rows: any[],
+  racecourseName: string,
+  trackType: string,
+  distance: number,
+  trackCondition: string,
+): DynamicStandardTime | null {
+  const times: number[] = [];
+  for (const r of rows) {
+    const t = timeStrToSeconds(r.time as string);
+    if (t > 0) times.push(t);
+  }
+  if (times.length < 3) return null;
+
+  times.sort((a, b) => a - b);
+  const median = times[Math.floor(times.length / 2)];
+  const avg = times.reduce((s, t) => s + t, 0) / times.length;
+
+  return {
+    racecourseName,
+    trackType,
+    distance,
+    trackCondition,
+    avgTimeSeconds: avg,
+    medianTimeSeconds: median,
+    sampleSize: times.length,
+  };
+}
+
+function timeStrToSeconds(timeStr: string): number {
+  if (!timeStr) return 0;
+  const parts = timeStr.split(':');
+  if (parts.length === 2) {
+    return parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
+  }
+  const num = parseFloat(timeStr);
+  return isNaN(num) ? 0 : num;
+}
+
+// ==================== 騎手直近フォーム ====================
+
+export interface JockeyRecentForm {
+  jockeyId: string;
+  recent30DayWinRate: number;
+  recent30DayRaces: number;
+  yearWinRate: number;
+  yearRaces: number;
+  careerWinRate: number;
+  trend: 'improving' | 'stable' | 'declining';
+}
+
+/**
+ * 騎手の直近30日と年間の勝率トレンドを算出
+ */
+export async function getJockeyRecentForm(jockeyId: string): Promise<JockeyRecentForm | null> {
+  if (!jockeyId) return null;
+
+  const now = new Date();
+  const d30 = new Date(now);
+  d30.setDate(d30.getDate() - 30);
+  const d30Str = d30.toISOString().slice(0, 10);
+
+  const d365 = new Date(now);
+  d365.setFullYear(d365.getFullYear() - 1);
+  const d365Str = d365.toISOString().slice(0, 10);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: any[] = await dbAll(`
+    SELECT re.result_position, r.date
+    FROM race_entries re
+    JOIN races r ON r.id = re.race_id
+    WHERE re.jockey_id = ?
+    AND r.status = '結果確定'
+    AND re.result_position IS NOT NULL
+  `, [jockeyId]);
+
+  if (rows.length < 5) return null;
+
+  let r30 = 0, w30 = 0, rYear = 0, wYear = 0;
+  for (const r of rows) {
+    if (r.date >= d30Str) { r30++; if (r.result_position === 1) w30++; }
+    if (r.date >= d365Str) { rYear++; if (r.result_position === 1) wYear++; }
+  }
+
+  const careerWinRate = rows.filter(r => r.result_position === 1).length / rows.length;
+  const yearWinRate = rYear > 0 ? wYear / rYear : careerWinRate;
+  const recent30DayWinRate = r30 >= 3 ? w30 / r30 : yearWinRate;
+
+  let trend: 'improving' | 'stable' | 'declining' = 'stable';
+  if (r30 >= 5) {
+    if (recent30DayWinRate > yearWinRate * 1.3) trend = 'improving';
+    else if (recent30DayWinRate < yearWinRate * 0.7) trend = 'declining';
+  }
+
+  return {
+    jockeyId,
+    recent30DayWinRate,
+    recent30DayRaces: r30,
+    yearWinRate,
+    yearRaces: rYear,
+    careerWinRate,
+    trend,
+  };
 }

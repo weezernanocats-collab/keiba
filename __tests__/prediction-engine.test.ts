@@ -681,8 +681,8 @@ describe('WEIGHTS', () => {
     expect(total).toBeCloseTo(1.0, 2);
   });
 
-  it('18個のファクターがある', () => {
-    expect(Object.keys(WEIGHTS).length).toBe(18);
+  it('19個のファクターがある', () => {
+    expect(Object.keys(WEIGHTS).length).toBe(19);
   });
 });
 

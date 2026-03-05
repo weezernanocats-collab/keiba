@@ -1,23 +1,29 @@
 /**
- * AI予想エンジン v4.2
+ * AI予想エンジン v5.0
  *
- * 過去の成績データを18の観点から多角的に分析し、レースの予想を生成する。
+ * 過去の成績データを19の観点から多角的に分析し、レースの予想を生成する。
  * v4: ベイズ推定フォールバック + 動的ウェイト調整 + データ充実度ベース信頼度
  * v4.2: 調教師能力ファクター追加
+ * v5.0: 5つの精度向上改善
+ *   - 動的スピード指数（コース×距離×馬場別の実データ基準タイム）
+ *   - リアルタイム枠順バイアス（固定biasMap → 実データの枠別勝率）
+ *   - 騎手直近フォーム（30日/年間トレンド）
+ *   - グレード補正 + トレンド検出（直近成績の質を反映）
+ *   - カテゴリ別ウェイトプロファイル（芝短/マイル/長/ダ短/ダ長）
  *
  * スコアリング要素と重み:
  *   === 個体分析 ===
- *   1.  直近成績        (18%) - 直近5走の着順を重み付け評価
+ *   1.  直近成績        (17%) - 直近5走+グレード補正+トレンド検出
  *   2.  コース適性      (6%)  - 同競馬場での過去成績
- *   3.  距離適性        (12%) - 同距離帯での過去成績
+ *   3.  距離適性        (11%) - 同距離帯での過去成績
  *   4.  馬場状態適性    (4%)  - 同馬場状態での成績
- *   5.  騎手能力        (6%)  - 騎手の勝率・複勝率
- *   6.  スピード指数    (10%) - タイムベースの速度評価
+ *   5.  騎手能力        (7%)  - 騎手の勝率+直近30日フォーム
+ *   6.  スピード指数    (10%) - 動的基準タイムベースの速度評価
  *   7.  クラス実績      (4%)  - 重賞など上位クラスでの成績
  *   8.  脚質適性        (5%)  - 展開との相性（逃げ/先行/差し/追込）
- *   9.  枠順分析        (2%)  - コース形態に応じた枠の有利不利
+ *   9.  枠順分析        (3%)  - 実データベースの枠別勝率
  *   10. ローテーション  (4%)  - 前走からの間隔と叩き良化パターン
- *   11. 上がり3F        (8%)  - 末脚の切れ味評価
+ *   11. 上がり3F        (7%)  - 末脚の切れ味評価
  *   12. 安定性          (4%)  - 着順のバラつきの少なさ
  *
  *   === 統計ベース分析 ===
@@ -27,6 +33,7 @@
  *   16. 統計的枠順バイアス (3%) - 過去データから算出した枠別勝率
  *   17. 季節パターン    (2%)  - 馬ごとの季節別成績傾向
  *   18. 斤量アドバンテージ (2%) - 平均斤量との差分
+ *   19. 市場オッズ      (3%)  - 単勝オッズの逆数正規化（低ウェイト）
  */
 
 import type {
@@ -43,33 +50,40 @@ import {
   calcSeasonalScore,
   calcSecondStartScore,
   type RaceHistoricalContext,
+  type DynamicStandardTime,
+  type JockeyRecentForm,
+  type CourseDistanceStats,
 } from './historical-analyzer';
 import { enhancePredictionWithGemini, type GeminiRaceContext } from './gemini-enhancer';
 import { callMLPredict, buildMLFeatures, type MLHorseInput } from './ml-client';
 import { calculateTodayTrackBias, type TodayTrackBias } from './track-bias';
+import { categorizeRace, applyCategoryMultipliers } from './weight-profiles';
+import { dbAll } from './database';
 
-// デフォルト重み設定 (v4.2: 調教師能力を追加、的中率最適化)
+// デフォルト重み設定 (v5.0: 精度向上5改善 + オッズファクター, 合計1.00)
 const DEFAULT_WEIGHTS: Record<string, number> = {
-  // 個体分析 (直近・距離・速度の重み強化)
-  recentForm: 0.18,
+  // 個体分析
+  recentForm: 0.16,
   courseAptitude: 0.06,
-  distanceAptitude: 0.12,
+  distanceAptitude: 0.10,
   trackConditionAptitude: 0.04,
-  jockeyAbility: 0.06,
+  jockeyAbility: 0.07,
   speedRating: 0.10,
   classPerformance: 0.04,
   runningStyle: 0.05,
-  postPositionBias: 0.02,
+  postPositionBias: 0.03,
   rotation: 0.04,
-  lastThreeFurlongs: 0.08,
+  lastThreeFurlongs: 0.07,
   consistency: 0.04,
   // 統計ベース分析
   sireAptitude: 0.05,
-  trainerAbility: 0.04,
+  trainerAbility: 0.03,
   jockeyTrainerCombo: 0.02,
-  historicalPostBias: 0.02,
+  historicalPostBias: 0.03,
   seasonalPattern: 0.02,
   handicapAdvantage: 0.02,
+  // 市場シグナル（低ウェイト、オッズ未取得時はフォールバック）
+  marketOdds: 0.03,
 };
 
 // WEIGHTS はキャリブレーション結果で上書き可能
@@ -143,6 +157,7 @@ const POPULATION_PRIORS: Record<string, number> = {
   historicalPostBias: 50,  // 枠バイアスは中立
   seasonalPattern: 50,     // 季節は中立
   handicapAdvantage: 50,   // 斤量は中立prior
+  marketOdds: 50,          // オッズなし → 中立
 };
 
 /**
@@ -169,6 +184,7 @@ function calcFactorReliability(factor: string, dataPoints: number): number {
     jockeyTrainerCombo: 5,
     historicalPostBias: 20,
     seasonalPattern: 6,
+    marketOdds: 1,
   };
   const req = requiredPoints[factor] || 5;
   return Math.min(1.0, dataPoints / req);
@@ -188,30 +204,34 @@ function bayesianScore(factor: string, observedScore: number, dataPoints: number
  * 動的ウェイト調整: データ不足ファクターの重みを下げ、充実ファクターに再配分
  */
 function adjustWeights(reliabilities: DataReliability[]): Record<string, number> {
-  const adjusted: Record<string, number> = { ...WEIGHTS };
+  return adjustWeightsWithBase(reliabilities, WEIGHTS);
+}
 
-  // 各ファクターの有効重み = 基本重み × reliability
+/**
+ * カテゴリ別ウェイトをベースにした動的ウェイト調整
+ */
+function adjustWeightsWithBase(reliabilities: DataReliability[], baseWeights: Record<string, number>): Record<string, number> {
+  const adjusted: Record<string, number> = { ...baseWeights };
+
   let totalEffective = 0;
   let totalBase = 0;
   for (const { factor, reliability } of reliabilities) {
-    const base = WEIGHTS[factor as keyof typeof WEIGHTS] || 0;
-    // reliability < 0.3 のファクターは重みを大きく減らす
+    const base = baseWeights[factor] || 0;
     const effective = base * Math.max(0.2, reliability);
     adjusted[factor] = effective;
     totalEffective += effective;
     totalBase += base;
   }
 
-  // 残った重みを reliability >= 0.5 のファクターに比例配分
   if (totalEffective < totalBase * 0.99) {
     const surplus = totalBase - totalEffective;
     const reliableFactors = reliabilities.filter(r => r.reliability >= 0.5);
     const reliableTotal = reliableFactors.reduce((s, r) =>
-      s + (WEIGHTS[r.factor as keyof typeof WEIGHTS] || 0), 0);
+      s + (baseWeights[r.factor] || 0), 0);
 
     if (reliableTotal > 0) {
       for (const { factor } of reliableFactors) {
-        const base = WEIGHTS[factor as keyof typeof WEIGHTS] || 0;
+        const base = baseWeights[factor] || 0;
         adjusted[factor] += surplus * (base / reliableTotal);
       }
     }
@@ -276,9 +296,16 @@ export async function generatePrediction(
     ? horses.reduce((sum, h) => sum + (h.entry.handicapWeight || 55), 0) / horses.length
     : 55;
 
+  // カテゴリ別ウェイトプロファイル適用
+  const category = categorizeRace(trackType, distance);
+  const categoryWeights = applyCategoryMultipliers(WEIGHTS, category);
+
+  // 単勝オッズマップ取得（市場シグナル用）
+  const oddsMap = await getWinOddsMap(raceId);
+
   // 各馬をスコアリング
   const scoredHorses = horses.map(h =>
-    scoreHorse(h, trackType, distance, cond, racecourseName, grade, horses.length, ctx, month, avgHandicapWeight)
+    scoreHorse(h, trackType, distance, cond, racecourseName, grade, horses.length, ctx, month, avgHandicapWeight, oddsMap, categoryWeights)
   );
 
   // 展開予想から脚質ボーナスを付与
@@ -438,6 +465,8 @@ function scoreHorse(
   ctx: RaceHistoricalContext,
   month: number,
   avgHandicapWeight: number,
+  oddsMap: Map<number, number>,
+  categoryWeights: Record<string, number>,
 ): ScoredHorse {
   const { entry, pastPerformances: pp, jockeyWinRate, jockeyPlaceRate, fatherName } = input;
   const reasons: string[] = [];
@@ -448,8 +477,8 @@ function scoreHorse(
 
   // ==================== 個体分析 ====================
 
-  // 1. 直近成績 (0-100)
-  scores.recentForm = calcRecentFormScore(pp);
+  // 1. 直近成績 (0-100) + グレード補正 + トレンド検出
+  scores.recentForm = calcRecentFormScoreV5(pp);
   if (scores.recentForm >= 75) reasons.push(`直近成績が優秀（スコア${Math.round(scores.recentForm)}）`);
   else if (scores.recentForm >= 60) reasons.push('直近の調子は悪くない');
   else if (scores.recentForm <= 30) reasons.push('直近成績が低調');
@@ -470,12 +499,14 @@ function scoreHorse(
     reasons.push('道悪巧者、重馬場で成績上昇');
   }
 
-  // 5. 騎手能力 (0-100)
-  scores.jockeyAbility = calcJockeyScore(jockeyWinRate, jockeyPlaceRate);
+  // 5. 騎手能力 (0-100) + 直近フォーム
+  const jockeyForm = ctx.jockeyFormMap.get(entry.jockeyId);
+  scores.jockeyAbility = calcJockeyScoreV5(jockeyWinRate, jockeyPlaceRate, jockeyForm);
+  if (jockeyForm?.trend === 'improving') reasons.push(`騎手${entry.jockeyName}は直近好調↑`);
   if (scores.jockeyAbility >= 75) reasons.push(`騎手${entry.jockeyName}は勝率トップクラス`);
 
-  // 6. スピード指数 (0-100)
-  scores.speedRating = calcSpeedRating(pp, trackType, distance);
+  // 6. スピード指数 (0-100) - 動的基準タイム対応
+  scores.speedRating = calcSpeedRatingV5(pp, trackType, distance, trackCondition, ctx.dynamicStdTime);
   if (scores.speedRating >= 75) reasons.push('高水準のスピード指数を記録');
 
   // 7. クラス実績 (0-100)
@@ -488,8 +519,8 @@ function scoreHorse(
   if (runStyle === '差し' && distance >= 1800) reasons.push('差し脚質で中長距離向き');
   if (runStyle === '追込' && distance >= 2000) reasons.push('追込で展開次第で一発あり');
 
-  // 9. 枠順分析 (0-100)
-  scores.postPositionBias = calcPostPositionBias(entry.postPosition, fieldSize, distance, trackType, racecourseName);
+  // 9. 枠順分析 (0-100) - リアルタイムデータ優先
+  scores.postPositionBias = calcPostPositionBiasV5(entry.postPosition, fieldSize, distance, trackType, racecourseName, ctx.courseDistStats);
   if (scores.postPositionBias >= 75) reasons.push('枠順が有利');
   else if (scores.postPositionBias <= 30) reasons.push('外枠で不利');
 
@@ -567,6 +598,18 @@ function scoreHorse(
     else if (diff <= -2) reasons.push(`斤量${weight}kgでトップハンデ不利`);
   }
 
+  // 19. 市場オッズ (0-100) - 低ウェイト、利用可能時のみ
+  {
+    const odds = oddsMap.get(entry.horseNumber);
+    if (odds && odds > 0) {
+      // オッズの逆数を正規化（1.0倍=100, 10倍=60, 50倍=30, 100倍=15）
+      scores.marketOdds = Math.min(100, Math.max(10, 100 - Math.log10(odds) * 30));
+      if (odds <= 3.0) reasons.push(`単勝${odds}倍の人気馬（市場評価高）`);
+    } else {
+      scores.marketOdds = 50; // オッズなし→中立
+    }
+  }
+
   // 叩き良化ボーナス（ローテーションスコアに加算）
   const secondStartBonus = ctx.secondStartMap.get(entry.horseId);
   if (secondStartBonus && pp.length >= 2) {
@@ -619,6 +662,7 @@ function scoreHorse(
     { factor: 'historicalPostBias', reliability: calcFactorReliability('historicalPostBias', ctx.courseDistStats?.totalRaces || 0), dataPoints: ctx.courseDistStats?.totalRaces || 0 },
     { factor: 'seasonalPattern', reliability: calcFactorReliability('seasonalPattern', seasonalData?.reduce((s, m) => s + m.races, 0) || 0), dataPoints: seasonalData?.reduce((s, m) => s + m.races, 0) || 0 },
     { factor: 'handicapAdvantage', reliability: 1.0, dataPoints: 1 },
+    { factor: 'marketOdds', reliability: oddsMap.has(entry.horseNumber) ? 1.0 : 0.0, dataPoints: oddsMap.has(entry.horseNumber) ? 1 : 0 },
   );
 
   // ベイズ推定でスコアを補正
@@ -630,8 +674,8 @@ function scoreHorse(
     }
   }
 
-  // 動的ウェイト調整
-  const dynWeights = adjustWeights(reliabilities);
+  // 動的ウェイト調整（カテゴリ別ウェイトをベースに）
+  const dynWeights = adjustWeightsWithBase(reliabilities, categoryWeights);
 
   // 総合スコア (動的ウェイト使用)
   let totalScore = 0;
@@ -836,6 +880,57 @@ function calcRecentFormScore(pp: PastPerformance[]): number {
   return Math.min(100, score);
 }
 
+/**
+ * v5: 直近成績スコア（グレード補正 + トレンド検出付き）
+ * - G1/G2/G3での好走に補正倍率を適用
+ * - 直近3走の着順推移からトレンドを検出（改善/悪化）
+ */
+function calcRecentFormScoreV5(pp: PastPerformance[]): number {
+  if (pp.length === 0) return 40;
+  const recent = pp.slice(0, 5);
+  let score = 0;
+  const weights = [0.35, 0.25, 0.20, 0.12, 0.08];
+
+  recent.forEach((perf, idx) => {
+    const w = weights[idx] || 0.05;
+    let posScore = positionToScore(perf.position, perf.entries || 16);
+
+    // グレード補正: 重賞での好走はより価値が高い
+    const raceName = perf.raceName || '';
+    if (perf.position <= 3) {
+      if (raceName.includes('G1') || raceName.includes('（G1）')) posScore *= 1.4;
+      else if (raceName.includes('G2') || raceName.includes('（G2）')) posScore *= 1.25;
+      else if (raceName.includes('G3') || raceName.includes('（G3）')) posScore *= 1.15;
+      else if (raceName.includes('ステークス')) posScore *= 1.08;
+    }
+
+    score += Math.min(100, posScore) * w;
+  });
+
+  // 連勝ボーナス
+  const winStreak = countWinStreak(pp);
+  if (winStreak >= 3) score += 10;
+  else if (winStreak >= 2) score += 5;
+
+  // 復調ボーナス
+  if (pp.length >= 2 && pp[0].position <= 3 && pp[1].position >= 8) {
+    score += 3;
+  }
+
+  // トレンド検出: 直近3走の着順比率の推移
+  if (pp.length >= 3) {
+    const ratios = pp.slice(0, 3).map(p => p.position / (p.entries || 16));
+    // ratios[0]が最新。値が小さい=好着順
+    const trend = (ratios[2] - ratios[0]); // 正 = 改善、負 = 悪化
+    if (trend > 0.15) score += 4;      // 明確な改善トレンド
+    else if (trend > 0.05) score += 2;  // 微改善
+    else if (trend < -0.15) score -= 3; // 明確な悪化
+    else if (trend < -0.05) score -= 1; // 微悪化
+  }
+
+  return Math.min(100, score);
+}
+
 function countWinStreak(pp: PastPerformance[]): number {
   let streak = 0;
   for (const perf of pp) {
@@ -913,6 +1008,28 @@ function calcJockeyScore(winRate: number, placeRate: number): number {
   return Math.min(100, Math.max(10, score));
 }
 
+/**
+ * v5: 騎手能力スコア（直近30日フォーム + トレンド反映）
+ */
+function calcJockeyScoreV5(winRate: number, placeRate: number, form: JockeyRecentForm | undefined): number {
+  let score = calcJockeyScore(winRate, placeRate);
+
+  if (form) {
+    // 直近30日のフォームを反映（十分なサンプルがある場合）
+    if (form.recent30DayRaces >= 5) {
+      const recentScore = calcJockeyScore(form.recent30DayWinRate, form.recent30DayWinRate * 2.5);
+      // 通算70% + 直近30% でブレンド
+      score = score * 0.7 + recentScore * 0.3;
+    }
+
+    // トレンドボーナス
+    if (form.trend === 'improving') score += 4;
+    else if (form.trend === 'declining') score -= 3;
+  }
+
+  return Math.min(100, Math.max(10, score));
+}
+
 function calcSpeedRating(pp: PastPerformance[], trackType: TrackType, distance: number): number {
   if (pp.length === 0) return 50;
 
@@ -949,6 +1066,85 @@ function calcSpeedRating(pp: PastPerformance[], trackType: TrackType, distance: 
   ratings.sort((a, b) => b - a);
   const top3 = ratings.slice(0, 3);
   return top3.reduce((s, r) => s + r, 0) / top3.length;
+}
+
+/**
+ * v5: 動的基準タイムベースのスピード指数
+ * DB実データの中央タイムを基準に使い、ハードコードはフォールバックのみ
+ */
+function calcSpeedRatingV5(
+  pp: PastPerformance[],
+  trackType: TrackType,
+  distance: number,
+  trackCondition: TrackCondition,
+  dynamicStdTime: DynamicStandardTime | null,
+): number {
+  if (pp.length === 0) return 50;
+
+  const relevantRaces = pp.filter(p =>
+    p.trackType === trackType &&
+    Math.abs(p.distance - distance) <= 200 &&
+    p.time
+  );
+
+  if (relevantRaces.length === 0) return 50;
+
+  // ハードコード基準タイム（フォールバック用）
+  const staticTimes: Record<string, Record<number, number>> = {
+    '芝': { 1000: 56.0, 1200: 69.0, 1400: 82.0, 1600: 95.0, 1800: 108.5, 2000: 121.0, 2200: 134.0, 2400: 147.0, 2500: 153.0, 3000: 183.0, 3200: 196.0, 3600: 222.0 },
+    'ダート': { 1000: 59.0, 1200: 72.0, 1400: 84.0, 1600: 97.0, 1700: 104.0, 1800: 111.0, 2000: 125.0, 2100: 131.0 },
+    '障害': { 3000: 210.0, 3200: 225.0, 3300: 232.0, 3570: 252.0, 3930: 280.0, 4250: 305.0 },
+  };
+
+  const ratings = relevantRaces.map(p => {
+    const seconds = timeToSeconds(p.time);
+    if (seconds <= 0) return 0;
+
+    // 動的基準タイムがあり、距離が一致する場合は優先使用
+    let stdTime: number;
+    if (dynamicStdTime && Math.abs(p.distance - dynamicStdTime.distance) <= 50) {
+      // 動的基準タイム + 馬場差補正
+      stdTime = dynamicStdTime.medianTimeSeconds;
+      // 馬場差: 動的基準は「良」で計算、走ったレースの馬場との差を補正
+      const condDiff = getConditionTimeAdjustment(p.trackCondition, trackType, p.distance);
+      stdTime += condDiff;
+    } else {
+      stdTime = interpolateStandardTime(staticTimes[trackType] || {}, p.distance);
+    }
+
+    if (stdTime <= 0) return 50;
+
+    const condAdj = getConditionAdjustment(p.trackCondition, trackType);
+    const timeDiff = stdTime - seconds;
+    const rating = 50 + timeDiff * (1000 / p.distance) * 20 + condAdj;
+
+    return Math.max(0, Math.min(100, rating));
+  }).filter(r => r > 0);
+
+  if (ratings.length === 0) return 50;
+
+  ratings.sort((a, b) => b - a);
+  const top3 = ratings.slice(0, 3);
+  return top3.reduce((s, r) => s + r, 0) / top3.length;
+}
+
+/**
+ * 馬場状態による基準タイムへの加算秒数
+ * 良を基準(0)として、重/不良はタイムが遅くなる分を加算
+ */
+function getConditionTimeAdjustment(condition: TrackCondition | string, trackType: TrackType, distance: number): number {
+  const perFurlong = distance / 200; // 1Fあたりのロス
+  if (trackType === '芝') {
+    if (condition === '稍重') return perFurlong * 0.1;
+    if (condition === '重') return perFurlong * 0.25;
+    if (condition === '不良') return perFurlong * 0.4;
+  } else {
+    // ダートは重馬場で速くなる傾向
+    if (condition === '稍重') return perFurlong * -0.05;
+    if (condition === '重') return perFurlong * -0.1;
+    if (condition === '不良') return perFurlong * 0.05;
+  }
+  return 0;
 }
 
 function interpolateStandardTime(table: Record<number, number>, distance: number): number {
@@ -1031,6 +1227,45 @@ function calcPostPositionBias(post: number, fieldSize: number, distance: number,
   }
 
   return isInner ? 55 : 48;
+}
+
+/**
+ * v5: リアルタイム枠順バイアス
+ * courseDistStats の実データがあればそれを使い、なければハードコードにフォールバック
+ */
+function calcPostPositionBiasV5(
+  post: number,
+  fieldSize: number,
+  distance: number,
+  trackType: TrackType,
+  racecourseName: string,
+  courseDistStats: CourseDistanceStats | null,
+): number {
+  if (fieldSize === 0) return 50;
+
+  // 実データがある場合: 枠番別勝率から直接スコアを算出
+  if (courseDistStats && courseDistStats.totalRaces >= 20) {
+    const postData = courseDistStats.postPositionWinRate[post];
+    if (postData && postData.races >= 5) {
+      // この枠の勝率を全体平均と比較
+      const avgRate = 1 / Math.max(fieldSize, 8);
+      const diff = postData.rate - avgRate;
+      return Math.min(100, Math.max(10, 50 + diff * 500));
+    }
+
+    // 枠番のデータ不足 → 内外の傾向で判定
+    const isInner = post <= Math.ceil(fieldSize / 2);
+    if (isInner) {
+      const innerAdv = courseDistStats.innerFrameWinRate - courseDistStats.outerFrameWinRate;
+      return Math.min(100, Math.max(10, 50 + innerAdv * 300));
+    } else {
+      const outerAdv = courseDistStats.outerFrameWinRate - courseDistStats.innerFrameWinRate;
+      return Math.min(100, Math.max(10, 50 + outerAdv * 300));
+    }
+  }
+
+  // フォールバック: 従来のハードコード
+  return calcPostPositionBias(post, fieldSize, distance, trackType, racecourseName);
 }
 
 function calcRotation(pp: PastPerformance[]): number {
@@ -1534,6 +1769,28 @@ function timeToSeconds(timeStr: string): number {
   const sec = parseInt(match[2]);
   const msec = parseInt(match[3]);
   return min * 60 + sec + msec / 10;
+}
+
+// ==================== オッズ取得ヘルパー ====================
+
+/** レースの単勝オッズをDB or entryから取得 */
+async function getWinOddsMap(raceId: string): Promise<Map<number, number>> {
+  const map = new Map<number, number>();
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows: any[] = await dbAll(
+      "SELECT horse_number1, odds FROM odds WHERE race_id = ? AND bet_type = '単勝'",
+      [raceId]
+    );
+    for (const r of rows) {
+      if (r.horse_number1 && r.odds > 0) {
+        map.set(r.horse_number1, r.odds);
+      }
+    }
+  } catch {
+    // oddsテーブルが無い場合は空マップを返す
+  }
+  return map;
 }
 
 // エクスポート
