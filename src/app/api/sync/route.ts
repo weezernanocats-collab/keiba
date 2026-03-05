@@ -296,6 +296,12 @@ export async function POST(request: NextRequest) {
   // 'full' タイプは bulk_chunked に変換（Vercel対応: fire-and-forget では完了しないため）
   if (type === 'full') {
     const targetDate = date || new Date(Date.now() + 9 * 60 * 60_000).toISOString().split('T')[0];
+
+    // 対象日の既存エントリを削除し、レースステータスをリセット
+    // これにより race_details フェーズで再スクレイプされる
+    await dbRun('DELETE FROM race_entries WHERE race_id IN (SELECT id FROM races WHERE date = ?)', [targetDate]);
+    await dbRun("UPDATE races SET status = '予定', distance = 0 WHERE date = ? AND status != '結果確定'", [targetDate]);
+
     const state = createInitialChunkedState({
       startDate: targetDate,
       endDate: targetDate,
