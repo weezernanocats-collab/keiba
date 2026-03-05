@@ -168,7 +168,7 @@ function mergeEnhancedOutput(
 // ==================== Main export ====================
 
 // 使用するモデルの優先順位（quota超過時にフォールバック）
-const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 const GEMINI_TIMEOUT_MS = 25_000; // 25秒タイムアウト（Vercel 60秒制限対応）
 
 export async function enhancePredictionWithGemini(
