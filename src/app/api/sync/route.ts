@@ -5,6 +5,7 @@ import {
   scrapeOdds,
   scrapeRaceResult,
   scrapeHorseDetail,
+  debugScrapeRaceCard,
 } from '@/lib/scraper';
 import type {
   ScrapedRace,
@@ -37,7 +38,7 @@ export const maxDuration = 60;
 
 // ==================== Types ====================
 
-type SyncType = 'races' | 'race_detail' | 'odds' | 'results' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort' | 'bulk_chunked' | 'accuracy' | 'evaluate_all' | 'calibrate' | 'regenerate_predictions' | 'repair_bets_odds' | 'reeval_repaired';
+type SyncType = 'races' | 'race_detail' | 'odds' | 'results' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort' | 'bulk_chunked' | 'accuracy' | 'evaluate_all' | 'calibrate' | 'regenerate_predictions' | 'repair_bets_odds' | 'reeval_repaired' | 'debug_scrape';
 
 interface SyncRequest {
   type: SyncType;
@@ -152,7 +153,7 @@ export async function POST(request: NextRequest) {
   const { type, date, raceId, horseId } = body;
 
   // Validate type
-  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'bulk_chunked', 'accuracy', 'evaluate_all', 'calibrate', 'regenerate_predictions', 'repair_bets_odds', 'reeval_repaired'];
+  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'bulk_chunked', 'accuracy', 'evaluate_all', 'calibrate', 'regenerate_predictions', 'repair_bets_odds', 'reeval_repaired', 'debug_scrape'];
   if (!type || !validTypes.includes(type)) {
     return NextResponse.json(
       {
@@ -160,6 +161,22 @@ export async function POST(request: NextRequest) {
       },
       { status: 400 }
     );
+  }
+
+  // デバッグ: 出馬表のHTML構造を診断
+  if (type === 'debug_scrape') {
+    if (!raceId) {
+      // raceIdが未指定の場合、まずレース一覧を取得して最初のレースを使用
+      const targetDate = date || new Date(Date.now() + 9 * 60 * 60_000).toISOString().split('T')[0];
+      const races = await scrapeRaceList(targetDate);
+      if (races.length === 0) {
+        return NextResponse.json({ error: `${targetDate} のレースが見つかりません` }, { status: 404 });
+      }
+      const debugInfo = await debugScrapeRaceCard(races[0].id);
+      return NextResponse.json({ targetDate, raceCount: races.length, races: races.slice(0, 5), debug: debugInfo });
+    }
+    const debugInfo = await debugScrapeRaceCard(raceId);
+    return NextResponse.json(debugInfo);
   }
 
   // 的中率統計の取得

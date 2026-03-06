@@ -58,9 +58,8 @@ async function fetchHtml(url: string): Promise<string> {
 
 /** URLとHTMLの先頭バイトからエンコーディングを判定 */
 function detectEncoding(url: string, buffer: ArrayBuffer): string {
-  // race.netkeiba.com のページは基本的にUTF-8
-  // (race_list_sub.html, shutuba.html, result.html など)
-  if (url.includes('race.netkeiba.com')) return 'utf-8';
+  // race_list_sub.html は明示的にUTF-8
+  if (url.includes('race_list_sub.html')) return 'utf-8';
 
   // HTMLの先頭部分で charset を確認（大文字小文字を区別しない）
   const preview = new TextDecoder('ascii').decode(buffer.slice(0, 2048));
@@ -69,7 +68,7 @@ function detectEncoding(url: string, buffer: ArrayBuffer): string {
     return 'utf-8';
   }
 
-  // デフォルトはEUC-JP (db.netkeiba.com の多くのページ)
+  // デフォルトはEUC-JP (netkeiba の多くのページ)
   return 'euc-jp';
 }
 
@@ -611,4 +610,89 @@ export interface ScrapedPastPerformance {
   cornerPositions: string;
   odds: number;
   popularity: number;
+}
+
+// ==================== デバッグ用 ====================
+
+/**
+ * 出馬表ページの生のHTML構造を解析して診断情報を返す。
+ */
+export async function debugScrapeRaceCard(raceId: string): Promise<Record<string, unknown>> {
+  const url = `${BASE_URL}/race/shutuba.html?race_id=${raceId}`;
+
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': USER_AGENT,
+      'Accept': 'text/html,application/xhtml+xml',
+      'Accept-Language': 'ja,en;q=0.9',
+    },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+
+  const buffer = await response.arrayBuffer();
+  const encoding = detectEncoding(url, buffer);
+  const html = new TextDecoder(encoding).decode(buffer);
+  const $ = cheerio.load(html);
+
+  // charset情報
+  const charsetMeta = $('meta[charset]').attr('charset') || '';
+  const contentTypeMeta = $('meta[http-equiv="Content-Type"]').attr('content') || '';
+
+  // テーブル情報
+  const tables = $('table').map((_, el) => ({
+    class: $(el).attr('class') || '(no class)',
+    id: $(el).attr('id') || '',
+    trCount: $(el).find('tr').length,
+  })).get();
+
+  // Shutuba_Table の行情報
+  const shutubaRows: Record<string, unknown>[] = [];
+  $('table.Shutuba_Table tr').each((i, tr) => {
+    const $tr = $(tr);
+    const trClass = $tr.attr('class') || '(no class)';
+    const tds = $tr.find('td');
+    const tdClasses = tds.map((_, td) => $(td).attr('class') || '').get();
+    const tdTexts = tds.map((_, td) => $(td).text().trim().substring(0, 30)).get();
+    shutubaRows.push({ index: i, trClass, tdCount: tds.length, tdClasses, tdTexts });
+  });
+
+  // HorseList 行
+  const horseListRows: Record<string, unknown>[] = [];
+  $('tr.HorseList').each((i, tr) => {
+    const $tr = $(tr);
+    const tds = $tr.find('td');
+    horseListRows.push({
+      index: i,
+      waku: $tr.find('td[class*="Waku"]').first().text().trim(),
+      umaban: $tr.find('td[class*="Umaban"]').first().text().trim(),
+      horseName: $tr.find('td.HorseInfo a').first().text().trim(),
+      barei: $tr.find('td.Barei').text().trim(),
+      jockey: $tr.find('td.Jockey a').first().text().trim(),
+      trainer: $tr.find('td.Trainer a').first().text().trim(),
+      tdCount: tds.length,
+      tdClasses: tds.map((_, td) => $(td).attr('class') || '').get(),
+    });
+  });
+
+  // 通常パース結果
+  const result = await scrapeRaceCard(raceId);
+
+  return {
+    url,
+    httpStatus: response.status,
+    encoding,
+    charsetMeta,
+    contentTypeMeta,
+    htmlLength: html.length,
+    title: $('title').text().trim().substring(0, 100),
+    raceName: $('h1.RaceName').text().trim(),
+    tablesFound: tables,
+    shutubaTableExists: $('table.Shutuba_Table').length > 0,
+    shutubaRowCount: shutubaRows.length,
+    shutubaRows: shutubaRows.slice(0, 5),
+    horseListRowCount: horseListRows.length,
+    horseListRows: horseListRows.slice(0, 5),
+    parsedEntries: result.entries.length,
+    parsedEntriesSample: result.entries.slice(0, 3),
+  };
 }
