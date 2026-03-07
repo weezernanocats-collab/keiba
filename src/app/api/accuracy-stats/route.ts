@@ -3,67 +3,65 @@ import { dbAll } from '@/lib/database';
 
 /**
  * 的中率統計API
- * - rolling 50R ウィンドウで winRate/placeRate/ROI 推移
- * - 信頼度バケット別の的中率
- * - 競馬場別の的中率
+ * クエリパラメータ: ?days=30 | 60 | 180 | all (デフォルト: all)
  */
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
-    // 全 prediction_results を日付順に取得
+    const daysParam = request.nextUrl.searchParams.get('days');
+    const days = daysParam && daysParam !== 'all' ? parseInt(daysParam, 10) : 0;
+
+    // 日付フィルタ用
+    const dateFilter = days > 0
+      ? `AND r.date >= date('now', '-${days} days')`
+      : '';
+
+    // prediction_results + races を JOIN して日付フィルタ
     const results = await dbAll<{
       race_id: string;
       win_hit: number;
       place_hit: number;
       bet_roi: number;
       evaluated_at: string;
+      race_date: string;
+      racecourse_name: string;
     }>(
-      `SELECT pr.race_id, pr.win_hit, pr.place_hit, pr.bet_roi, pr.evaluated_at
+      `SELECT pr.race_id, pr.win_hit, pr.place_hit, pr.bet_roi, pr.evaluated_at,
+              r.date as race_date, r.racecourse_name
        FROM prediction_results pr
-       ORDER BY pr.evaluated_at ASC`,
+       JOIN races r ON r.id = pr.race_id
+       WHERE r.status = '結果確定' ${dateFilter}
+       ORDER BY r.date ASC, pr.evaluated_at ASC`,
       [],
     );
 
-    // 信頼度・競馬場の追加情報
-    const predRows = await dbAll<{
-      race_id: string;
-      confidence: number;
-    }>(
+    // 信頼度マップ
+    const predRows = await dbAll<{ race_id: string; confidence: number }>(
       'SELECT race_id, confidence FROM predictions',
       [],
     );
     const confidenceMap = new Map(predRows.map(r => [r.race_id, r.confidence]));
 
-    const raceRows = await dbAll<{
-      id: string;
-      racecourse_name: string;
-      date: string;
-    }>(
-      "SELECT id, racecourse_name, date FROM races WHERE status = '結果確定'",
-      [],
-    );
-    const raceInfoMap = new Map(raceRows.map(r => [r.id, { venue: r.racecourse_name, date: r.date }]));
-
-    // Rolling 50R ウィンドウ
-    const windowSize = 50;
+    // Rolling 50R ウィンドウ（データが50件未満ならウィンドウを小さく）
+    const windowSize = Math.min(50, Math.max(10, Math.floor(results.length / 3)));
     const rolling: { index: number; date: string; winRate: number; placeRate: number; roi: number }[] = [];
-    for (let i = windowSize - 1; i < results.length; i++) {
-      const window = results.slice(i - windowSize + 1, i + 1);
-      const winRate = window.reduce((s, r) => s + r.win_hit, 0) / windowSize * 100;
-      const placeRate = window.reduce((s, r) => s + r.place_hit, 0) / windowSize * 100;
-      // bet_roi は倍率 (0=外れ, 2.5=250%回収)。パーセントに変換
-      const avgRoi = window.reduce((s, r) => s + (r.bet_roi || 0), 0) / windowSize * 100;
-      const raceInfo = raceInfoMap.get(results[i].race_id);
+    if (results.length >= windowSize) {
+      for (let i = windowSize - 1; i < results.length; i++) {
+        const window = results.slice(i - windowSize + 1, i + 1);
+        const winRate = window.reduce((s, r) => s + r.win_hit, 0) / windowSize * 100;
+        const placeRate = window.reduce((s, r) => s + r.place_hit, 0) / windowSize * 100;
+        const avgRoi = window.reduce((s, r) => s + (r.bet_roi || 0), 0) / windowSize * 100;
 
-      rolling.push({
-        index: i + 1,
-        date: raceInfo?.date || results[i].evaluated_at.split('T')[0],
-        winRate: Math.round(winRate * 10) / 10,
-        placeRate: Math.round(placeRate * 10) / 10,
-        roi: Math.round(avgRoi),
-      });
+        rolling.push({
+          index: i + 1,
+          date: results[i].race_date,
+          winRate: Math.round(winRate * 10) / 10,
+          placeRate: Math.round(placeRate * 10) / 10,
+          roi: Math.round(avgRoi),
+        });
+      }
     }
 
-    // 信頼度バケット別 (10刻み: 0-30, 30-40, 40-50, ..., 80-100)
+    // 信頼度バケット別
     const confBuckets: Record<string, { total: number; win: number; place: number }> = {};
     for (const r of results) {
       const conf = confidenceMap.get(r.race_id) ?? 50;
@@ -93,8 +91,7 @@ export async function GET(_request: NextRequest) {
     // 競馬場別
     const venueBuckets: Record<string, { total: number; win: number; place: number }> = {};
     for (const r of results) {
-      const info = raceInfoMap.get(r.race_id);
-      const venue = info?.venue || '不明';
+      const venue = r.racecourse_name || '不明';
       if (!venueBuckets[venue]) venueBuckets[venue] = { total: 0, win: 0, place: 0 };
       venueBuckets[venue].total++;
       if (r.win_hit) venueBuckets[venue].win++;
@@ -124,8 +121,10 @@ export async function GET(_request: NextRequest) {
         avgRoi: Math.round(avgRoi),
       },
       rolling,
+      rollingWindowSize: windowSize,
       confidenceStats,
       venueStats,
+      period: days > 0 ? `${days}日` : '全期間',
     });
   } catch (error) {
     console.error('accuracy-stats エラー:', error);

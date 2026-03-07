@@ -37,22 +37,36 @@ interface VenueStat {
   placeRate: number;
 }
 
+const PERIOD_OPTIONS = [
+  { label: '30日', value: '30' },
+  { label: '60日', value: '60' },
+  { label: '半年', value: '180' },
+  { label: '全期間', value: 'all' },
+] as const;
+
 export default function StatsPage() {
   const [loading, setLoading] = useState(true);
+  const [period, setPeriod] = useState<string>('all');
+  const [periodLabel, setPeriodLabel] = useState<string>('全期間');
   const [summary, setSummary] = useState<Summary | null>(null);
   const [rolling, setRolling] = useState<RollingPoint[]>([]);
+  const [rollingWindowSize, setRollingWindowSize] = useState(50);
   const [confidenceStats, setConfidenceStats] = useState<ConfidenceStat[]>([]);
   const [venueStats, setVenueStats] = useState<VenueStat[]>([]);
 
   useEffect(() => {
     async function fetchData() {
+      setLoading(true);
       try {
-        const res = await fetch('/api/accuracy-stats');
+        const params = period !== 'all' ? `?days=${period}` : '';
+        const res = await fetch(`/api/accuracy-stats${params}`);
         const data = await res.json();
         setSummary(data.summary);
         setRolling(data.rolling || []);
+        setRollingWindowSize(data.rollingWindowSize || 50);
         setConfidenceStats(data.confidenceStats || []);
         setVenueStats(data.venueStats || []);
+        setPeriodLabel(data.period || '全期間');
       } catch (err) {
         console.error('統計データ取得エラー:', err);
       } finally {
@@ -60,7 +74,7 @@ export default function StatsPage() {
       }
     }
     fetchData();
-  }, []);
+  }, [period]);
 
   if (loading) return <LoadingSpinner message="統計データを読み込んでいます..." />;
 
@@ -69,6 +83,23 @@ export default function StatsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">的中率・ROI分析</h1>
         <Link href="/" className="text-sm text-accent hover:underline">← トップに戻る</Link>
+      </div>
+
+      {/* 期間セレクター */}
+      <div className="flex gap-2">
+        {PERIOD_OPTIONS.map(opt => (
+          <button
+            key={opt.value}
+            onClick={() => setPeriod(opt.value)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              period === opt.value
+                ? 'bg-primary text-white'
+                : 'bg-card-bg border border-card-border hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
       </div>
 
       {/* サマリーカード */}
@@ -84,7 +115,7 @@ export default function StatsPage() {
       {/* 的中率推移グラフ */}
       {rolling.length > 0 && (
         <div className="bg-card-bg border border-card-border rounded-xl p-6">
-          <h2 className="text-lg font-bold mb-4">的中率推移 (50R ローリング)</h2>
+          <h2 className="text-lg font-bold mb-4">的中率推移 ({rollingWindowSize}R ローリング / {periodLabel})</h2>
           <ResponsiveContainer width="100%" height={350}>
             <LineChart data={rolling}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
@@ -121,7 +152,7 @@ export default function StatsPage() {
       {/* 信頼度別的中率 */}
       {confidenceStats.length > 0 && (
         <div className="bg-card-bg border border-card-border rounded-xl p-6">
-          <h2 className="text-lg font-bold mb-4">信頼度別 的中率</h2>
+          <h2 className="text-lg font-bold mb-4">信頼度別 的中率 ({periodLabel})</h2>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={confidenceStats}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
@@ -142,7 +173,7 @@ export default function StatsPage() {
       {/* 競馬場別的中率 */}
       {venueStats.length > 0 && (
         <div className="bg-card-bg border border-card-border rounded-xl p-6">
-          <h2 className="text-lg font-bold mb-4">競馬場別 的中率</h2>
+          <h2 className="text-lg font-bold mb-4">競馬場別 的中率 ({periodLabel})</h2>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={venueStats.slice(0, 15)} layout="vertical">
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
