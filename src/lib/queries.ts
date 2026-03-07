@@ -106,16 +106,21 @@ function mapRaceEntry(row: Record<string, any>): RaceEntry {
 
 export async function getUpcomingRaces(limit: number = 50) {
   const rows = await dbAll<Record<string, unknown>>(`
-    SELECT r.*, COUNT(e.id) as entry_count
+    SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
+    LEFT JOIN predictions p ON r.id = p.race_id
     WHERE r.date >= date('now')
     AND r.status IN ('予定', '出走確定')
     GROUP BY r.id
     ORDER BY r.date, r.racecourse_name, r.race_number
     LIMIT ?
   `, [limit]);
-  return rows.map(r => ({ ...mapRace(r), entryCount: (r.entry_count ?? 0) as number }));
+  return rows.map(r => ({
+    ...mapRace(r),
+    entryCount: (r.entry_count ?? 0) as number,
+    confidence: r.prediction_confidence != null ? Number(r.prediction_confidence) : null,
+  }));
 }
 
 export async function getRecentResults(limit: number = 50) {
