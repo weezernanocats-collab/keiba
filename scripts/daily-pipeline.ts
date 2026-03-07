@@ -37,7 +37,7 @@ if (!process.env.TURSO_DATABASE_URL || !process.env.TURSO_AUTH_TOKEN) {
 import { runSchedulerJob } from '@/lib/scheduler';
 import { closeDatabase } from '@/lib/database';
 
-const VALID_JOBS = ['morning', 'odds', 'results', 'night'] as const;
+const VALID_JOBS = ['morning', 'odds', 'afternoon', 'results', 'night'] as const;
 type JobType = typeof VALID_JOBS[number];
 
 function parseArgs(): JobType {

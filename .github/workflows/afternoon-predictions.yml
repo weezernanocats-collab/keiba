@@ -1,27 +1,15 @@
-name: Daily Morning Pipeline
+name: Afternoon Prediction Refresh
 
 on:
   schedule:
-    # 毎日 21:00 UTC = 06:00 JST
-    - cron: '0 21 * * *'
+    # 毎日 04:00 UTC = 13:00 JST
+    - cron: '0 4 * * *'
   workflow_dispatch:
-    inputs:
-      job:
-        description: 'Job to run'
-        required: false
-        default: 'morning'
-        type: choice
-        options:
-          - morning
-          - odds
-          - afternoon
-          - results
-          - night
 
 jobs:
-  morning:
+  afternoon:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
@@ -42,8 +30,8 @@ jobs:
           echo "TURSO_AUTH_TOKEN=\"${{ secrets.TURSO_AUTH_TOKEN }}\"" >> .env.local
           echo "GEMINI_API_KEY=\"${{ secrets.GEMINI_API_KEY }}\"" >> .env.local
 
-      - name: Run morning pipeline (data fetch + predictions)
-        run: npx tsx -r tsconfig-paths/register scripts/daily-pipeline.ts --job ${{ github.event.inputs.job || 'morning' }}
+      - name: Run afternoon prediction refresh
+        run: npx tsx -r tsconfig-paths/register scripts/daily-pipeline.ts --job afternoon
 
       - name: Cleanup
         if: always()

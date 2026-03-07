@@ -19,6 +19,9 @@ if (process.argv.includes('--no-gemini')) {
   delete process.env.GEMINI_API_KEY;
 }
 
+// --afternoon フラグ（午前の傾向をサマリに含める + 未実施レースのみ対象）
+const IS_AFTERNOON = process.argv.includes('--afternoon');
+
 // --concurrency N
 const concurrencyIdx = process.argv.indexOf('--concurrency');
 const CONCURRENCY = concurrencyIdx >= 0 ? parseInt(process.argv[concurrencyIdx + 1]) || 3 : 3;
@@ -76,6 +79,7 @@ async function processRace(race: {
     race.track_condition as TrackCondition | undefined,
     race.racecourse_name, race.grade, horseInputs,
     race.weather as '晴' | '曇' | '小雨' | '雨' | '小雪' | '雪' | undefined,
+    IS_AFTERNOON ? { isAfternoon: true } : undefined,
   );
   await savePrediction(prediction);
   return true;
@@ -95,28 +99,28 @@ async function main() {
   await ensureCalibrationLoaded();
 
   for (const date of dates) {
-    process.stdout.write(`\n=== ${date} の予想生成 ===\n`);
+    process.stdout.write(`\n=== ${date} の予想生成${IS_AFTERNOON ? '（午後更新）' : ''} ===\n`);
 
-    // 既存予想を削除
-    const existingPreds = await dbAll<{ race_id: string }>(
-      "SELECT DISTINCT race_id FROM predictions WHERE race_id IN (SELECT id FROM races WHERE date = ?)",
-      [date]
-    );
-    if (existingPreds.length > 0) {
-      const { dbRun } = await import('@/lib/database');
-      const ids = existingPreds.map(r => r.race_id);
-      const placeholders = ids.map(() => '?').join(',');
-      await dbRun(`DELETE FROM predictions WHERE race_id IN (${placeholders})`, ids);
-      process.stdout.write(`  既存予想 ${existingPreds.length}件 削除\n`);
-    }
-
+    // 対象レースを取得（--afternoon時は未実施レースのみ）
+    const statusFilter = IS_AFTERNOON
+      ? "status = '出走確定'"
+      : "status IN ('出走確定', '予定')";
     const races = await dbAll<{
       id: string; name: string; track_type: string; distance: number;
       track_condition: string; racecourse_name: string; grade: string; weather: string;
     }>(
-      "SELECT id, name, track_type, distance, track_condition, racecourse_name, grade, weather FROM races WHERE date = ? AND status = '出走確定' ORDER BY id",
+      `SELECT id, name, track_type, distance, track_condition, racecourse_name, grade, weather FROM races WHERE date = ? AND ${statusFilter} ORDER BY id`,
       [date]
     );
+
+    // 対象レースの既存予想を削除
+    if (races.length > 0) {
+      const { dbRun } = await import('@/lib/database');
+      const ids = races.map(r => r.id);
+      const placeholders = ids.map(() => '?').join(',');
+      await dbRun(`DELETE FROM predictions WHERE race_id IN (${placeholders})`, ids);
+      process.stdout.write(`  既存予想削除: ${ids.length}件\n`);
+    }
 
     process.stdout.write(`  対象レース: ${races.length}件\n`);
     let count = 0;

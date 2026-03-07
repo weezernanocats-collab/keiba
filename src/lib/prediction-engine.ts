@@ -288,6 +288,7 @@ export async function generatePrediction(
   grade: string | undefined,
   horses: HorseAnalysisInput[],
   weather?: string,
+  options?: { isAfternoon?: boolean },
 ): Promise<Prediction> {
   const cond = trackCondition || '良';
   const month = new Date(date).getMonth() + 1;
@@ -432,7 +433,7 @@ export async function generatePrediction(
   const recommendedBets = generateBetRecommendations(scoredHorses, confidence);
 
   // サマリー生成
-  const summary = generateSummary(topPicks, analysis, raceName, confidence);
+  const summary = generateSummary(topPicks, analysis, raceName, confidence, todayBias, options?.isAfternoon);
 
   const rawPrediction: Prediction = {
     raceId,
@@ -1753,9 +1754,40 @@ function calcExpectedValue(
 
 // ==================== サマリー生成 ====================
 
-function generateSummary(topPicks: PredictionPick[], analysis: RaceAnalysis, raceName: string, confidence: number): string {
+function generateSummary(
+  topPicks: PredictionPick[],
+  analysis: RaceAnalysis,
+  raceName: string,
+  confidence: number,
+  todayBias?: TodayTrackBias | null,
+  isAfternoon?: boolean,
+): string {
   const parts: string[] = [];
   parts.push(`【${raceName}の予想】`);
+
+  // 午後再生成時: 午前の傾向セクション
+  if (isAfternoon && todayBias && todayBias.sampleRaces >= 3) {
+    parts.push('');
+    parts.push(`【午前の傾向（${todayBias.sampleRaces}R分析）】`);
+    const trends: string[] = [];
+    if (Math.abs(todayBias.innerAdvantage) > 0.15) {
+      trends.push(todayBias.innerAdvantage > 0
+        ? `内枠有利（バイアス${(todayBias.innerAdvantage * 100).toFixed(0)}%）`
+        : `外枠有利（バイアス${(Math.abs(todayBias.innerAdvantage) * 100).toFixed(0)}%）`);
+    } else {
+      trends.push('枠順バイアスなし');
+    }
+    if (Math.abs(todayBias.frontRunnerAdvantage) > 0.15) {
+      trends.push(todayBias.frontRunnerAdvantage > 0
+        ? `先行有利（逃げ・先行馬の好走多い）`
+        : `差し追込有利（後方勢が台頭）`);
+    } else {
+      trends.push('脚質バイアスなし');
+    }
+    parts.push(`  ${trends.join(' / ')}`);
+    parts.push(`  ※午前${todayBias.sampleRaces}レースの実績を反映して予想を更新`);
+  }
+
   parts.push('');
 
   if (topPicks.length > 0) {
@@ -1780,7 +1812,11 @@ function generateSummary(topPicks: PredictionPick[], analysis: RaceAnalysis, rac
 
   parts.push('');
   parts.push(`AI信頼度: ${confidence}%`);
-  parts.push('※統計分析v3: 16ファクター分析（血統・騎手×調教師・季節パターン含む）');
+  if (isAfternoon) {
+    parts.push('※午後更新版: 午前の馬場傾向を反映した19ファクター分析');
+  } else {
+    parts.push('※統計分析v3: 16ファクター分析（血統・騎手×調教師・季節パターン含む）');
+  }
 
   return parts.join('\n');
 }

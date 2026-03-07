@@ -44,7 +44,7 @@ import {
 } from './queries';
 import { generatePrediction } from './prediction-engine';
 import { evaluateAllPendingRaces, ensureCalibrationLoaded, autoCalibrate } from './accuracy-tracker';
-import { dbAll } from './database';
+import { dbAll, dbRun } from './database';
 import type { PastPerformance } from '@/types';
 
 // ==================== 型定義 ====================
@@ -56,6 +56,8 @@ export interface SchedulerConfig {
   morningFetchTime: string;
   /** オッズ取得時刻 (HH:MM) */
   oddsFetchTime: string;
+  /** 午後の予想再生成時刻 (HH:MM) */
+  afternoonPredictionTime: string;
   /** 結果取得時刻 (HH:MM) */
   resultFetchTime: string;
   /** 翌日分の事前取得時刻 (HH:MM) */
@@ -85,6 +87,7 @@ const DEFAULT_CONFIG: SchedulerConfig = {
   enabled: false,
   morningFetchTime: '06:00',
   oddsFetchTime: '09:30',
+  afternoonPredictionTime: '13:00',
   resultFetchTime: '17:00',
   nightFetchTime: '22:00',
   rateLimitMs: 1200,
@@ -147,7 +150,7 @@ export function updateSchedulerConfig(config: Partial<SchedulerConfig>): void {
 }
 
 /** 手動で特定のジョブを即座に実行 */
-export async function runSchedulerJob(job: 'morning' | 'odds' | 'results' | 'night'): Promise<void> {
+export async function runSchedulerJob(job: 'morning' | 'odds' | 'afternoon' | 'results' | 'night'): Promise<void> {
   const today = new Date().toISOString().split('T')[0];
   const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
 
@@ -157,6 +160,9 @@ export async function runSchedulerJob(job: 'morning' | 'odds' | 'results' | 'nig
       break;
     case 'odds':
       await executeOddsFetch(today);
+      break;
+    case 'afternoon':
+      await executeAfternoonPredictions(today);
       break;
     case 'results':
       await executeResultFetch(today);
@@ -212,6 +218,15 @@ export async function runCronJob(): Promise<{ executed: string[]; skipped: strin
       executed.push(`odds (${today})`);
     } catch (e) {
       skipped.push(`odds: ${errMsg(e)}`);
+    }
+  }
+
+  if (isNear(currentConfig.afternoonPredictionTime)) {
+    try {
+      await executeAfternoonPredictions(today);
+      executed.push(`afternoon predictions (${today})`);
+    } catch (e) {
+      skipped.push(`afternoon: ${errMsg(e)}`);
     }
   }
 
@@ -420,6 +435,100 @@ async function executeMorningFetch(date: string): Promise<void> {
     await updateSchedulerRun(runId, 'completed', detail);
   } catch (error) {
     addLog('朝のデータ取得失敗', errMsg(error), false);
+    await updateSchedulerRun(runId, 'failed', undefined, errMsg(error));
+  }
+}
+
+/**
+ * 午後の予想再生成
+ * 午前のレース結果から馬場バイアスを取得し、未実施レースの予想を更新する。
+ * サマリに「午前の傾向」セクションを追加。
+ */
+async function executeAfternoonPredictions(date: string): Promise<void> {
+  if (await hasSchedulerRunToday('afternoon', date)) {
+    addLog('午後予想スキップ', `${date} は既に実行済み`, true);
+    return;
+  }
+
+  const runId = await recordSchedulerRun('afternoon', date, 'running');
+  addLog('午後予想再生成開始', date, true);
+  lastRunTime = new Date().toISOString();
+
+  try {
+    await ensureCalibrationLoaded();
+
+    // 未実施のレースのみ対象
+    const races = await dbAll<{
+      id: string; name: string; track_type: string; distance: number;
+      track_condition: string; racecourse_name: string; grade: string; weather: string;
+    }>(
+      "SELECT id, name, track_type, distance, track_condition, racecourse_name, grade, weather FROM races WHERE date = ? AND status = '出走確定' ORDER BY id",
+      [date]
+    );
+
+    if (races.length === 0) {
+      addLog('午後予想スキップ', '未実施レースなし', true);
+      await updateSchedulerRun(runId, 'completed', '未実施レースなし');
+      return;
+    }
+
+    addLog('午後予想対象', `${races.length}レース（未実施分のみ）`, true);
+
+    // 既存予想を削除
+    const raceIds = races.map(r => r.id);
+    const placeholders = raceIds.map(() => '?').join(',');
+    await dbRun(`DELETE FROM predictions WHERE race_id IN (${placeholders})`, raceIds);
+
+    let predictionCount = 0;
+    for (const race of races) {
+      try {
+        const raceData = await getRaceById(race.id);
+        if (!raceData?.entries?.length) continue;
+        const horseInputs = await Promise.all(
+          (raceData.entries as import('@/types').RaceEntry[]).map(async (re) => {
+            const [pastPerfs, horseData, jockeyStats, trainerStats] = await Promise.all([
+              getHorsePastPerformances(re.horseId, 100),
+              getHorseById(re.horseId) as Promise<{ father_name?: string } | null>,
+              getJockeyStats(re.jockeyId),
+              getTrainerStats(re.trainerName),
+            ]);
+            const fatherName = horseData?.father_name || '';
+            const [sireTrackWR, jockeyDistWR, jockeyCourseWR] = await Promise.all([
+              getSireTrackWinRate(fatherName, race.track_type),
+              getJockeyDistanceWinRate(re.jockeyId, race.distance),
+              getJockeyCourseWinRate(re.jockeyId, race.racecourse_name),
+            ]);
+            return {
+              entry: re, pastPerformances: pastPerfs,
+              jockeyWinRate: jockeyStats.winRate, jockeyPlaceRate: jockeyStats.placeRate,
+              fatherName,
+              trainerWinRate: trainerStats.winRate, trainerPlaceRate: trainerStats.placeRate,
+              sireTrackWinRate: sireTrackWR,
+              jockeyDistanceWinRate: jockeyDistWR,
+              jockeyCourseWinRate: jockeyCourseWR,
+            };
+          })
+        );
+        const prediction = await generatePrediction(
+          race.id, race.name, date,
+          race.track_type as import('@/types').TrackType, race.distance,
+          race.track_condition as import('@/types').TrackCondition | undefined,
+          race.racecourse_name, race.grade, horseInputs,
+          race.weather as '晴' | '曇' | '小雨' | '雨' | '小雪' | '雪' | undefined,
+          { isAfternoon: true },
+        );
+        await savePrediction(prediction);
+        predictionCount++;
+      } catch (error) {
+        addLog('午後予想失敗', `${race.id}: ${errMsg(error)}`, false);
+      }
+    }
+
+    const detail = `${date}: ${predictionCount}/${races.length}レース 午後予想更新`;
+    addLog('午後予想完了', detail, true);
+    await updateSchedulerRun(runId, 'completed', detail);
+  } catch (error) {
+    addLog('午後予想失敗', errMsg(error), false);
     await updateSchedulerRun(runId, 'failed', undefined, errMsg(error));
   }
 }
