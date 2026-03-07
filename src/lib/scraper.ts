@@ -5,6 +5,7 @@
  * 注意: スクレイピングは利用規約を確認の上、適切な間隔をあけて実行すること。
  */
 import * as cheerio from 'cheerio';
+import * as iconv from 'iconv-lite';
 
 const BASE_URL = 'https://race.netkeiba.com';
 const DB_BASE_URL = 'https://db.netkeiba.com';
@@ -37,10 +38,10 @@ async function fetchHtml(url: string): Promise<string> {
       }
 
       const buffer = await response.arrayBuffer();
-      // race_list_sub.html はUTF-8、その他のnetkeiba ページは EUC-JP
       const encoding = detectEncoding(url, buffer);
-      const decoder = new TextDecoder(encoding);
-      return decoder.decode(buffer);
+      // iconv-lite で確実にデコード（Vercel環境の TextDecoder は EUC-JP 非対応）
+      const nodeBuffer = Buffer.from(buffer);
+      return iconv.decode(nodeBuffer, encoding);
     } catch (error) {
       if (error instanceof PermanentError) throw error;
 
@@ -61,10 +62,9 @@ function detectEncoding(url: string, buffer: ArrayBuffer): string {
   // race_list_sub.html は明示的にUTF-8
   if (url.includes('race_list_sub.html')) return 'utf-8';
 
-  // HTMLの先頭部分で charset を確認（大文字小文字を区別しない）
-  const preview = new TextDecoder('ascii').decode(buffer.slice(0, 2048));
-  const previewLower = preview.toLowerCase();
-  if (previewLower.includes('charset=utf-8') || previewLower.includes('charset="utf-8"')) {
+  // HTMLの先頭部分で charset を確認（ASCII互換バイトのみ読む、大文字小文字区別なし）
+  const preview = Buffer.from(buffer.slice(0, 2048)).toString('ascii').toLowerCase();
+  if (preview.includes('charset=utf-8') || preview.includes('charset="utf-8"')) {
     return 'utf-8';
   }
 
