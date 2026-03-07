@@ -96,10 +96,10 @@ export async function GET(
         const predResult = await dbAll<{
           win_hit: number;
           place_hit: number;
-          top3_in_top6: number;
-          roi: number;
+          top3_picks_hit: number;
+          bet_roi: number;
         }>(
-          'SELECT win_hit, place_hit, top3_in_top6, roi FROM prediction_results WHERE race_id = ?',
+          'SELECT win_hit, place_hit, top3_picks_hit, bet_roi FROM prediction_results WHERE race_id = ?',
           [raceId],
         );
 
@@ -150,8 +150,8 @@ export async function GET(
         verification = {
           winHit: predResult[0]?.win_hit === 1,
           placeHit: predResult[0]?.place_hit === 1,
-          top3InTop6: predResult[0]?.top3_in_top6 ?? 0,
-          roi: predResult[0]?.roi ?? 0,
+          top3InTop6: predResult[0]?.top3_picks_hit ?? 0,
+          roi: Math.round((predResult[0]?.bet_roi ?? 0) * 100),
           pickResults,
           betResults,
           actualTop3,

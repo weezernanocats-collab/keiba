@@ -50,7 +50,8 @@ export async function GET(_request: NextRequest) {
       const window = results.slice(i - windowSize + 1, i + 1);
       const winRate = window.reduce((s, r) => s + r.win_hit, 0) / windowSize * 100;
       const placeRate = window.reduce((s, r) => s + r.place_hit, 0) / windowSize * 100;
-      const avgRoi = window.reduce((s, r) => s + (r.bet_roi || 0), 0) / windowSize;
+      // bet_roi は倍率 (0=外れ, 2.5=250%回収)。パーセントに変換
+      const avgRoi = window.reduce((s, r) => s + (r.bet_roi || 0), 0) / windowSize * 100;
       const raceInfo = raceInfoMap.get(results[i].race_id);
 
       rolling.push({
@@ -113,7 +114,7 @@ export async function GET(_request: NextRequest) {
     // 全体サマリ
     const totalWin = results.reduce((s, r) => s + r.win_hit, 0);
     const totalPlace = results.reduce((s, r) => s + r.place_hit, 0);
-    const avgRoi = results.length > 0 ? results.reduce((s, r) => s + (r.bet_roi || 0), 0) / results.length : 0;
+    const avgRoi = results.length > 0 ? results.reduce((s, r) => s + (r.bet_roi || 0), 0) / results.length * 100 : 0;
 
     return NextResponse.json({
       summary: {
