@@ -3,6 +3,8 @@ import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import FavoriteButton from '@/components/FavoriteButton';
+import { useFavorites } from '@/lib/use-favorites';
 
 interface RaceRow {
   id: string;
@@ -36,6 +38,7 @@ function ConfidenceBadge({ value }: { value: number | null }) {
 export default function PredictionsPage() {
   const [races, setRaces] = useState<RaceRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const { toggleRace, isRaceFavorite } = useFavorites();
 
   useEffect(() => {
     async function fetchRaces() {
@@ -92,6 +95,7 @@ export default function PredictionsPage() {
                     <th className="py-2 px-2 font-medium">条件</th>
                     <th className="py-2 px-2 font-medium text-center">頭数</th>
                     <th className="py-2 px-2 font-medium text-center">信頼度</th>
+                    <th className="py-2 px-1 font-medium w-10"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -116,6 +120,13 @@ export default function PredictionsPage() {
                       <td className="py-2 px-2 text-center">
                         <ConfidenceBadge value={race.confidence} />
                       </td>
+                      <td className="py-2 px-1 text-center">
+                        <FavoriteButton
+                          isFavorite={isRaceFavorite(race.id)}
+                          onToggle={() => toggleRace(race.id)}
+                          size="sm"
+                        />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -124,12 +135,14 @@ export default function PredictionsPage() {
             {/* モバイル: コンパクトリスト */}
             <div className="md:hidden space-y-1">
               {dateRaces.map(race => (
-                <Link
+                <div
                   key={race.id}
-                  href={`/predictions/${race.id}`}
                   className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-card-bg/80 transition-colors border-b border-card-border/30"
                 >
-                  <div className="flex items-center gap-2 min-w-0">
+                  <Link
+                    href={`/predictions/${race.id}`}
+                    className="flex items-center gap-2 min-w-0 flex-1"
+                  >
                     <span className="text-xs text-muted w-6 shrink-0">{race.raceNumber}R</span>
                     <div className="min-w-0">
                       <div className="font-medium text-sm truncate flex items-center gap-1">
@@ -140,9 +153,16 @@ export default function PredictionsPage() {
                         {race.racecourseName} {race.trackType}{race.distance}m {race.entryCount}頭
                       </div>
                     </div>
+                  </Link>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <ConfidenceBadge value={race.confidence} />
+                    <FavoriteButton
+                      isFavorite={isRaceFavorite(race.id)}
+                      onToggle={() => toggleRace(race.id)}
+                      size="sm"
+                    />
                   </div>
-                  <ConfidenceBadge value={race.confidence} />
-                </Link>
+                </div>
               ))}
             </div>
           </div>

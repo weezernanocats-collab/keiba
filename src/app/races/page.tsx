@@ -3,6 +3,8 @@ import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import FavoriteButton from '@/components/FavoriteButton';
+import { useFavorites } from '@/lib/use-favorites';
 
 interface RaceRow {
   id: string;
@@ -24,6 +26,7 @@ export default function RacesPage() {
   const [trackFilter, setTrackFilter] = useState<string>('all');
   const [gradeFilter, setGradeFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
+  const { toggleRace, isRaceFavorite } = useFavorites();
 
   useEffect(() => {
     async function fetchRaces() {
@@ -152,6 +155,7 @@ export default function RacesPage() {
                       <th className="px-4 py-3 text-center font-medium">頭数</th>
                       <th className="px-4 py-3 text-center font-medium">状態</th>
                       <th className="px-4 py-3 text-center font-medium">詳細</th>
+                      <th className="px-2 py-3 text-center font-medium w-10"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-card-border">
@@ -195,6 +199,13 @@ export default function RacesPage() {
                               </Link>
                             </>
                           )}
+                        </td>
+                        <td className="px-2 py-3 text-center">
+                          <FavoriteButton
+                            isFavorite={isRaceFavorite(race.id)}
+                            onToggle={() => toggleRace(race.id)}
+                            size="sm"
+                          />
                         </td>
                       </tr>
                     ))}
