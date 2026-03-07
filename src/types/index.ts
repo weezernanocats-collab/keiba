@@ -162,6 +162,19 @@ export interface RaceAnalysis {
   paceAnalysis: string;
   keyFactors: string[];
   riskFactors: string[];
+  bettingStrategy?: BettingStrategy;
+}
+
+export type RacePattern = '一強' | '二強' | '三つ巴' | '混戦' | '大混戦';
+
+export interface BettingStrategy {
+  pattern: RacePattern;
+  patternLabel: string;        // 例: "◎が抜けた一強レース"
+  recommendation: string;      // メイン戦略テキスト
+  riskLevel: 'low' | 'medium' | 'high';
+  primaryBets: string[];       // 推奨券種（優先順）
+  avoidBets: string[];         // 非推奨券種
+  budgetAdvice: string;        // 資金配分アドバイス
 }
 
 export interface RecommendedBet {

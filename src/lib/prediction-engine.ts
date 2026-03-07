@@ -39,6 +39,7 @@
 import type {
   Prediction, PredictionPick, RaceAnalysis, RecommendedBet,
   RaceEntry, PastPerformance, TrackType, TrackCondition,
+  BettingStrategy, RacePattern,
 } from '@/types';
 
 import {
@@ -429,8 +430,12 @@ export async function generatePrediction(
   // 信頼度算出
   const confidence = calculateConfidence(scoredHorses, ctx);
 
-  // 推奨馬券
-  const recommendedBets = generateBetRecommendations(scoredHorses, confidence);
+  // 馬券戦略
+  const bettingStrategy = generateBettingStrategy(scoredHorses, confidence);
+  analysis.bettingStrategy = bettingStrategy;
+
+  // 推奨馬券（戦略ベース）
+  const recommendedBets = generateBetRecommendations(scoredHorses, confidence, bettingStrategy);
 
   // サマリー生成
   const summary = generateSummary(topPicks, analysis, raceName, confidence, todayBias, options?.isAfternoon);
@@ -1587,117 +1592,298 @@ function calculateConfidence(scoredHorses: ScoredHorse[], ctx: RaceHistoricalCon
   return Math.min(92, Math.max(10, Math.round(confidence)));
 }
 
+// ==================== レースパターン分類 ====================
+
+function classifyRacePattern(scoredHorses: ScoredHorse[]): {
+  pattern: RacePattern;
+  gap12: number;
+  gap23: number;
+  gap34: number;
+} {
+  const gap12 = scoredHorses[0].totalScore - scoredHorses[1].totalScore;
+  const gap23 = scoredHorses[1].totalScore - scoredHorses[2].totalScore;
+  const gap34 = scoredHorses.length > 3
+    ? scoredHorses[2].totalScore - scoredHorses[3].totalScore
+    : 999;
+
+  let pattern: RacePattern;
+  if (gap12 >= 6) {
+    pattern = '一強';
+  } else if (gap12 < 3 && gap23 >= 4) {
+    pattern = '二強';
+  } else if (gap12 < 4 && gap23 < 4 && gap34 >= 4) {
+    pattern = '三つ巴';
+  } else if (gap12 < 4 && gap23 < 4 && gap34 < 4) {
+    pattern = '大混戦';
+  } else {
+    pattern = '混戦';
+  }
+
+  return { pattern, gap12, gap23, gap34 };
+}
+
+// ==================== 馬券戦略生成 ====================
+
+function generateBettingStrategy(
+  scoredHorses: ScoredHorse[],
+  confidence: number,
+): BettingStrategy {
+  const { pattern, gap12 } = classifyRacePattern(scoredHorses);
+  const top = scoredHorses[0];
+  const second = scoredHorses[1];
+  const third = scoredHorses[2];
+
+  switch (pattern) {
+    case '一強': {
+      const hasValue = top.entry.odds && top.entry.odds >= 2.0;
+      return {
+        pattern,
+        patternLabel: `◎${top.entry.horseName}が抜けた一強レース（スコア差${gap12.toFixed(1)}）`,
+        recommendation: hasValue
+          ? `${top.entry.horseName}の単勝が中心。2着以下が絞りにくいため、◎頭固定の馬単・三連単で相手を広げるのが有効。`
+          : `${top.entry.horseName}は堅いが人気で妙味薄。馬単◎→○▲流しで配当を狙うか、複勝で手堅く。`,
+        riskLevel: 'low',
+        primaryBets: ['単勝', '馬単', '三連単'],
+        avoidBets: ['ワイド'],
+        budgetAdvice: '単勝40% + 馬単◎頭固定40% + 三連単◎頭固定20%',
+      };
+    }
+    case '二強':
+      return {
+        pattern,
+        patternLabel: `◎${top.entry.horseName}と○${second.entry.horseName}の二強対決（差${gap12.toFixed(1)}）`,
+        recommendation: `上位2頭が拮抗。どちらが来てもカバーできる馬連・ワイドが中心。着順が読めないため馬単は裏表で。3着に穴馬が来る可能性も考慮して三連複を広めに。`,
+        riskLevel: 'medium',
+        primaryBets: ['馬連', 'ワイド', '三連複'],
+        avoidBets: ['三連単'],
+        budgetAdvice: '馬連◎○30% + ワイド◎○→▲△30% + 三連複BOX30% + 複勝10%',
+      };
+    case '三つ巴':
+      return {
+        pattern,
+        patternLabel: `◎○▲の三つ巴（上位3頭が僅差）`,
+        recommendation: `上位3頭が拮抗しており着順予想が困難。ワイドBOXで手広くカバーするか、三連複1点に絞って高配当を狙う。単勝・馬単は避けるべき。`,
+        riskLevel: 'medium',
+        primaryBets: ['ワイド', '三連複', '複勝'],
+        avoidBets: ['単勝', '馬単', '三連単'],
+        budgetAdvice: 'ワイドBOX◎○▲40% + 三連複◎○▲30% + 複勝◎○30%',
+      };
+    case '混戦':
+      return {
+        pattern,
+        patternLabel: `混戦模様（上位馬のスコアが接近）`,
+        recommendation: `有力馬が多く絞りにくい展開。ワイドBOXか複勝で手堅く回収するのが賢明。大勝負は避け、的中率重視で。`,
+        riskLevel: 'high',
+        primaryBets: ['複勝', 'ワイド'],
+        avoidBets: ['単勝', '馬単', '三連単'],
+        budgetAdvice: '複勝◎○50% + ワイド◎→○▲△50%',
+      };
+    case '大混戦':
+      return {
+        pattern,
+        patternLabel: `大混戦（4頭以上が僅差で予想困難）`,
+        recommendation: confidence >= 40
+          ? `混戦のため的中難易度が高い。複勝で手堅く拾うか、思い切って穴馬の単勝を少額で狙う。ワイドBOX（4頭）も面白い。`
+          : `予想困難なレース。無理に勝負せず見送りも選択肢。買うなら複勝1点か少額ワイドまで。`,
+        riskLevel: 'high',
+        primaryBets: confidence >= 40 ? ['複勝', 'ワイド'] : ['複勝'],
+        avoidBets: ['馬単', '三連単', '三連複'],
+        budgetAdvice: confidence >= 40
+          ? '複勝◎60% + ワイドBOX40%（少額推奨）'
+          : '見送り推奨。買うなら複勝1点のみ（少額）',
+      };
+  }
+}
+
 // ==================== 推奨馬券 ====================
 
-function generateBetRecommendations(scoredHorses: ScoredHorse[], confidence: number): RecommendedBet[] {
+function generateBetRecommendations(
+  scoredHorses: ScoredHorse[],
+  confidence: number,
+  strategy: BettingStrategy,
+): RecommendedBet[] {
   const bets: RecommendedBet[] = [];
   if (scoredHorses.length < 3) return bets;
 
-  // softmax で全馬の推定勝率を算出
   const winProbs = estimateWinProbabilities(scoredHorses);
   const top = scoredHorses[0];
   const second = scoredHorses[1];
   const third = scoredHorses[2];
   const fourth = scoredHorses[3];
-  const gap12 = top.totalScore - second.totalScore;
+  const { pattern, gap12, gap23, gap34 } = classifyRacePattern(scoredHorses);
 
   const evOf = (h: ScoredHorse) => calcExpectedValue(h, winProbs);
-
-  // --- 通常の馬券推奨（従来ロジック + EV表示） ---
-
-  // オッズ取得ヘルパー（0以下はundefined）
   const oddsOf = (h: ScoredHorse) => (h.entry.odds && h.entry.odds > 0) ? h.entry.odds : undefined;
 
-  if (gap12 > 5 && confidence >= 50) {
+  const isPrimary = (type: string) => strategy.primaryBets.includes(type);
+  const isAvoided = (type: string) => strategy.avoidBets.includes(type);
+
+  // --- 戦略ベースの馬券推奨 ---
+
+  // 単勝: 一強パターンまたは高信頼度時
+  if (!isAvoided('単勝') && (pattern === '一強' || (gap12 > 5 && confidence >= 50))) {
     const ev = evOf(top);
+    const isMain = isPrimary('単勝');
     bets.push({
       type: '単勝',
       selections: [top.entry.horseNumber],
-      reasoning: `${top.entry.horseName}が総合力で群を抜いている。${top.reasons[0] || ''}。信頼度${confidence}%。${ev >= 1.0 ? `期待値${ev.toFixed(2)}で妙味あり。` : ''}`,
+      reasoning: isMain
+        ? `【主力】${top.entry.horseName}が総合力で抜けている。${top.reasons[0] || ''}${ev >= 1.0 ? ` 期待値${ev.toFixed(2)}。` : ''}`
+        : `${top.entry.horseName}の勝利を狙う。ただし${pattern}のため控えめに。`,
       expectedValue: ev,
       odds: oddsOf(top),
     });
   }
 
-  bets.push({
-    type: '複勝',
-    selections: [top.entry.horseNumber],
-    reasoning: `${top.entry.horseName}の3着以内は堅い。安定感重視の馬券。${top.scores.consistency >= 70 ? '着順も安定しており信頼できる。' : ''}`,
-    expectedValue: evOf(top) * 0.7,
-    odds: oddsOf(top) ? Math.max(1.1, oddsOf(top)! * 0.35) : undefined,
-  });
-
-  bets.push({
-    type: '馬連',
-    selections: [top.entry.horseNumber, second.entry.horseNumber],
-    reasoning: `${top.entry.horseName}と${second.entry.horseName}の上位2頭。${second.reasons[0] || ''}`,
-    expectedValue: (evOf(top) + evOf(second)) / 2,
-    odds: (oddsOf(top) && oddsOf(second)) ? oddsOf(top)! * oddsOf(second)! * 0.5 : undefined,
-  });
-
-  if (third.totalScore > 40) {
+  // 複勝: ほぼ常に推奨（安定枠）
+  if (!isAvoided('複勝')) {
+    const isMain = isPrimary('複勝');
     bets.push({
-      type: 'ワイド',
-      selections: [top.entry.horseNumber, third.entry.horseNumber],
-      reasoning: `${top.entry.horseName}軸で${third.entry.horseName}へ。${third.reasons[0] || '好走条件が揃っている'}`,
-      expectedValue: (evOf(top) + evOf(third)) / 2,
-      odds: (oddsOf(top) && oddsOf(third)) ? oddsOf(top)! * oddsOf(third)! * 0.25 : undefined,
+      type: '複勝',
+      selections: [top.entry.horseNumber],
+      reasoning: isMain
+        ? `【主力】${top.entry.horseName}の3着以内で手堅く回収。${pattern === '混戦' || pattern === '大混戦' ? '混戦のため複勝が最も安全。' : ''}${top.scores.consistency >= 70 ? '着順安定型。' : ''}`
+        : `${top.entry.horseName}の3着以内は堅い。安定感重視。`,
+      expectedValue: evOf(top) * 0.7,
+      odds: oddsOf(top) ? Math.max(1.1, oddsOf(top)! * 0.35) : undefined,
+    });
+    // 混戦時は○も複勝推奨
+    if ((pattern === '混戦' || pattern === '大混戦' || pattern === '二強') && isMain) {
+      bets.push({
+        type: '複勝',
+        selections: [second.entry.horseNumber],
+        reasoning: `【押さえ】${second.entry.horseName}も3着以内有力。◎と迷う実力。`,
+        expectedValue: evOf(second) * 0.7,
+        odds: oddsOf(second) ? Math.max(1.1, oddsOf(second)! * 0.35) : undefined,
+      });
+    }
+  }
+
+  // 馬連: 二強パターンやスコアが近い上位2頭
+  if (!isAvoided('馬連')) {
+    const isMain = isPrimary('馬連');
+    bets.push({
+      type: '馬連',
+      selections: [top.entry.horseNumber, second.entry.horseNumber],
+      reasoning: isMain
+        ? `【主力】${top.entry.horseName}と${second.entry.horseName}の組み合わせ。${pattern === '二強' ? '二強対決の本線。' : ''}${second.reasons[0] || ''}`
+        : `上位2頭の組み合わせ。${second.reasons[0] || ''}`,
+      expectedValue: (evOf(top) + evOf(second)) / 2,
+      odds: (oddsOf(top) && oddsOf(second)) ? oddsOf(top)! * oddsOf(second)! * 0.5 : undefined,
     });
   }
 
-  if (fourth && third.totalScore - fourth.totalScore > 2) {
+  // ワイド: 三つ巴・混戦で特に有効
+  if (!isAvoided('ワイド')) {
+    const isMain = isPrimary('ワイド');
+    if (isMain && (pattern === '三つ巴' || pattern === '混戦' || pattern === '大混戦')) {
+      // BOX形式: ◎○▲（+△）のワイドBOX
+      const boxHorses = pattern === '大混戦' && fourth
+        ? [top, second, third, fourth]
+        : [top, second, third];
+      const pairs: [ScoredHorse, ScoredHorse][] = [];
+      for (let i = 0; i < boxHorses.length; i++) {
+        for (let j = i + 1; j < boxHorses.length; j++) {
+          pairs.push([boxHorses[i], boxHorses[j]]);
+        }
+      }
+      for (const [a, b] of pairs) {
+        bets.push({
+          type: 'ワイド',
+          selections: [a.entry.horseNumber, b.entry.horseNumber],
+          reasoning: `【主力】ワイドBOXの一角。${a.entry.horseName}-${b.entry.horseName}。${pattern}のため着順不問で広く拾う。`,
+          expectedValue: (evOf(a) + evOf(b)) / 2,
+          odds: (oddsOf(a) && oddsOf(b)) ? oddsOf(a)! * oddsOf(b)! * 0.25 : undefined,
+        });
+      }
+    } else if (!isAvoided('ワイド') && third.totalScore > 40) {
+      // 通常: ◎→▲
+      bets.push({
+        type: 'ワイド',
+        selections: [top.entry.horseNumber, third.entry.horseNumber],
+        reasoning: `${top.entry.horseName}軸で${third.entry.horseName}へ。${third.reasons[0] || '好走条件が揃っている'}`,
+        expectedValue: (evOf(top) + evOf(third)) / 2,
+        odds: (oddsOf(top) && oddsOf(third)) ? oddsOf(top)! * oddsOf(third)! * 0.25 : undefined,
+      });
+    }
+  }
+
+  // 馬単: 一強パターンで◎頭固定
+  if (!isAvoided('馬単') && gap12 > 5 && confidence >= 50) {
+    const isMain = isPrimary('馬単');
+    // ◎→○
+    bets.push({
+      type: '馬単',
+      selections: [top.entry.horseNumber, second.entry.horseNumber],
+      reasoning: isMain
+        ? `【主力】${top.entry.horseName}頭固定。2着${second.entry.horseName}。${gap12 > 8 ? '1着は堅い。' : ''}`
+        : `${top.entry.horseName}が頭鉄板。2着に${second.entry.horseName}。`,
+      expectedValue: evOf(top) * 1.5,
+      odds: (oddsOf(top) && oddsOf(second)) ? oddsOf(top)! * oddsOf(second)! * 0.9 : undefined,
+    });
+    // 一強なら◎→▲も
+    if (isMain && third.totalScore > 40) {
+      bets.push({
+        type: '馬単',
+        selections: [top.entry.horseNumber, third.entry.horseNumber],
+        reasoning: `${top.entry.horseName}頭固定→${third.entry.horseName}。穴目の組み合わせ。`,
+        expectedValue: evOf(top) * 1.3,
+        odds: (oddsOf(top) && oddsOf(third)) ? oddsOf(top)! * oddsOf(third)! * 0.9 : undefined,
+      });
+    }
+  }
+
+  // 三連複: 上位が明確に抜けている場合
+  if (!isAvoided('三連複') && fourth && gap34 > 1.5) {
+    const isMain = isPrimary('三連複');
     bets.push({
       type: '三連複',
       selections: [top.entry.horseNumber, second.entry.horseNumber, third.entry.horseNumber],
-      reasoning: `上位3頭で堅く決まる想定。${confidence >= 60 ? '信頼度高め。' : '波乱の余地あり、抑え程度に。'}`,
+      reasoning: isMain
+        ? `【主力】上位3頭のBOX。${confidence >= 60 ? '信頼度高め。' : ''}${pattern === '三つ巴' ? '3頭の着順は不問で取れる。' : ''}`
+        : `上位3頭で堅く決まる想定。${confidence >= 60 ? '信頼度高め。' : '波乱の余地あり、抑え程度に。'}`,
       expectedValue: (evOf(top) + evOf(second) + evOf(third)) / 3,
       odds: (oddsOf(top) && oddsOf(second) && oddsOf(third)) ? oddsOf(top)! * oddsOf(second)! * oddsOf(third)! * 0.3 : undefined,
     });
   }
 
-  if (gap12 > 7 && confidence >= 55) {
-    bets.push({
-      type: '馬単',
-      selections: [top.entry.horseNumber, second.entry.horseNumber],
-      reasoning: `${top.entry.horseName}が頭鉄板。2着に${second.entry.horseName}。${gap12 > 10 ? '1着は堅い。' : ''}`,
-      expectedValue: evOf(top) * 1.5,
-      odds: (oddsOf(top) && oddsOf(second)) ? oddsOf(top)! * oddsOf(second)! * 0.9 : undefined,
-    });
-  }
-
-  if (gap12 > 8 && confidence >= 65 && fourth && third.totalScore - fourth.totalScore > 3) {
+  // 三連単: 一強パターンかつ高信頼度
+  if (!isAvoided('三連単') && gap12 > 6 && confidence >= 60 && fourth && gap34 > 2) {
     bets.push({
       type: '三連単',
       selections: [top.entry.horseNumber, second.entry.horseNumber, third.entry.horseNumber],
-      reasoning: `高配当狙い。着順まで予想。${top.entry.horseName}→${second.entry.horseName}→${third.entry.horseName}の順。`,
+      reasoning: `高配当狙い。${top.entry.horseName}→${second.entry.horseName}→${third.entry.horseName}の順。`,
       expectedValue: (evOf(top) + evOf(second) + evOf(third)) / 3 * 2,
       odds: (oddsOf(top) && oddsOf(second) && oddsOf(third)) ? oddsOf(top)! * oddsOf(second)! * oddsOf(third)! * 0.6 : undefined,
     });
   }
 
-  // --- バリューベット検出（EV > 1.0 の馬を抽出） ---
-  // 上位3頭以外で期待値が高い馬（＝市場が過小評価している穴馬）を検出
+  // --- バリューベット検出 ---
   for (const horse of scoredHorses) {
     if (!horse.entry.odds || horse.entry.odds <= 0) continue;
     const ev = evOf(horse);
-    if (ev < 1.15) continue; // EV 1.15以上のみ（マージン考慮）
+    if (ev < 1.15) continue;
 
     const rank = scoredHorses.indexOf(horse) + 1;
-    // 上位3頭は既に推奨済みなのでスキップ
     if (rank <= 3) continue;
 
     const prob = winProbs.get(horse) || 0;
     bets.push({
       type: '単勝',
       selections: [horse.entry.horseNumber],
-      reasoning: `【バリューベット】${horse.entry.horseName}（${rank}番人気相当）。推定勝率${(prob * 100).toFixed(1)}%に対しオッズ${horse.entry.odds.toFixed(1)}倍は過小評価。期待値${ev.toFixed(2)}。${horse.reasons[0] || ''}`,
+      reasoning: `【バリュー】${horse.entry.horseName}（${rank}位）。推定勝率${(prob * 100).toFixed(1)}%に対しオッズ${horse.entry.odds.toFixed(1)}倍は過小評価。期待値${ev.toFixed(2)}。`,
       expectedValue: ev,
       odds: oddsOf(horse),
     });
   }
 
-  // EVが高い順にソート（バリューベットが上位に来るように）
-  bets.sort((a, b) => b.expectedValue - a.expectedValue);
+  // 主力ベットを先頭、その後EVが高い順
+  bets.sort((a, b) => {
+    const aMain = a.reasoning.startsWith('【主力】') ? 1 : 0;
+    const bMain = b.reasoning.startsWith('【主力】') ? 1 : 0;
+    if (aMain !== bMain) return bMain - aMain;
+    return b.expectedValue - a.expectedValue;
+  });
 
   return bets;
 }
