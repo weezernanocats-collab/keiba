@@ -63,6 +63,7 @@ import { calcWeightTrendBonus } from './weight-trend';
 import { applyEnhancedPaceBonus, generatePaceAnalysisText, type HistoricalPaceProfile } from './pace-analyzer';
 import { calcMarginScore } from './margin-score';
 import { calcWeatherScore } from './weather-score';
+import { applyVenueMultipliers } from './racecourse-profiles';
 import { dbAll } from './database';
 
 // デフォルト重み設定 (v5.2: v5.1ベース + 着差/天候を最小ウェイトで追加, 合計1.00)
@@ -310,9 +311,12 @@ export async function generatePrediction(
     ? horses.reduce((sum, h) => sum + (h.entry.handicapWeight || 55), 0) / horses.length
     : 55;
 
-  // カテゴリ別ウェイトプロファイル適用
+  // カテゴリ別ウェイトプロファイル適用 → 競馬場別補正
   const category = categorizeRace(trackType, distance);
-  const categoryWeights = applyCategoryMultipliers(WEIGHTS, category);
+  const categoryWeights = applyVenueMultipliers(
+    applyCategoryMultipliers(WEIGHTS, category),
+    racecourseName,
+  );
 
   // 単勝オッズマップ取得（市場シグナル用）
   const oddsMap = await getWinOddsMap(raceId);

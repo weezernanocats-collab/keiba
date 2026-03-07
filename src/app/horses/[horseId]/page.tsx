@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import FavoriteButton from '@/components/FavoriteButton';
+import { useFavorites } from '@/lib/use-favorites';
 
 interface HorseDetail {
   id: string;
@@ -78,6 +80,7 @@ export default function HorseDetailPage() {
   const [raceEntries, setRaceEntries] = useState<RaceEntryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { toggleHorse, isHorseFavorite } = useFavorites();
 
   useEffect(() => {
     async function fetchData() {
@@ -129,7 +132,10 @@ export default function HorseDetailPage() {
 
       {/* 基本情報 */}
       <div className="bg-card-bg border border-card-border rounded-xl p-6">
-        <h1 className="text-3xl font-bold mb-1">{horse.name}</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-3xl font-bold mb-1">{horse.name}</h1>
+          <FavoriteButton isFavorite={isHorseFavorite(horseId)} onToggle={() => toggleHorse(horseId)} />
+        </div>
         {horse.name_en && <p className="text-muted text-sm mb-4">{horse.name_en}</p>}
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">

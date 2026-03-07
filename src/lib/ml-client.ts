@@ -152,22 +152,30 @@ function getModelDir(): string {
 
 function loadModel(filename: string): XGBModel | null {
   const filepath = join(getModelDir(), filename);
-  if (!existsSync(filepath)) return null;
+  if (!existsSync(filepath)) {
+    console.warn(`[ML] モデルファイル未検出: ${filepath}`);
+    return null;
+  }
   try {
     const raw = readFileSync(filepath, 'utf-8');
     return JSON.parse(raw) as XGBModel;
-  } catch {
+  } catch (error) {
+    console.error(`[ML] モデルファイル読み込みエラー (${filename}):`, error);
     return null;
   }
 }
 
 function loadFeatureNames(): string[] | null {
   const filepath = join(getModelDir(), 'feature_names.json');
-  if (!existsSync(filepath)) return null;
+  if (!existsSync(filepath)) {
+    console.warn(`[ML] feature_names.json 未検出: ${filepath}`);
+    return null;
+  }
   try {
     const raw = readFileSync(filepath, 'utf-8');
     return JSON.parse(raw) as string[];
-  } catch {
+  } catch (error) {
+    console.error('[ML] feature_names.json 読み込みエラー:', error);
     return null;
   }
 }
@@ -177,15 +185,21 @@ function ensureModelsLoaded(): boolean {
     return modelMode !== 'none';
   }
 
+  console.log(`[ML] モデル読み込み開始 (modelDir: ${getModelDir()})`);
+
   cachedFeatureNames = loadFeatureNames();
   if (!cachedFeatureNames) {
+    console.warn('[ML] feature_names が読み込めないため ML 推論を無効化');
     modelMode = 'none';
     return false;
   }
+  console.log(`[ML] feature_names 読み込み完了: ${cachedFeatureNames.length}個`);
 
   // ランキングモデルを優先チェック
   cachedRankerModel = loadModel('xgb_ranker.json');
   if (cachedRankerModel) {
+    const treeCount = cachedRankerModel.learner.gradient_booster.model.trees.length;
+    console.log(`[ML] ランキングモデル読み込み完了 (trees: ${treeCount})`);
     modelMode = 'ranker';
     return true;
   }
@@ -194,10 +208,12 @@ function ensureModelsLoaded(): boolean {
   cachedWinModel = loadModel('xgb_win.json');
   cachedPlaceModel = loadModel('xgb_place.json');
   if (cachedWinModel && cachedPlaceModel) {
+    console.log('[ML] 分類モデル (win+place) 読み込み完了');
     modelMode = 'classifier';
     return true;
   }
 
+  console.warn('[ML] 利用可能なモデルなし → ML 推論を無効化');
   modelMode = 'none';
   return false;
 }
@@ -343,7 +359,9 @@ export async function callMLPredict(horses: MLHorseInput[]): Promise<MLPredictio
 
     // ランキングモデルモード
     if (modelMode === 'ranker' && cachedRankerModel) {
-      return predictWithRanker(cachedRankerModel, horses, cachedFeatureNames);
+      const result = predictWithRanker(cachedRankerModel, horses, cachedFeatureNames);
+      console.log(`[ML] ランキング推論完了: ${horses.length}頭`);
+      return result;
     }
 
     // 分類モデルフォールバック
@@ -362,11 +380,13 @@ export async function callMLPredict(horses: MLHorseInput[]): Promise<MLPredictio
         };
       }
 
+      console.log(`[ML] 分類モデル推論完了: ${horses.length}頭`);
       return result;
     }
 
     return null;
-  } catch {
+  } catch (error) {
+    console.error('[ML] callMLPredict でエラー発生:', error);
     return null;
   }
 }

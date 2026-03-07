@@ -44,6 +44,7 @@ import {
 } from './queries';
 import { generatePrediction } from './prediction-engine';
 import { evaluateAllPendingRaces, ensureCalibrationLoaded, autoCalibrate } from './accuracy-tracker';
+import { recalculateEVForDate } from './ev-calculator';
 import { dbAll, dbRun } from './database';
 import type { PastPerformance } from '@/types';
 
@@ -567,7 +568,16 @@ async function executeOddsFetch(date: string): Promise<void> {
       await sleep(currentConfig.rateLimitMs);
     }
 
-    const detail = `${date}: ${count}レース分`;
+    // オッズ取得後に EV を再計算
+    let evCount = 0;
+    try {
+      evCount = await recalculateEVForDate(date);
+      addLog('EV再計算', `${evCount}レースの期待値を更新`, true);
+    } catch (evError) {
+      addLog('EV再計算失敗', errMsg(evError), false);
+    }
+
+    const detail = `${date}: ${count}レース分, EV更新${evCount}件`;
     addLog('オッズ取得完了', detail, true);
     await updateSchedulerRun(runId, 'completed', detail);
   } catch (error) {

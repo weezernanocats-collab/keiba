@@ -4,6 +4,9 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import FavoriteButton from '@/components/FavoriteButton';
+import BudgetSimulator from '@/components/BudgetSimulator';
+import { useFavorites } from '@/lib/use-favorites';
 
 interface Pick {
   rank: number;
@@ -36,6 +39,7 @@ interface Bet {
   selections: number[];
   reasoning: string;
   expectedValue: number;
+  odds?: number;
 }
 
 interface PredictionData {
@@ -58,6 +62,35 @@ interface RaceData {
   trackType: string;
   distance: number;
   trackCondition: string | null;
+  status: string;
+}
+
+interface PickResult extends Pick {
+  actualPosition: number | null;
+  hit: boolean;
+  placeHit: boolean;
+}
+
+interface BetResult extends Bet {
+  hit: boolean;
+}
+
+interface Verification {
+  winHit: boolean;
+  placeHit: boolean;
+  top3InTop6: number;
+  roi: number;
+  pickResults: PickResult[];
+  betResults: BetResult[];
+  actualTop3: number[];
+}
+
+interface ScoreBucket {
+  scoreRange: string;
+  scoreLow: number;
+  total: number;
+  winRate: number;
+  placeRate: number;
 }
 
 export default function PredictionDetailPage() {
@@ -65,20 +98,29 @@ export default function PredictionDetailPage() {
   const raceId = params.raceId as string;
   const [prediction, setPrediction] = useState<PredictionData | null>(null);
   const [race, setRace] = useState<RaceData | null>(null);
+  const [verification, setVerification] = useState<Verification | null>(null);
+  const [scoreBuckets, setScoreBuckets] = useState<ScoreBucket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { toggleRace, isRaceFavorite } = useFavorites();
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const res = await fetch(`/api/predictions/${raceId}`);
-        const data = await res.json();
-        if (data.error) {
-          setError(data.error);
+        const [predRes, scoreRes] = await Promise.all([
+          fetch(`/api/predictions/${raceId}`),
+          fetch('/api/score-lookup'),
+        ]);
+        const predData = await predRes.json();
+        if (predData.error) {
+          setError(predData.error);
         } else {
-          setPrediction(data.prediction || null);
-          setRace(data.race || null);
+          setPrediction(predData.prediction || null);
+          setRace(predData.race || null);
+          setVerification(predData.verification || null);
         }
+        const scoreData = await scoreRes.json();
+        setScoreBuckets(scoreData.buckets || []);
       } catch (err) {
         console.error('エラー:', err);
         setError('データの取得に失敗しました');
@@ -95,7 +137,7 @@ export default function PredictionDetailPage() {
     return (
       <div className="text-center py-12 space-y-4">
         <p className="text-lg text-muted">{error}</p>
-        <Link href="/predictions" className="text-accent hover:underline">← 予想一覧に戻る</Link>
+        <Link href="/predictions" className="text-accent hover:underline">&larr; 予想一覧に戻る</Link>
       </div>
     );
   }
@@ -104,12 +146,12 @@ export default function PredictionDetailPage() {
     return (
       <div className="text-center py-12">
         <p>予想データがありません</p>
-        <Link href="/predictions" className="text-accent hover:underline">← 予想一覧に戻る</Link>
+        <Link href="/predictions" className="text-accent hover:underline">&larr; 予想一覧に戻る</Link>
       </div>
     );
   }
 
-  const rankLabels = ['◎ 本命', '○ 対抗', '▲ 単穴', '△ 連下', '× 注意', '☆ 穴'];
+  const rankLabels = ['\u25CE 本命', '\u25CB 対抗', '\u25B2 単穴', '\u25B3 連下', '\u00D7 注意', '\u2606 穴'];
   const rankColors = [
     'bg-red-50 border-red-300 dark:bg-red-900/20 dark:border-red-800',
     'bg-blue-50 border-blue-300 dark:bg-blue-900/20 dark:border-blue-800',
@@ -119,9 +161,19 @@ export default function PredictionDetailPage() {
     'bg-gray-50 border-gray-300 dark:bg-gray-800/20 dark:border-gray-600',
   ];
 
+  // スコアバケットからヒント取得
+  function getScoreHint(score: number): string {
+    const bucket = scoreBuckets.find(b => score >= b.scoreLow && score < b.scoreLow + 5);
+    if (!bucket || bucket.total < 5) return '';
+    return `同帯勝率${bucket.winRate}% (複${bucket.placeRate}%)`;
+  }
+
   return (
     <div className="space-y-6 animate-fadeIn">
-      <Link href="/predictions" className="text-sm text-accent hover:underline">← 予想一覧に戻る</Link>
+      <div className="flex items-center justify-between">
+        <Link href="/predictions" className="text-sm text-accent hover:underline">&larr; 予想一覧に戻る</Link>
+        <FavoriteButton isFavorite={isRaceFavorite(raceId)} onToggle={() => toggleRace(raceId)} />
+      </div>
 
       {/* レース情報ヘッダー */}
       <div className="bg-gradient-to-r from-primary to-primary-light rounded-xl p-6 text-white">
@@ -152,46 +204,145 @@ export default function PredictionDetailPage() {
         </div>
       </div>
 
+      {/* 答え合わせ (B2) - 結果確定済みの場合 */}
+      {verification && (
+        <div className="bg-card-bg border-2 border-amber-400 dark:border-amber-600 rounded-xl p-6">
+          <h2 className="text-lg font-bold mb-4">📋 答え合わせ</h2>
+
+          {/* 全体結果バッジ */}
+          <div className="flex flex-wrap gap-3 mb-4">
+            <span className={`px-4 py-2 rounded-lg text-sm font-bold ${
+              verification.winHit
+                ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+            }`}>
+              単勝: {verification.winHit ? '的中!' : '不的中'}
+            </span>
+            <span className={`px-4 py-2 rounded-lg text-sm font-bold ${
+              verification.placeHit
+                ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+            }`}>
+              複勝: {verification.placeHit ? '的中!' : '不的中'}
+            </span>
+            <span className="px-4 py-2 rounded-lg text-sm font-bold bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+              ROI: {verification.roi}%
+            </span>
+          </div>
+
+          {/* 予想 vs 実結果テーブル */}
+          <div className="overflow-x-auto mb-4">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b dark:border-gray-700 text-left">
+                  <th className="py-2 pr-2">印</th>
+                  <th className="py-2">馬番</th>
+                  <th className="py-2">馬名</th>
+                  <th className="py-2 text-right">スコア</th>
+                  <th className="py-2 text-center">実着順</th>
+                  <th className="py-2 text-center">判定</th>
+                </tr>
+              </thead>
+              <tbody>
+                {verification.pickResults.map((pick, idx) => (
+                  <tr key={pick.horseNumber} className="border-b dark:border-gray-800">
+                    <td className="py-2 pr-2 font-bold">{rankLabels[idx] || '\u2606'}</td>
+                    <td className="py-2 font-mono">{pick.horseNumber}</td>
+                    <td className="py-2">{pick.horseName}</td>
+                    <td className="py-2 text-right font-mono">{pick.score}</td>
+                    <td className="py-2 text-center font-bold">
+                      {pick.actualPosition ? `${pick.actualPosition}着` : '-'}
+                    </td>
+                    <td className="py-2 text-center">
+                      {pick.hit && (
+                        <span className="px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-xs rounded font-bold">
+                          1着!
+                        </span>
+                      )}
+                      {!pick.hit && pick.placeHit && (
+                        <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 text-xs rounded font-bold">
+                          複勝圏
+                        </span>
+                      )}
+                      {!pick.hit && !pick.placeHit && pick.actualPosition && (
+                        <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 text-xs rounded">
+                          外れ
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* 推奨馬券の的中判定 */}
+          {verification.betResults.length > 0 && (
+            <div>
+              <h3 className="text-sm font-bold text-muted mb-2">推奨馬券の結果</h3>
+              <div className="flex flex-wrap gap-2">
+                {verification.betResults.map((bet, idx) => (
+                  <span key={idx} className={`px-3 py-1.5 rounded text-xs font-medium ${
+                    bet.hit
+                      ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border border-green-300'
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-500 border border-gray-300 dark:border-gray-600'
+                  }`}>
+                    {bet.type} {bet.selections.join('-')} {bet.hit ? '的中' : '不的中'}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* サマリー */}
       <div className="bg-card-bg border border-card-border rounded-xl p-6">
-        <h2 className="text-lg font-bold mb-3">📝 予想サマリー</h2>
+        <h2 className="text-lg font-bold mb-3">予想サマリー</h2>
         <div className="whitespace-pre-line text-sm leading-relaxed">{prediction.summary}</div>
       </div>
 
       {/* トップピック */}
       <div>
-        <h2 className="text-lg font-bold mb-4">🏇 予想印</h2>
+        <h2 className="text-lg font-bold mb-4">予想印</h2>
         <div className="space-y-3">
-          {prediction.topPicks.map((pick, idx) => (
-            <div
-              key={pick.horseNumber}
-              className={`border rounded-xl p-4 ${rankColors[idx] || rankColors[5]}`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  <span className="text-lg font-bold">{rankLabels[idx] || '☆'}</span>
-                  <span className="text-xl font-bold">{pick.horseNumber}番 {pick.horseName}</span>
+          {prediction.topPicks.map((pick, idx) => {
+            const scoreHint = getScoreHint(pick.score);
+            return (
+              <div
+                key={pick.horseNumber}
+                className={`border rounded-xl p-4 ${rankColors[idx] || rankColors[5]}`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-3">
+                    <span className="text-lg font-bold">{rankLabels[idx] || '\u2606'}</span>
+                    <span className="text-xl font-bold">{pick.horseNumber}番 {pick.horseName}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-sm text-muted">スコア</span>
+                    <span className="ml-2 text-lg font-bold">{pick.score}</span>
+                    {/* B1: スコアの意味表示 */}
+                    {scoreHint && (
+                      <div className="text-xs text-accent mt-0.5">{scoreHint}</div>
+                    )}
+                  </div>
                 </div>
-                <div className="text-right">
-                  <span className="text-sm text-muted">スコア</span>
-                  <span className="ml-2 text-lg font-bold">{pick.score}</span>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {pick.reasons.map((reason, rIdx) => (
+                    <span key={rIdx} className="text-xs bg-white/60 dark:bg-black/20 px-2 py-1 rounded">
+                      {reason}
+                    </span>
+                  ))}
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2 mt-2">
-                {pick.reasons.map((reason, rIdx) => (
-                  <span key={rIdx} className="text-xs bg-white/60 dark:bg-black/20 px-2 py-1 rounded">
-                    {reason}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
       {/* レース分析 */}
       <div className="bg-card-bg border border-card-border rounded-xl p-6">
-        <h2 className="text-lg font-bold mb-4">📊 レース分析</h2>
+        <h2 className="text-lg font-bold mb-4">レース分析</h2>
         <div className="space-y-4">
           <div>
             <h3 className="text-sm font-bold text-muted mb-1">馬場バイアス</h3>
@@ -207,7 +358,7 @@ export default function PredictionDetailPage() {
               <ul className="space-y-1">
                 {prediction.analysis.keyFactors.map((f, i) => (
                   <li key={i} className="text-sm flex items-start gap-2">
-                    <span className="text-accent">●</span> {f}
+                    <span className="text-accent">&#9679;</span> {f}
                   </li>
                 ))}
               </ul>
@@ -219,7 +370,7 @@ export default function PredictionDetailPage() {
               <ul className="space-y-1">
                 {prediction.analysis.riskFactors.map((f, i) => (
                   <li key={i} className="text-sm flex items-start gap-2">
-                    <span className="text-warning">⚠</span> {f}
+                    <span className="text-warning">&#9888;</span> {f}
                   </li>
                 ))}
               </ul>
@@ -231,9 +382,8 @@ export default function PredictionDetailPage() {
       {/* 馬券戦略 */}
       {prediction.analysis.bettingStrategy && (
         <div className="bg-card-bg border border-card-border rounded-xl p-6">
-          <h2 className="text-lg font-bold mb-4">🎯 馬券戦略</h2>
+          <h2 className="text-lg font-bold mb-4">馬券戦略</h2>
           <div className="space-y-4">
-            {/* パターン表示 */}
             <div className="flex flex-wrap items-center gap-3">
               <span className={`px-4 py-2 rounded-lg text-sm font-bold ${
                 prediction.analysis.bettingStrategy.pattern === '一強'
@@ -259,12 +409,10 @@ export default function PredictionDetailPage() {
 
             <p className="text-sm text-muted">{prediction.analysis.bettingStrategy.patternLabel}</p>
 
-            {/* 戦略テキスト */}
             <div className="bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
               <p className="text-sm leading-relaxed">{prediction.analysis.bettingStrategy.recommendation}</p>
             </div>
 
-            {/* 推奨・非推奨 */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <h4 className="text-xs font-bold text-muted mb-2">推奨券種</h4>
@@ -290,7 +438,6 @@ export default function PredictionDetailPage() {
               )}
             </div>
 
-            {/* 資金配分 */}
             <div className="bg-gray-50 dark:bg-gray-800/30 rounded-lg p-3">
               <h4 className="text-xs font-bold text-muted mb-1">資金配分の目安</h4>
               <p className="text-sm">{prediction.analysis.bettingStrategy.budgetAdvice}</p>
@@ -302,7 +449,7 @@ export default function PredictionDetailPage() {
       {/* 推奨馬券 */}
       {prediction.recommendedBets.length > 0 && (
         <div>
-          <h2 className="text-lg font-bold mb-4">🎫 推奨馬券</h2>
+          <h2 className="text-lg font-bold mb-4">推奨馬券</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {prediction.recommendedBets.map((bet, idx) => {
               const isMain = bet.reasoning.startsWith('【主力】');
@@ -333,6 +480,7 @@ export default function PredictionDetailPage() {
                     </div>
                     <span className="text-sm text-muted">
                       EV: {bet.expectedValue.toFixed(2)}
+                      {bet.odds ? ` (${bet.odds.toFixed(1)}倍)` : ''}
                     </span>
                   </div>
                   <p className="text-xl font-bold mb-2">
@@ -346,6 +494,14 @@ export default function PredictionDetailPage() {
             })}
           </div>
         </div>
+      )}
+
+      {/* B5: 金額シミュレーション */}
+      {prediction.recommendedBets.length > 0 && prediction.analysis.bettingStrategy && (
+        <BudgetSimulator
+          bets={prediction.recommendedBets}
+          riskLevel={prediction.analysis.bettingStrategy.riskLevel}
+        />
       )}
 
       {/* 出馬表リンク */}

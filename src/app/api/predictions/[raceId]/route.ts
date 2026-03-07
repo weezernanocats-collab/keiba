@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getPredictionByRaceId, getRaceById, getHorseById, getHorsePastPerformances, getJockeyStats, savePrediction } from '@/lib/queries';
-import { dbRun } from '@/lib/database';
+import { dbRun, dbAll } from '@/lib/database';
 import { generatePrediction } from '@/lib/prediction-engine';
 import { seedAllData } from '@/lib/seed-data';
 import type { RaceEntry } from '@/types';
@@ -89,7 +89,79 @@ export async function GET(
       topPicks: augmentedPicks,
     };
 
-    return NextResponse.json({ prediction: augmentedPrediction, race });
+    // 結果確定済みの場合は答え合わせデータを追加
+    let verification = null;
+    if (race.status === '結果確定') {
+      try {
+        const predResult = await dbAll<{
+          win_hit: number;
+          place_hit: number;
+          top3_in_top6: number;
+          roi: number;
+        }>(
+          'SELECT win_hit, place_hit, top3_in_top6, roi FROM prediction_results WHERE race_id = ?',
+          [raceId],
+        );
+
+        // 出走馬の着順マップ
+        const entryResults = new Map<number, number>();
+        for (const entry of race.entries) {
+          if (entry.result?.position) {
+            entryResults.set(entry.horseNumber, entry.result.position);
+          }
+        }
+
+        // 予想vs結果の対比
+        const pickResults = augmentedPicks.map(pick => ({
+          ...pick,
+          actualPosition: entryResults.get(pick.horseNumber) ?? null,
+          hit: entryResults.get(pick.horseNumber) === 1,
+          placeHit: (entryResults.get(pick.horseNumber) ?? 99) <= 3,
+        }));
+
+        // 推奨馬券の的中判定
+        const actualTop3 = [...entryResults.entries()]
+          .sort((a, b) => a[1] - b[1])
+          .slice(0, 3)
+          .map(([num]) => num);
+        const actualWinner = actualTop3[0];
+
+        const betResults = augmentedPrediction.recommendedBets.map((bet: { type: string; selections: number[] }) => {
+          let hitStatus = false;
+          if (bet.type === '単勝') {
+            hitStatus = bet.selections[0] === actualWinner;
+          } else if (bet.type === '複勝') {
+            hitStatus = actualTop3.includes(bet.selections[0]);
+          } else if (bet.type === '馬連' || bet.type === 'ワイド') {
+            hitStatus = bet.selections.every(s => actualTop3.includes(s));
+          } else if (bet.type === '馬単') {
+            hitStatus = bet.selections[0] === actualWinner && actualTop3.includes(bet.selections[1]);
+          } else if (bet.type === '三連複') {
+            hitStatus = bet.selections.every(s => actualTop3.includes(s));
+          } else if (bet.type === '三連単') {
+            hitStatus = bet.selections.length >= 3 &&
+              bet.selections[0] === actualTop3[0] &&
+              bet.selections[1] === actualTop3[1] &&
+              bet.selections[2] === actualTop3[2];
+          }
+          return { ...bet, hit: hitStatus };
+        });
+
+        verification = {
+          winHit: predResult[0]?.win_hit === 1,
+          placeHit: predResult[0]?.place_hit === 1,
+          top3InTop6: predResult[0]?.top3_in_top6 ?? 0,
+          roi: predResult[0]?.roi ?? 0,
+          pickResults,
+          betResults,
+          actualTop3,
+        };
+      } catch (verErr) {
+        console.error('答え合わせデータ取得エラー:', verErr);
+      }
+    }
+
+    return NextResponse.json({ prediction: augmentedPrediction, race, verification });
   } catch (error) {
     console.error('予想API エラー:', error);
     return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });
