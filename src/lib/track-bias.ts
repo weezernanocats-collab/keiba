@@ -56,10 +56,13 @@ export async function calculateTodayTrackBias(
        re.post_position,
        re.horse_number,
        re.result_position,
-       (SELECT COUNT(*) FROM race_entries re2 WHERE re2.race_id = re.race_id) as field_size,
+       fs.field_size,
        re.result_corner_positions
      FROM race_entries re
      JOIN races r ON re.race_id = r.id
+     JOIN (
+       SELECT race_id, COUNT(*) as field_size FROM race_entries GROUP BY race_id
+     ) fs ON fs.race_id = re.race_id
      WHERE r.racecourse_name = ?
        AND r.date = ?
        AND r.status = '結果確定'

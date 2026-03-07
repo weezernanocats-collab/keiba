@@ -104,57 +104,56 @@ export async function buildRaceContext(
   month: number,
   horses: { horseId: string; fatherName: string; jockeyId: string; trainerName: string }[],
 ): Promise<RaceHistoricalContext> {
-  const courseDistStats = await getCourseDistanceStats(racecourseName, trackType, distance);
+  const uniqueSires = [...new Set(horses.map(h => h.fatherName).filter(Boolean))];
+  const uniqueTrainers = [...new Set(horses.map(h => h.trainerName).filter(Boolean))];
+  const uniqueJockeys = [...new Set(horses.map(h => h.jockeyId).filter(Boolean))];
+  const uniqueJTKeys = [...new Set(
+    horses.filter(h => h.jockeyId && h.trainerName).map(h => `${h.jockeyId}__${h.trainerName}`)
+  )];
+
+  // 独立したクエリを全て並列実行
+  const [
+    courseDistStats,
+    sireResults,
+    jtResults,
+    trainerResults,
+    seasonalResults,
+    secondStartResults,
+    dynamicStdTime,
+    jockeyFormResults,
+    paceProfile,
+  ] = await Promise.all([
+    getCourseDistanceStats(racecourseName, trackType, distance),
+    Promise.all(uniqueSires.map(async s => [s, await getSireStats(s)] as const)),
+    Promise.all(uniqueJTKeys.map(async key => {
+      const [jid, tname] = key.split('__');
+      return [key, await getJockeyTrainerCombo(jid, tname)] as const;
+    })),
+    Promise.all(uniqueTrainers.map(async t => [t, await getTrainerStats(t)] as const)),
+    Promise.all(horses.map(async h => [h.horseId, await getHorseSeasonalStats(h.horseId)] as const)),
+    Promise.all(horses.map(async h => [h.horseId, await getSecondStartBonus(h.horseId)] as const)),
+    getDynamicStandardTimes(racecourseName, trackType, distance, '良'),
+    Promise.all(uniqueJockeys.map(async jid => [jid, await getJockeyRecentForm(jid)] as const)),
+    getPaceProfile(racecourseName, trackType, distance),
+  ]);
 
   const sireStatsMap = new Map<string, SireStats>();
-  const uniqueSires = [...new Set(horses.map(h => h.fatherName).filter(Boolean))];
-  for (const sire of uniqueSires) {
-    const stats = await getSireStats(sire);
-    if (stats) sireStatsMap.set(sire, stats);
-  }
+  for (const [name, stats] of sireResults) { if (stats) sireStatsMap.set(name, stats); }
 
   const jockeyTrainerMap = new Map<string, JockeyTrainerCombo>();
-  for (const h of horses) {
-    if (h.jockeyId && h.trainerName) {
-      const key = `${h.jockeyId}__${h.trainerName}`;
-      if (!jockeyTrainerMap.has(key)) {
-        const combo = await getJockeyTrainerCombo(h.jockeyId, h.trainerName);
-        if (combo) jockeyTrainerMap.set(key, combo);
-      }
-    }
-  }
+  for (const [key, combo] of jtResults) { if (combo) jockeyTrainerMap.set(key, combo); }
 
   const trainerStatsMap = new Map<string, TrainerStats>();
-  const uniqueTrainers = [...new Set(horses.map(h => h.trainerName).filter(Boolean))];
-  for (const trainer of uniqueTrainers) {
-    const stats = await getTrainerStats(trainer);
-    if (stats) trainerStatsMap.set(trainer, stats);
-  }
+  for (const [name, stats] of trainerResults) { if (stats) trainerStatsMap.set(name, stats); }
 
   const seasonalMap = new Map<string, SeasonalStats[]>();
-  for (const h of horses) {
-    const stats = await getHorseSeasonalStats(h.horseId);
-    if (stats.length > 0) seasonalMap.set(h.horseId, stats);
-  }
+  for (const [id, stats] of seasonalResults) { if (stats.length > 0) seasonalMap.set(id, stats); }
 
   const secondStartMap = new Map<string, SecondStartBonus | null>();
-  for (const h of horses) {
-    secondStartMap.set(h.horseId, await getSecondStartBonus(h.horseId));
-  }
+  for (const [id, bonus] of secondStartResults) { secondStartMap.set(id, bonus); }
 
-  // 動的基準タイム（コース×距離×馬場）
-  const dynamicStdTime = await getDynamicStandardTimes(racecourseName, trackType, distance, '良');
-
-  // 騎手直近フォーム
   const jockeyFormMap = new Map<string, JockeyRecentForm>();
-  const uniqueJockeys = [...new Set(horses.map(h => h.jockeyId).filter(Boolean))];
-  for (const jid of uniqueJockeys) {
-    const form = await getJockeyRecentForm(jid);
-    if (form) jockeyFormMap.set(jid, form);
-  }
-
-  // ペースプロファイル（コース×トラック×距離帯の前残り傾向）
-  const paceProfile = await getPaceProfile(racecourseName, trackType, distance);
+  for (const [jid, form] of jockeyFormResults) { if (form) jockeyFormMap.set(jid, form); }
 
   return { courseDistStats, sireStatsMap, jockeyTrainerMap, trainerStatsMap, seasonalMap, secondStartMap, dynamicStdTime, jockeyFormMap, paceProfile };
 }

@@ -376,28 +376,32 @@ async function executeMorningFetch(date: string): Promise<void> {
       try {
         const raceData = await getRaceById(detail.id);
         if (!raceData?.entries?.length) continue;
-        const horseInputs = [];
-        for (const re of raceData.entries as import('@/types').RaceEntry[]) {
-          const pastPerfs = await getHorsePastPerformances(re.horseId, 100);
-          const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
-          const jockeyStats = await getJockeyStats(re.jockeyId);
-          const trainerStats = await getTrainerStats(re.trainerName);
-          const fatherName = horseData?.father_name || '';
-          const [sireTrackWR, jockeyDistWR, jockeyCourseWR] = await Promise.all([
-            getSireTrackWinRate(fatherName, detail.trackType),
-            getJockeyDistanceWinRate(re.jockeyId, detail.distance),
-            getJockeyCourseWinRate(re.jockeyId, detail.racecourseName),
-          ]);
-          horseInputs.push({
-            entry: re, pastPerformances: pastPerfs,
-            jockeyWinRate: jockeyStats.winRate, jockeyPlaceRate: jockeyStats.placeRate,
-            fatherName,
-            trainerWinRate: trainerStats.winRate, trainerPlaceRate: trainerStats.placeRate,
-            sireTrackWinRate: sireTrackWR,
-            jockeyDistanceWinRate: jockeyDistWR,
-            jockeyCourseWinRate: jockeyCourseWR,
-          });
-        }
+        // 全馬のデータを並列取得
+        const horseInputs = await Promise.all(
+          (raceData.entries as import('@/types').RaceEntry[]).map(async (re) => {
+            const [pastPerfs, horseData, jockeyStats, trainerStats] = await Promise.all([
+              getHorsePastPerformances(re.horseId, 100),
+              getHorseById(re.horseId) as Promise<{ father_name?: string } | null>,
+              getJockeyStats(re.jockeyId),
+              getTrainerStats(re.trainerName),
+            ]);
+            const fatherName = horseData?.father_name || '';
+            const [sireTrackWR, jockeyDistWR, jockeyCourseWR] = await Promise.all([
+              getSireTrackWinRate(fatherName, detail.trackType),
+              getJockeyDistanceWinRate(re.jockeyId, detail.distance),
+              getJockeyCourseWinRate(re.jockeyId, detail.racecourseName),
+            ]);
+            return {
+              entry: re, pastPerformances: pastPerfs,
+              jockeyWinRate: jockeyStats.winRate, jockeyPlaceRate: jockeyStats.placeRate,
+              fatherName,
+              trainerWinRate: trainerStats.winRate, trainerPlaceRate: trainerStats.placeRate,
+              sireTrackWinRate: sireTrackWR,
+              jockeyDistanceWinRate: jockeyDistWR,
+              jockeyCourseWinRate: jockeyCourseWR,
+            };
+          })
+        );
         const prediction = await generatePrediction(
           detail.id, detail.name, date, detail.trackType, detail.distance,
           detail.trackCondition, detail.racecourseName, detail.grade, horseInputs,
