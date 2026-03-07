@@ -30,7 +30,12 @@ export default function BudgetSimulator({ bets, riskLevel }: BudgetSimulatorProp
 
   return (
     <div className="bg-card-bg border border-card-border rounded-xl p-6">
-      <h2 className="text-lg font-bold mb-4">💰 金額シミュレーション</h2>
+      <h2 className="text-lg font-bold mb-2">💰 金額シミュレーション</h2>
+      <p className="text-sm text-muted mb-4">
+        上の「推奨馬券」を実際に購入する場合の配分例です。
+        投資金額を入力すると、AIの戦略（リスク: {riskLevel === 'low' ? '低' : riskLevel === 'medium' ? '中' : '高'}）に基づいて
+        主力・バリュー・押さえに自動配分します。
+      </p>
 
       <div className="flex items-center gap-3 mb-4">
         <label className="text-sm font-medium whitespace-nowrap">投資金額:</label>
@@ -106,6 +111,7 @@ export default function BudgetSimulator({ bets, riskLevel }: BudgetSimulatorProp
       </div>
 
       {/* 回収シナリオ */}
+      <h3 className="text-sm font-bold text-muted mb-2">回収シナリオ</h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800 rounded-lg p-3">
           <div className="text-xs text-green-600 dark:text-green-400 font-medium">全的中時</div>

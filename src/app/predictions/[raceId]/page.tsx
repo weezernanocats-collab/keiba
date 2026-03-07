@@ -172,7 +172,7 @@ export default function PredictionDetailPage() {
     <div className="space-y-6 animate-fadeIn">
       <div className="flex items-center justify-between">
         <Link href="/predictions" className="text-sm text-accent hover:underline">&larr; 予想一覧に戻る</Link>
-        <FavoriteButton isFavorite={isRaceFavorite(raceId)} onToggle={() => toggleRace(raceId)} />
+        <FavoriteButton isFavorite={isRaceFavorite(raceId)} onToggle={() => toggleRace(raceId)} showLabel />
       </div>
 
       {/* レース情報ヘッダー */}

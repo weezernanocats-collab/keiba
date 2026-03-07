@@ -126,7 +126,7 @@ export default function RaceDetailPage() {
         <div className="flex flex-wrap items-start gap-3 mb-3">
           <GradeBadge grade={race.grade} />
           <h1 className="text-2xl font-bold">{race.name}</h1>
-          <FavoriteButton isFavorite={isRaceFavorite(raceId)} onToggle={() => toggleRace(raceId)} />
+          <FavoriteButton isFavorite={isRaceFavorite(raceId)} onToggle={() => toggleRace(raceId)} showLabel />
         </div>
         <div className="flex flex-wrap gap-4 text-sm text-muted">
           <span>📅 {race.date} {race.time || ''}</span>

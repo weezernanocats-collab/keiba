@@ -14,10 +14,10 @@ export async function GET(_request: NextRequest) {
       race_id: string;
       win_hit: number;
       place_hit: number;
-      roi: number;
+      bet_roi: number;
       evaluated_at: string;
     }>(
-      `SELECT pr.race_id, pr.win_hit, pr.place_hit, pr.roi, pr.evaluated_at
+      `SELECT pr.race_id, pr.win_hit, pr.place_hit, pr.bet_roi, pr.evaluated_at
        FROM prediction_results pr
        ORDER BY pr.evaluated_at ASC`,
       [],
@@ -50,7 +50,7 @@ export async function GET(_request: NextRequest) {
       const window = results.slice(i - windowSize + 1, i + 1);
       const winRate = window.reduce((s, r) => s + r.win_hit, 0) / windowSize * 100;
       const placeRate = window.reduce((s, r) => s + r.place_hit, 0) / windowSize * 100;
-      const avgRoi = window.reduce((s, r) => s + (r.roi || 0), 0) / windowSize;
+      const avgRoi = window.reduce((s, r) => s + (r.bet_roi || 0), 0) / windowSize;
       const raceInfo = raceInfoMap.get(results[i].race_id);
 
       rolling.push({
@@ -113,7 +113,7 @@ export async function GET(_request: NextRequest) {
     // 全体サマリ
     const totalWin = results.reduce((s, r) => s + r.win_hit, 0);
     const totalPlace = results.reduce((s, r) => s + r.place_hit, 0);
-    const avgRoi = results.length > 0 ? results.reduce((s, r) => s + (r.roi || 0), 0) / results.length : 0;
+    const avgRoi = results.length > 0 ? results.reduce((s, r) => s + (r.bet_roi || 0), 0) / results.length : 0;
 
     return NextResponse.json({
       summary: {

@@ -134,7 +134,7 @@ export default function HorseDetailPage() {
       <div className="bg-card-bg border border-card-border rounded-xl p-6">
         <div className="flex items-center gap-3">
           <h1 className="text-3xl font-bold mb-1">{horse.name}</h1>
-          <FavoriteButton isFavorite={isHorseFavorite(horseId)} onToggle={() => toggleHorse(horseId)} />
+          <FavoriteButton isFavorite={isHorseFavorite(horseId)} onToggle={() => toggleHorse(horseId)} showLabel />
         </div>
         {horse.name_en && <p className="text-muted text-sm mb-4">{horse.name_en}</p>}
 
