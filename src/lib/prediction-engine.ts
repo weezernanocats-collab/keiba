@@ -456,7 +456,7 @@ export async function generatePrediction(
   const mlPredictions = await callMLPredict(mlInputs, { trackType, distance });
 
   if (mlPredictions) {
-    const ML_BLEND_WEIGHT = parseFloat(process.env.ML_BLEND_WEIGHT || '0.40');
+    const ML_BLEND_WEIGHT = parseFloat(process.env.ML_BLEND_WEIGHT || '0.65');
     for (const sh of scoredHorses) {
       const ml = mlPredictions[sh.entry.horseNumber];
       if (ml) {
