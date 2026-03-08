@@ -114,8 +114,8 @@ const DEFAULT_WEIGHTS: Record<string, number> = {
   jockeyTrainerCombo: 0.02,
   seasonalPattern: 0.02,
   handicapAdvantage: 0.01,
-  // 市場シグナル (v6.1: log-oddsブレンドで別途統合するため低減)
-  marketOdds: 0.01,
+  // 市場シグナル
+  marketOdds: 0.03,
   marginCompetitiveness: 0.01,
   weatherAptitude: 0.02,  // v6.0: +0.01（historicalPostBiasから再配分）
 };
