@@ -157,12 +157,23 @@ export interface PredictionPick {
   reasons: string[];
 }
 
+export interface MarketAnalysisEntry {
+  modelProb: number;
+  marketProb: number;
+  blendedProb: number;
+  disagreement: number;
+  isValue: boolean;
+}
+
 export interface RaceAnalysis {
   trackBias: string;
   paceAnalysis: string;
   keyFactors: string[];
   riskFactors: string[];
   bettingStrategy?: BettingStrategy;
+  marketAnalysis?: Record<number, MarketAnalysisEntry>;
+  valueHorses?: number[];
+  overround?: number;
 }
 
 export type RacePattern = '一強' | '二強' | '三つ巴' | '混戦' | '大混戦';

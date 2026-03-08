@@ -85,6 +85,12 @@ function parseCornerDelta(cornerStr: string | undefined): number {
   return parts[parts.length - 2] - parts[parts.length - 1];
 }
 import { dbAll } from './database';
+import {
+  oddsToImpliedProbabilities,
+  blendProbabilities,
+  computeDisagreement,
+  findValueHorses,
+} from './market-blend';
 
 // デフォルト重み設定 (v5.2: v5.1ベース + 着差/天候を最小ウェイトで追加, 合計1.00)
 // 新ファクターの真価は未来レースの自動校正で測定する
@@ -108,8 +114,8 @@ const DEFAULT_WEIGHTS: Record<string, number> = {
   jockeyTrainerCombo: 0.02,
   seasonalPattern: 0.02,
   handicapAdvantage: 0.01,
-  // 市場シグナル
-  marketOdds: 0.03,
+  // 市場シグナル (v6.1: log-oddsブレンドで別途統合するため低減)
+  marketOdds: 0.01,
   marginCompetitiveness: 0.01,
   weatherAptitude: 0.02,  // v6.0: +0.01（historicalPostBiasから再配分）
 };
@@ -461,6 +467,42 @@ export async function generatePrediction(
   }
   // --- ML推論ここまで ---
 
+  // --- 市場オッズブレンド (v6.1) ---
+  // softmaxでモデル確率を算出
+  const modelWinProbs = estimateWinProbabilities(scoredHorses);
+  // 馬番→確率のMapに変換
+  const modelProbsByNumber = new Map<number, number>();
+  for (const [sh, prob] of modelWinProbs) {
+    modelProbsByNumber.set(sh.entry.horseNumber, prob);
+  }
+
+  // 市場暗示確率を算出（oddsMapは既に上で取得済み）
+  const { probs: marketProbsByNumber, overround } = oddsToImpliedProbabilities(oddsMap);
+
+  // ブレンド確率・乖離度・妙味馬
+  let blendedProbsByNumber: Map<number, number>;
+  let disagreements: Map<number, import('./market-blend').MarketDisagreement>;
+  let valueHorseNumbers: number[];
+
+  if (marketProbsByNumber.size > 0) {
+    blendedProbsByNumber = blendProbabilities(modelProbsByNumber, marketProbsByNumber, 0.65);
+    disagreements = computeDisagreement(modelProbsByNumber, marketProbsByNumber, blendedProbsByNumber, 0.03);
+    valueHorseNumbers = findValueHorses(disagreements, 0.03);
+
+    // 妙味馬に理由を追加
+    for (const sh of scoredHorses) {
+      const d = disagreements.get(sh.entry.horseNumber);
+      if (d && d.isValueHorse) {
+        sh.reasons.push(`妙味あり: モデル${(d.modelProb * 100).toFixed(1)}% vs 市場${(d.marketProb * 100).toFixed(1)}%`);
+      }
+    }
+  } else {
+    blendedProbsByNumber = modelProbsByNumber;
+    disagreements = new Map();
+    valueHorseNumbers = [];
+  }
+  // --- 市場オッズブレンドここまで ---
+
   // トップピック生成
   const topPicks: PredictionPick[] = scoredHorses.slice(0, 6).map((sh, idx) => ({
     rank: idx + 1,
@@ -501,14 +543,31 @@ export async function generatePrediction(
   (analysis as any).horseScores = horseScores;
 
   // 各馬のsoftmax確率を算出・保存（Brier Score / キャリブレーション評価用）
-  const winProbs = estimateWinProbabilities(scoredHorses);
   const winProbabilities: Record<number, number> = {};
   for (const sh of scoredHorses) {
-    const prob = winProbs.get(sh) || 0;
+    // ブレンド確率があればそちらを使用、なければモデル確率
+    const prob = blendedProbsByNumber.get(sh.entry.horseNumber) || modelProbsByNumber.get(sh.entry.horseNumber) || 0;
     winProbabilities[sh.entry.horseNumber] = Math.round(prob * 10000) / 10000;
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (analysis as any).winProbabilities = winProbabilities;
+
+  // 市場分析データをanalysisに格納
+  if (disagreements.size > 0) {
+    const marketAnalysis: Record<number, { modelProb: number; marketProb: number; blendedProb: number; disagreement: number; isValue: boolean }> = {};
+    for (const [hn, d] of disagreements) {
+      marketAnalysis[hn] = {
+        modelProb: Math.round(d.modelProb * 10000) / 10000,
+        marketProb: Math.round(d.marketProb * 10000) / 10000,
+        blendedProb: Math.round(d.blendedProb * 10000) / 10000,
+        disagreement: Math.round(d.disagreement * 10000) / 10000,
+        isValue: d.isValueHorse,
+      };
+    }
+    analysis.marketAnalysis = marketAnalysis;
+    analysis.valueHorses = valueHorseNumbers;
+    analysis.overround = Math.round(overround * 10000) / 10000;
+  }
 
   // 信頼度算出
   const confidence = calculateConfidence(scoredHorses, ctx);
@@ -517,8 +576,8 @@ export async function generatePrediction(
   const bettingStrategy = generateBettingStrategy(scoredHorses, confidence);
   analysis.bettingStrategy = bettingStrategy;
 
-  // 推奨馬券（戦略ベース）
-  const recommendedBets = generateBetRecommendations(scoredHorses, confidence, bettingStrategy, oddsMap);
+  // 推奨馬券（戦略ベース + ブレンド確率）
+  const recommendedBets = generateBetRecommendations(scoredHorses, confidence, bettingStrategy, oddsMap, blendedProbsByNumber);
 
   // サマリー生成
   const summary = generateSummary(topPicks, analysis, raceName, confidence, todayBias, options?.isAfternoon);
@@ -1760,11 +1819,24 @@ function generateBetRecommendations(
   confidence: number,
   strategy: BettingStrategy,
   oddsMap?: Map<number, number>,
+  precomputedProbs?: Map<number, number>,
 ): RecommendedBet[] {
   const bets: RecommendedBet[] = [];
   if (scoredHorses.length < 3) return bets;
 
-  const winProbs = estimateWinProbabilities(scoredHorses);
+  // ブレンド確率が渡されていればそちらを使用、なければsoftmaxで算出
+  let winProbs: Map<ScoredHorse, number>;
+  if (precomputedProbs && precomputedProbs.size > 0) {
+    winProbs = new Map<ScoredHorse, number>();
+    for (const sh of scoredHorses) {
+      const prob = precomputedProbs.get(sh.entry.horseNumber);
+      if (prob !== undefined) {
+        winProbs.set(sh, prob);
+      }
+    }
+  } else {
+    winProbs = estimateWinProbabilities(scoredHorses);
+  }
   const top = scoredHorses[0];
   const second = scoredHorses[1];
   const third = scoredHorses[2];
@@ -2170,12 +2242,28 @@ function generateSummary(
     parts.push(`【注意点】${analysis.riskFactors.join(' / ')}`);
   }
 
+  // 妙味馬サマリー
+  if (analysis.valueHorses && analysis.valueHorses.length > 0 && analysis.marketAnalysis) {
+    parts.push('');
+    const valueNames = analysis.valueHorses.slice(0, 3).map(hn => {
+      const pick = topPicks.find(p => p.horseNumber === hn);
+      const ma = analysis.marketAnalysis![hn];
+      if (pick && ma) {
+        return `${pick.horseName}（モデル${(ma.modelProb * 100).toFixed(1)}% vs 市場${(ma.marketProb * 100).toFixed(1)}%）`;
+      }
+      return null;
+    }).filter(Boolean);
+    if (valueNames.length > 0) {
+      parts.push(`【妙味馬】${valueNames.join('、')}はオッズ以上の実力と判断`);
+    }
+  }
+
   parts.push('');
   parts.push(`AI信頼度: ${confidence}%`);
   if (isAfternoon) {
-    parts.push('※午後更新版: 午前の馬場傾向を反映した19ファクター分析');
+    parts.push('※午後更新版: 午前の馬場傾向を反映した19ファクター分析 + 市場オッズブレンド');
   } else {
-    parts.push('※統計分析v3: 16ファクター分析（血統・騎手×調教師・季節パターン含む）');
+    parts.push('※統計分析v3: 16ファクター分析（血統・騎手×調教師・季節パターン含む）+ 市場オッズブレンド');
   }
 
   return parts.join('\n');

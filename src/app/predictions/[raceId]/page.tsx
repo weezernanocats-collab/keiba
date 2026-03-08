@@ -7,6 +7,7 @@ import LoadingSpinner from '@/components/LoadingSpinner';
 import FavoriteButton from '@/components/FavoriteButton';
 import BudgetSimulator from '@/components/BudgetSimulator';
 import MonteCarloSimulator from '@/components/MonteCarloSimulator';
+import ModelVsMarket from '@/components/ModelVsMarket';
 import { useFavorites } from '@/lib/use-favorites';
 
 interface Pick {
@@ -17,6 +18,14 @@ interface Pick {
   reasons: string[];
 }
 
+interface MarketEntry {
+  modelProb: number;
+  marketProb: number;
+  blendedProb: number;
+  disagreement: number;
+  isValue: boolean;
+}
+
 interface Analysis {
   trackBias: string;
   paceAnalysis: string;
@@ -24,6 +33,9 @@ interface Analysis {
   riskFactors: string[];
   bettingStrategy?: BettingStrategy;
   winProbabilities?: Record<number, number>;
+  marketAnalysis?: Record<number, MarketEntry>;
+  valueHorses?: number[];
+  overround?: number;
 }
 
 interface BettingStrategy {
@@ -322,6 +334,11 @@ export default function PredictionDetailPage() {
                   <div className="flex items-center gap-3">
                     <span className="text-lg font-bold">{rankLabels[idx] || '\u2606'}</span>
                     <span className="text-xl font-bold">{pick.horseNumber}番 {pick.horseName}</span>
+                    {prediction.analysis.valueHorses?.includes(pick.horseNumber) && (
+                      <span className="text-xs bg-amber-100 dark:bg-amber-800/40 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded font-bold">
+                        妙味あり
+                      </span>
+                    )}
                   </div>
                   <div className="text-right">
                     <span className="text-sm text-muted">スコア</span>
@@ -344,6 +361,18 @@ export default function PredictionDetailPage() {
           })}
         </div>
       </div>
+
+      {/* モデル vs 市場オッズ */}
+      {prediction.analysis.marketAnalysis && prediction.analysis.valueHorses && prediction.analysis.overround && (
+        <ModelVsMarket
+          marketAnalysis={prediction.analysis.marketAnalysis}
+          valueHorses={prediction.analysis.valueHorses}
+          overround={prediction.analysis.overround}
+          horseNames={Object.fromEntries(
+            prediction.topPicks.map(p => [p.horseNumber, p.horseName])
+          )}
+        />
+      )}
 
       {/* レース分析 */}
       <div className="bg-card-bg border border-card-border rounded-xl p-6">
