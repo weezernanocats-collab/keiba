@@ -904,6 +904,7 @@ async function processChunkPhase(
           if (odds.win.length > 0) {
             for (const w of odds.win) {
               await upsertOdds(race.id, '単勝', [w.horseNumber], w.odds);
+              await upsertRaceEntryOdds(race.id, w.horseNumber, w.odds, 0);
               state.stats.oddsScraped++;
             }
             for (const p of odds.place) {

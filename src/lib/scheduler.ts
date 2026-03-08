@@ -575,6 +575,7 @@ async function executeOddsFetch(date: string): Promise<void> {
         const snapshotTime = new Date().toISOString();
         for (const w of odds.win) {
           await upsertOdds(race.id, '単勝', [w.horseNumber], w.odds);
+          await upsertRaceEntryOdds(race.id, w.horseNumber, w.odds, 0);
           // 時系列スナップショット保存
           await insertOddsSnapshot(race.id, w.horseNumber, w.odds, snapshotTime);
         }
