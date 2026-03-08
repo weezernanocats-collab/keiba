@@ -498,6 +498,116 @@ export async function upsertRaceEntryOdds(raceId: string, horseNumber: number, o
   `, [odds, popularity, raceId, horseNumber]);
 }
 
+// ==================== オッズ時系列 ====================
+
+export async function insertOddsSnapshot(raceId: string, horseNumber: number, odds: number, snapshotTime: string) {
+  await dbRun(`
+    INSERT INTO odds_snapshots (race_id, horse_number, odds, snapshot_time)
+    VALUES (?, ?, ?, ?)
+  `, [raceId, horseNumber, odds, snapshotTime]);
+}
+
+export async function getOddsSnapshots(raceId: string): Promise<{ horse_number: number; odds: number; snapshot_time: string }[]> {
+  return dbAll(`
+    SELECT horse_number, odds, snapshot_time
+    FROM odds_snapshots
+    WHERE race_id = ?
+    ORDER BY horse_number, snapshot_time
+  `, [raceId]) as Promise<{ horse_number: number; odds: number; snapshot_time: string }[]>;
+}
+
+export interface OddsMovement {
+  horseNumber: number;
+  firstOdds: number;
+  lastOdds: number;
+  oddsChange: number;
+  oddsChangeRate: number;
+  snapshotCount: number;
+  volatility: number;
+}
+
+export async function getOddsMovement(raceId: string): Promise<OddsMovement[]> {
+  const snapshots = await getOddsSnapshots(raceId);
+  if (snapshots.length === 0) return [];
+
+  const byHorse = new Map<number, { odds: number; time: string }[]>();
+  for (const s of snapshots) {
+    const arr = byHorse.get(s.horse_number) || [];
+    arr.push({ odds: s.odds, time: s.snapshot_time });
+    byHorse.set(s.horse_number, arr);
+  }
+
+  const result: OddsMovement[] = [];
+  for (const [horseNumber, entries] of byHorse) {
+    if (entries.length < 2) continue;
+    entries.sort((a, b) => a.time.localeCompare(b.time));
+
+    const firstOdds = entries[0].odds;
+    const lastOdds = entries[entries.length - 1].odds;
+    const oddsValues = entries.map(e => e.odds);
+    const mean = oddsValues.reduce((s, v) => s + v, 0) / oddsValues.length;
+    const variance = oddsValues.reduce((s, v) => s + (v - mean) ** 2, 0) / oddsValues.length;
+
+    result.push({
+      horseNumber,
+      firstOdds,
+      lastOdds,
+      oddsChange: lastOdds - firstOdds,
+      oddsChangeRate: firstOdds > 0 ? (lastOdds - firstOdds) / firstOdds : 0,
+      snapshotCount: entries.length,
+      volatility: Math.sqrt(variance),
+    });
+  }
+
+  return result;
+}
+
+// ==================== ラップタイム ====================
+
+export async function upsertRaceLapTimes(raceId: string, lapTimes: number[], paceType: string) {
+  await dbRun(`
+    UPDATE races SET lap_times_json = ?, pace_type = ? WHERE id = ?
+  `, [JSON.stringify(lapTimes), paceType, raceId]);
+}
+
+export async function getRaceLapTimes(raceId: string): Promise<{ lapTimes: number[]; paceType: string } | null> {
+  const row = await dbGet<{ lap_times_json: string | null; pace_type: string | null }>(
+    `SELECT lap_times_json, pace_type FROM races WHERE id = ?`,
+    [raceId]
+  );
+  if (!row?.lap_times_json) return null;
+  try {
+    return {
+      lapTimes: JSON.parse(row.lap_times_json),
+      paceType: row.pace_type || 'ミドル',
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ラップタイムからペースタイプを判定
+ * 前半と後半のラップ合計を比較
+ */
+export function classifyPaceType(lapTimes: number[]): string {
+  if (lapTimes.length < 4) return 'ミドル';
+
+  const halfIdx = Math.floor(lapTimes.length / 2);
+  const firstHalf = lapTimes.slice(0, halfIdx);
+  const secondHalf = lapTimes.slice(halfIdx);
+
+  const firstAvg = firstHalf.reduce((s, v) => s + v, 0) / firstHalf.length;
+  const secondAvg = secondHalf.reduce((s, v) => s + v, 0) / secondHalf.length;
+
+  const diff = secondAvg - firstAvg;
+  // 前半が速い (後半遅い) = ハイペース
+  // 後半が速い (前半遅い) = スローペース
+  if (diff > 0.4) return 'ハイ';
+  if (diff < -0.4) return 'スロー';
+  return 'ミドル';
+}
+
 // ==================== AI予想 ====================
 
 export async function getPredictionByRaceId(raceId: string) {
@@ -617,30 +727,67 @@ export async function getJockeyStats(jockeyId: string, beforeDate?: string): Pro
 /**
  * 調教師名からDB上の勝率・複勝率を race_entries から計算する。
  */
-export async function getTrainerStats(trainerName: string): Promise<{ winRate: number; placeRate: number }> {
-  const DEFAULT_WIN_RATE = 0.08;
-  const DEFAULT_PLACE_RATE = 0.20;
+export interface TrainerStatsResult {
+  winRate: number;
+  placeRate: number;
+  sprintWinRate: number;
+  mileWinRate: number;
+  longWinRate: number;
+  heavyWinRate: number;
+  gradeWinRate: number;
+}
 
-  if (!trainerName) return { winRate: DEFAULT_WIN_RATE, placeRate: DEFAULT_PLACE_RATE };
+export async function getTrainerStats(trainerName: string): Promise<TrainerStatsResult> {
+  const DEF_W = 0.08;
+  const DEF_P = 0.20;
+  const defaults: TrainerStatsResult = {
+    winRate: DEF_W, placeRate: DEF_P,
+    sprintWinRate: DEF_W, mileWinRate: DEF_W, longWinRate: DEF_W,
+    heavyWinRate: DEF_W, gradeWinRate: DEF_W,
+  };
 
-  const stats = await dbGet<{ total: number; wins: number; places: number }>(`
+  if (!trainerName) return defaults;
+
+  const stats = await dbGet<{
+    total: number; wins: number; places: number;
+    sprint_total: number; sprint_wins: number;
+    mile_total: number; mile_wins: number;
+    long_total: number; long_wins: number;
+    heavy_total: number; heavy_wins: number;
+    grade_total: number; grade_wins: number;
+  }>(`
     SELECT
       COUNT(*) as total,
       SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins,
-      SUM(CASE WHEN e.result_position <= 2 THEN 1 ELSE 0 END) as places
+      SUM(CASE WHEN e.result_position <= 2 THEN 1 ELSE 0 END) as places,
+      SUM(CASE WHEN r.distance <= 1400 THEN 1 ELSE 0 END) as sprint_total,
+      SUM(CASE WHEN r.distance <= 1400 AND e.result_position = 1 THEN 1 ELSE 0 END) as sprint_wins,
+      SUM(CASE WHEN r.distance BETWEEN 1401 AND 1800 THEN 1 ELSE 0 END) as mile_total,
+      SUM(CASE WHEN r.distance BETWEEN 1401 AND 1800 AND e.result_position = 1 THEN 1 ELSE 0 END) as mile_wins,
+      SUM(CASE WHEN r.distance >= 1801 THEN 1 ELSE 0 END) as long_total,
+      SUM(CASE WHEN r.distance >= 1801 AND e.result_position = 1 THEN 1 ELSE 0 END) as long_wins,
+      SUM(CASE WHEN r.track_condition IN ('重', '不良') THEN 1 ELSE 0 END) as heavy_total,
+      SUM(CASE WHEN r.track_condition IN ('重', '不良') AND e.result_position = 1 THEN 1 ELSE 0 END) as heavy_wins,
+      SUM(CASE WHEN r.grade IN ('G3', 'G2', 'G1') THEN 1 ELSE 0 END) as grade_total,
+      SUM(CASE WHEN r.grade IN ('G3', 'G2', 'G1') AND e.result_position = 1 THEN 1 ELSE 0 END) as grade_wins
     FROM race_entries e
     JOIN races r ON e.race_id = r.id
     WHERE e.trainer_name = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL
   `, [trainerName]);
 
-  if (stats && stats.total >= 10) {
-    return {
-      winRate: stats.wins / stats.total,
-      placeRate: stats.places / stats.total,
-    };
-  }
+  if (!stats || stats.total < 10) return defaults;
 
-  return { winRate: DEFAULT_WIN_RATE, placeRate: DEFAULT_PLACE_RATE };
+  const safeRate = (wins: number, total: number) => total >= 5 ? wins / total : DEF_W;
+
+  return {
+    winRate: stats.wins / stats.total,
+    placeRate: stats.places / stats.total,
+    sprintWinRate: safeRate(stats.sprint_wins, stats.sprint_total),
+    mileWinRate: safeRate(stats.mile_wins, stats.mile_total),
+    longWinRate: safeRate(stats.long_wins, stats.long_total),
+    heavyWinRate: safeRate(stats.heavy_wins, stats.heavy_total),
+    gradeWinRate: safeRate(stats.grade_wins, stats.grade_total),
+  };
 }
 
 // ==================== 交互作用統計（予想エンジン用） ====================

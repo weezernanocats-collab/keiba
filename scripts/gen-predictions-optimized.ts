@@ -482,6 +482,9 @@ function computeTrainerPerfs(trainerName: string, beforeDate?: string) {
           result_position: e.result_position,
           track_type: race.track_type,
           date: race.date,
+          distance: race.distance,
+          track_condition: race.track_condition,
+          grade: race.grade,
         });
       }
     }

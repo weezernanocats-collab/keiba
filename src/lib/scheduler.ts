@@ -17,7 +17,7 @@ import {
   scrapeRaceList,
   scrapeRaceCard,
   scrapeOdds,
-  scrapeRaceResult,
+  scrapeRaceResultWithLaps,
   scrapeHorseDetail,
 } from './scraper';
 import type { ScrapedRaceDetail } from './scraper';
@@ -26,6 +26,7 @@ import {
   upsertRaceEntry,
   upsertOdds,
   upsertRaceEntryOdds,
+  insertOddsSnapshot,
   upsertHorse,
   insertPastPerformance,
   getHorsePastPerformances,
@@ -41,6 +42,8 @@ import {
   updateSchedulerRun,
   hasSchedulerRunToday,
   getRecentSchedulerRuns,
+  upsertRaceLapTimes,
+  classifyPaceType,
 } from './queries';
 import { generatePrediction } from './prediction-engine';
 import { evaluateAllPendingRaces, ensureCalibrationLoaded, autoCalibrate } from './accuracy-tracker';
@@ -407,6 +410,9 @@ async function executeMorningFetch(date: string): Promise<void> {
               getJockeyDistanceWinRate(re.jockeyId, detail.distance),
               getJockeyCourseWinRate(re.jockeyId, detail.racecourseName),
             ]);
+            const distCat = detail.distance <= 1400 ? 'sprint' : detail.distance <= 1800 ? 'mile' : 'long';
+            const isHeavy = detail.trackCondition === '重' || detail.trackCondition === '不良';
+            const isGrade = ['G3', 'G2', 'G1'].includes(detail.grade || '');
             return {
               entry: re, pastPerformances: pastPerfs,
               jockeyWinRate: jockeyStats.winRate, jockeyPlaceRate: jockeyStats.placeRate,
@@ -415,6 +421,10 @@ async function executeMorningFetch(date: string): Promise<void> {
               sireTrackWinRate: sireTrackWR,
               jockeyDistanceWinRate: jockeyDistWR,
               jockeyCourseWinRate: jockeyCourseWR,
+              trainerDistCatWinRate: distCat === 'sprint' ? trainerStats.sprintWinRate
+                : distCat === 'mile' ? trainerStats.mileWinRate : trainerStats.longWinRate,
+              trainerCondWinRate: isHeavy ? trainerStats.heavyWinRate : trainerStats.winRate,
+              trainerGradeWinRate: isGrade ? trainerStats.gradeWinRate : trainerStats.winRate,
             };
           })
         );
@@ -499,6 +509,9 @@ async function executeAfternoonPredictions(date: string): Promise<void> {
               getJockeyDistanceWinRate(re.jockeyId, race.distance),
               getJockeyCourseWinRate(re.jockeyId, race.racecourse_name),
             ]);
+            const distCat2 = race.distance <= 1400 ? 'sprint' : race.distance <= 1800 ? 'mile' : 'long';
+            const isHeavy2 = race.track_condition === '重' || race.track_condition === '不良';
+            const isGrade2 = ['G3', 'G2', 'G1'].includes(race.grade || '');
             return {
               entry: re, pastPerformances: pastPerfs,
               jockeyWinRate: jockeyStats.winRate, jockeyPlaceRate: jockeyStats.placeRate,
@@ -507,6 +520,10 @@ async function executeAfternoonPredictions(date: string): Promise<void> {
               sireTrackWinRate: sireTrackWR,
               jockeyDistanceWinRate: jockeyDistWR,
               jockeyCourseWinRate: jockeyCourseWR,
+              trainerDistCatWinRate: distCat2 === 'sprint' ? trainerStats.sprintWinRate
+                : distCat2 === 'mile' ? trainerStats.mileWinRate : trainerStats.longWinRate,
+              trainerCondWinRate: isHeavy2 ? trainerStats.heavyWinRate : trainerStats.winRate,
+              trainerGradeWinRate: isGrade2 ? trainerStats.gradeWinRate : trainerStats.winRate,
             };
           })
         );
@@ -555,8 +572,11 @@ async function executeOddsFetch(date: string): Promise<void> {
     for (const race of races) {
       try {
         const odds = await scrapeOdds(race.id);
+        const snapshotTime = new Date().toISOString();
         for (const w of odds.win) {
           await upsertOdds(race.id, '単勝', [w.horseNumber], w.odds);
+          // 時系列スナップショット保存
+          await insertOddsSnapshot(race.id, w.horseNumber, w.odds, snapshotTime);
         }
         for (const p of odds.place) {
           await upsertOdds(race.id, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
@@ -609,7 +629,7 @@ async function executeResultFetch(date: string): Promise<void> {
     let entryResultCount = 0;
     for (const race of races) {
       try {
-        const results = await scrapeRaceResult(race.id);
+        const { results, lapTimes } = await scrapeRaceResultWithLaps(race.id);
         for (const r of results) {
           await upsertRaceEntry(race.id, {
             horseNumber: r.horseNumber, horseName: r.horseName,
@@ -624,6 +644,11 @@ async function executeResultFetch(date: string): Promise<void> {
             await upsertOdds(race.id, '単勝', [r.horseNumber], r.odds);
             await upsertRaceEntryOdds(race.id, r.horseNumber, r.odds, r.popularity);
           }
+        }
+        // ラップタイム保存
+        if (lapTimes.length > 0) {
+          const paceType = classifyPaceType(lapTimes);
+          await upsertRaceLapTimes(race.id, lapTimes, paceType);
         }
         if (results.length > 0) {
           await upsertRace({ id: race.id, status: '結果確定' });

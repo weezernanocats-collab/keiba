@@ -30,6 +30,8 @@ export interface PredictionResult {
   betInvestment: number;
   betReturn: number;
   betRoi: number;
+  brierScore: number | null;
+  logLoss: number | null;
 }
 
 export interface AccuracyStats {
@@ -57,6 +59,24 @@ export interface AccuracyStats {
     placeHitRate: number;
     roi: number;
   }[];
+  // Proper Scoring Rules (Phase 0)
+  scoringRules: {
+    brierScore: number | null;        // 低いほど良い (0=完璧, 1=最悪)
+    brierSkillScore: number | null;   // 対均等確率BSS (正値=モデルに価値あり)
+    marketBSS: number | null;         // 対市場BSS (正値=市場を上回っている)
+    logLoss: number | null;           // 対数損失 (低いほど良い)
+    ece: number | null;               // Expected Calibration Error (低いほど良い)
+    calibrationBins: CalibrationBin[] | null; // 10ビンのキャリブレーションデータ
+    evaluatedWithProbs: number;       // 確率データ付きで評価されたレース数
+  };
+}
+
+export interface CalibrationBin {
+  binRange: string;       // 例: "10-20%"
+  count: number;          // ビン内のサンプル数
+  avgPredicted: number;   // 平均予測確率
+  avgActual: number;      // 実際の勝率
+  gap: number;            // |avgPredicted - avgActual|
 }
 
 // ==================== メイン照合関数 ====================
@@ -73,9 +93,9 @@ export async function evaluateRacePrediction(raceId: string): Promise<Prediction
   );
   if (existing) return null;
 
-  // 予想を取得
-  const prediction = await dbGet<{ id: number; confidence: number; picks_json: string; bets_json: string }>(
-    'SELECT id, confidence, picks_json, bets_json FROM predictions WHERE race_id = ? ORDER BY generated_at DESC LIMIT 1',
+  // 予想を取得（analysis_json も取得 → winProbabilities を抽出）
+  const prediction = await dbGet<{ id: number; confidence: number; picks_json: string; bets_json: string; analysis_json: string }>(
+    'SELECT id, confidence, picks_json, bets_json, analysis_json FROM predictions WHERE race_id = ? ORDER BY generated_at DESC LIMIT 1',
     [raceId]
   );
 
@@ -137,17 +157,20 @@ export async function evaluateRacePrediction(raceId: string): Promise<Prediction
   }
   const betRoi = betReturn / betInvestment;
 
+  // Brier Score & Log Loss 算出（analysis_json に winProbabilities があれば）
+  const { brierScore, logLoss } = computeScoringRules(prediction.analysis_json, results);
+
   // DB に記録
   await dbRun(`
     INSERT INTO prediction_results
       (race_id, prediction_id, top_pick_horse_id, top_pick_actual_position,
        win_hit, place_hit, top3_picks_hit, predicted_confidence,
-       bet_investment, bet_return, bet_roi)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       bet_investment, bet_return, bet_roi, brier_score, log_loss)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     raceId, prediction.id, topPick.horseId, topPickActualPosition,
     winHit ? 1 : 0, placeHit ? 1 : 0, top3PicksHit, prediction.confidence,
-    betInvestment, betReturn, betRoi,
+    betInvestment, betReturn, betRoi, brierScore, logLoss,
   ]);
 
   return {
@@ -162,6 +185,64 @@ export async function evaluateRacePrediction(raceId: string): Promise<Prediction
     betInvestment,
     betReturn,
     betRoi,
+    brierScore,
+    logLoss,
+  };
+}
+
+// ==================== Proper Scoring Rules ====================
+
+/**
+ * analysis_json から winProbabilities を抽出し、
+ * 各馬の予測確率 vs 実結果(1/0) から Brier Score と Log Loss を算出する。
+ *
+ * Brier Score = (1/N) × Σ(p_i - y_i)²  (低いほど良い、0=完璧)
+ * Log Loss = -(1/N) × Σ[y_i×log(p_i) + (1-y_i)×log(1-p_i)]  (低いほど良い)
+ */
+function computeScoringRules(
+  analysisJson: string | null,
+  results: { horse_number: number; result_position: number }[],
+): { brierScore: number | null; logLoss: number | null } {
+  if (!analysisJson) return { brierScore: null, logLoss: null };
+
+  let winProbabilities: Record<string, number> | null = null;
+  try {
+    const analysis = JSON.parse(analysisJson);
+    winProbabilities = analysis.winProbabilities || null;
+  } catch {
+    return { brierScore: null, logLoss: null };
+  }
+
+  if (!winProbabilities || Object.keys(winProbabilities).length === 0) {
+    return { brierScore: null, logLoss: null };
+  }
+
+  const EPS = 1e-15; // log(0) 防止用
+  let brierSum = 0;
+  let logLossSum = 0;
+  let count = 0;
+
+  for (const result of results) {
+    const prob = winProbabilities[String(result.horse_number)];
+    if (prob === undefined) continue;
+
+    const actual = result.result_position === 1 ? 1 : 0;
+    const clampedProb = Math.max(EPS, Math.min(1 - EPS, prob));
+
+    // Brier Score: (p - y)²
+    brierSum += (clampedProb - actual) ** 2;
+
+    // Log Loss: -[y×log(p) + (1-y)×log(1-p)]
+    logLossSum += -(actual * Math.log(clampedProb) + (1 - actual) * Math.log(1 - clampedProb));
+
+    count++;
+  }
+
+  if (count === 0) return { brierScore: null, logLoss: null };
+
+  return {
+    brierScore: Math.round((brierSum / count) * 100000) / 100000,
+    logLoss: Math.round((logLossSum / count) * 100000) / 100000,
   };
 }
 
@@ -197,12 +278,18 @@ export async function getAccuracyStats(): Promise<AccuracyStats> {
   const total = await dbGet<{ c: number }>('SELECT COUNT(*) as c FROM prediction_results');
   const totalEvaluated = total?.c ?? 0;
 
+  const emptyScoringRules = {
+    brierScore: null, brierSkillScore: null, marketBSS: null,
+    logLoss: null, ece: null, calibrationBins: null, evaluatedWithProbs: 0,
+  };
+
   if (totalEvaluated === 0) {
     return {
       totalEvaluated: 0,
       winHitRate: 0, placeHitRate: 0, avgTop3Coverage: 0,
       avgRoi: 0, totalInvested: 0, totalReturned: 0, overallRoi: 0,
       confidenceCalibration: [], recentTrend: [],
+      scoringRules: emptyScoringRules,
     };
   }
 
@@ -224,6 +311,7 @@ export async function getAccuracyStats(): Promise<AccuracyStats> {
       winHitRate: 0, placeHitRate: 0, avgTop3Coverage: 0,
       avgRoi: 0, totalInvested: 0, totalReturned: 0, overallRoi: 0,
       confidenceCalibration: [], recentTrend: [],
+      scoringRules: emptyScoringRules,
     };
   }
 
@@ -276,6 +364,9 @@ export async function getAccuracyStats(): Promise<AccuracyStats> {
     trendQuery(999999, '全期間'),
   ])).filter(t => t.count > 0);
 
+  // Proper Scoring Rules 集計
+  const scoringRules = await computeAggregateScoringRules();
+
   return {
     totalEvaluated,
     winHitRate: agg.win_hit_rate,
@@ -293,6 +384,44 @@ export async function getAccuracyStats(): Promise<AccuracyStats> {
       avgRoi: c.roi,
     })),
     recentTrend,
+    scoringRules,
+  };
+}
+
+// ==================== Scoring Rules 集計（軽量版: DBに記録済みの値の平均のみ） ====================
+
+/**
+ * prediction_results に保存済みの brier_score / log_loss の集計のみ行う（軽量版）。
+ * BSS / ECE はper-horseデータが必要でTurso負荷が大きいため、
+ * scripts/check-scoring-rules.ts でローカル実行する設計。
+ */
+async function computeAggregateScoringRules(): Promise<AccuracyStats['scoringRules']> {
+  const agg = await dbGet<{
+    cnt: number; avg_brier: number; avg_ll: number;
+  }>(`
+    SELECT
+      COUNT(*) as cnt,
+      AVG(brier_score) as avg_brier,
+      AVG(log_loss) as avg_ll
+    FROM prediction_results
+    WHERE brier_score IS NOT NULL
+  `);
+
+  if (!agg || agg.cnt === 0) {
+    return {
+      brierScore: null, brierSkillScore: null, marketBSS: null,
+      logLoss: null, ece: null, calibrationBins: null, evaluatedWithProbs: 0,
+    };
+  }
+
+  return {
+    brierScore: Math.round(agg.avg_brier * 100000) / 100000,
+    brierSkillScore: null,  // スクリプトで算出
+    marketBSS: null,        // スクリプトで算出
+    logLoss: Math.round(agg.avg_ll * 100000) / 100000,
+    ece: null,              // スクリプトで算出
+    calibrationBins: null,  // スクリプトで算出
+    evaluatedWithProbs: agg.cnt,
   };
 }
 
@@ -348,17 +477,17 @@ export async function calibrateWeights(): Promise<CalibrationResult | null> {
     'recentForm', 'courseAptitude', 'distanceAptitude', 'trackConditionAptitude',
     'jockeyAbility', 'speedRating', 'classPerformance', 'runningStyle',
     'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
-    'sireAptitude', 'trainerAbility', 'jockeyTrainerCombo', 'historicalPostBias',
+    'sireAptitude', 'trainerAbility', 'jockeyTrainerCombo',
     'seasonalPattern', 'handicapAdvantage', 'marketOdds',
   ];
 
   const currentWeights: Record<string, number> = {
     recentForm: 0.16, courseAptitude: 0.06, distanceAptitude: 0.10,
     trackConditionAptitude: 0.04, jockeyAbility: 0.07, speedRating: 0.10,
-    classPerformance: 0.04, runningStyle: 0.05, postPositionBias: 0.03,
+    classPerformance: 0.04, runningStyle: 0.05, postPositionBias: 0.04,
     rotation: 0.04, lastThreeFurlongs: 0.07, consistency: 0.04,
-    sireAptitude: 0.05, trainerAbility: 0.03, jockeyTrainerCombo: 0.02,
-    historicalPostBias: 0.03, seasonalPattern: 0.02, handicapAdvantage: 0.02,
+    sireAptitude: 0.05, trainerAbility: 0.04, jockeyTrainerCombo: 0.02,
+    seasonalPattern: 0.02, handicapAdvantage: 0.02,
     marketOdds: 0.03,
   };
 
@@ -576,7 +705,7 @@ export async function calibrateCategoryWeights(): Promise<CategoryCalibrationRes
     'recentForm', 'courseAptitude', 'distanceAptitude', 'trackConditionAptitude',
     'jockeyAbility', 'speedRating', 'classPerformance', 'runningStyle',
     'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
-    'sireAptitude', 'trainerAbility', 'jockeyTrainerCombo', 'historicalPostBias',
+    'sireAptitude', 'trainerAbility', 'jockeyTrainerCombo',
     'seasonalPattern', 'handicapAdvantage', 'marketOdds',
   ];
 

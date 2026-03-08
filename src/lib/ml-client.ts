@@ -4,9 +4,11 @@
  * XGBoost の JSON モデルファイルを直接読み込み、決定木を走査して推論する。
  * Python 不要 — Vercel の 500MB 制限を回避。
  *
- * v5.2: XGBRanker (ランキングモデル) 対応
- * - xgb_ranker.json が存在すればランキングモデルを使用
- * - なければ従来の xgb_win.json + xgb_place.json にフォールバック
+ * v6.0 Phase 2:
+ * - Isotonic Regression 確率較正 (Platt Scaling)
+ * - カテゴリ別専門モデル (5カテゴリ)
+ * - xgb_ranker_{category}.json が存在すればカテゴリモデルを使用
+ * - calibration.json で softmax → 較正済み確率に変換
  *
  * モデル未配置時は null を返却し、呼び出し元は加重平均にフォールバックする。
  */
@@ -27,6 +29,16 @@ export interface MLPrediction {
 }
 
 export type MLPredictions = Record<number, MLPrediction>;
+
+export interface RaceContext {
+  trackType: string;
+  distance: number;
+}
+
+interface CalibrationData {
+  x_thresholds: number[];
+  y_values: number[];
+}
 
 // ==================== XGBoost JSON Model Types ====================
 
@@ -70,6 +82,15 @@ const GRADE_ENCODE: Record<string, number> = {
   'G3': 6, 'G2': 7, 'G1': 8,
 };
 
+// カテゴリ定義: (trackType_encoded, distance_min, distance_max)
+const CATEGORY_DEFS: Record<string, [number, number, number]> = {
+  'turf_sprint': [0, 0, 1400],
+  'turf_mile': [0, 1401, 1800],
+  'turf_long': [0, 1901, 99999],
+  'dirt_short': [1, 0, 1600],
+  'dirt_long': [1, 1601, 99999],
+};
+
 interface ContextualFeatures {
   fieldSize: number;
   odds: number | undefined;
@@ -82,7 +103,6 @@ interface ContextualFeatures {
   trackType: string;
   distance: number;
   trackCondition: string;
-  // v4.2 新特徴量（後方互換性のためオプショナル）
   weather?: string | undefined;
   weightChange?: number | undefined;
   trainerWinRate?: number | undefined;
@@ -90,15 +110,22 @@ interface ContextualFeatures {
   sireTrackWinRate?: number | undefined;
   jockeyDistanceWinRate?: number | undefined;
   jockeyCourseWinRate?: number | undefined;
-  // v5.1: 馬体重トレンド特徴量
   weightStability?: number | undefined;
   weightTrendSlope?: number | undefined;
   weightOptimalDelta?: number | undefined;
+  jockeySwitchQuality?: number | undefined;
+  cornerDelta?: number | undefined;
+  avgMarginWhenWinning?: number | undefined;
+  avgMarginWhenLosing?: number | undefined;
+  daysSinceLastRace?: number | undefined;
+  meetDay?: number | undefined;
+  trainerDistCatWinRate?: number | undefined;
+  trainerCondWinRate?: number | undefined;
+  trainerGradeWinRate?: number | undefined;
 }
 
 /**
  * ファクタースコア + コンテキスト特徴量 → 特徴量dictを構築
- * v5.2: marginCompetitiveness, weatherAptitude はfactorScoresに含まれる
  */
 export function buildMLFeatures(
   factorScores: Record<string, number>,
@@ -107,10 +134,11 @@ export function buildMLFeatures(
   const odds = ctx.odds ?? 10;
   const popularity = ctx.popularity ?? Math.ceil(ctx.fieldSize / 2);
 
+  const condEncoded = TRACK_CONDITION_ENCODE[ctx.trackCondition] ?? 0;
+
   return {
     ...factorScores,
     fieldSize: ctx.fieldSize,
-    odds,
     popularity,
     age: ctx.age,
     sex_encoded: SEX_ENCODE[ctx.sex] ?? 0,
@@ -119,23 +147,61 @@ export function buildMLFeatures(
     grade_encoded: GRADE_ENCODE[ctx.grade ?? ''] ?? 3,
     trackType_encoded: TRACK_TYPE_ENCODE[ctx.trackType] ?? 0,
     distance: ctx.distance,
-    trackCondition_encoded: TRACK_CONDITION_ENCODE[ctx.trackCondition] ?? 0,
-    oddsLogTransform: Math.log1p(odds),
+    trackCondition_encoded: condEncoded,
     popularityRatio: ctx.fieldSize > 0 ? popularity / ctx.fieldSize : 0.5,
-    // v4.2 新特徴量
     weather_encoded: WEATHER_ENCODE[ctx.weather ?? ''] ?? 0,
     weightChange: ctx.weightChange ?? 0,
     trainerWinRate: ctx.trainerWinRate ?? 0.08,
     trainerPlaceRate: ctx.trainerPlaceRate ?? 0.20,
-    // 交互作用特徴量
     sireTrackWinRate: ctx.sireTrackWinRate ?? 0.07,
     jockeyDistanceWinRate: ctx.jockeyDistanceWinRate ?? 0.08,
     jockeyCourseWinRate: ctx.jockeyCourseWinRate ?? 0.08,
-    // v5.1: 馬体重トレンド
     weightStability: ctx.weightStability ?? 50,
     weightTrendSlope: ctx.weightTrendSlope ?? 0,
     weightOptimalDelta: ctx.weightOptimalDelta ?? 0,
+    jockeySwitchQuality: ctx.jockeySwitchQuality ?? 0,
+    cornerDelta: ctx.cornerDelta ?? 0,
+    avgMarginWhenWinning: ctx.avgMarginWhenWinning ?? 0,
+    avgMarginWhenLosing: ctx.avgMarginWhenLosing ?? 0,
+    daysSinceLastRace: ctx.daysSinceLastRace ?? 30,
+    meetDay: ctx.meetDay ?? 1,
+    trainerDistCatWinRate: ctx.trainerDistCatWinRate ?? 0.08,
+    trainerCondWinRate: ctx.trainerCondWinRate ?? 0.08,
+    trainerGradeWinRate: ctx.trainerGradeWinRate ?? 0.08,
+    weightXspeed: ctx.handicapWeight * ((factorScores.speedRating ?? 50) / 100),
+    ageXdistance: ctx.age * (ctx.distance / 1000),
+    jockeyXform: ((factorScores.jockeyAbility ?? 50) / 100) * ((factorScores.recentForm ?? 50) / 100),
+    fieldSizeXpost: ctx.fieldSize * (ctx.postPosition / ctx.fieldSize),
+    rotationXform: ((factorScores.rotation ?? 50) / 100) * ((factorScores.recentForm ?? 50) / 100),
+    conditionXsire: condEncoded * ((factorScores.sireAptitude ?? 50) / 100),
   };
+}
+
+// ==================== CatBoost Oblivious Tree Types ====================
+
+interface CatBoostSplit {
+  feature_index: number;
+  threshold: number;
+}
+
+interface CatBoostTree {
+  splits: CatBoostSplit[];
+  leaf_values: number[];
+}
+
+interface CatBoostModel {
+  model_type: string;
+  tree_count: number;
+  feature_count: number;
+  scale: number;
+  bias: number;
+  trees: CatBoostTree[];
+}
+
+interface EnsembleWeights {
+  xgb: number;
+  catboost: number;
+  per_category?: Record<string, { xgb: number; catboost: number }>;
 }
 
 // ==================== Model loading & caching ====================
@@ -144,6 +210,12 @@ let cachedWinModel: XGBModel | null | undefined;
 let cachedPlaceModel: XGBModel | null | undefined;
 let cachedRankerModel: XGBModel | null | undefined;
 let cachedFeatureNames: string[] | null = null;
+let cachedCalibration: CalibrationData | null = null;
+let cachedCategoryModels: Record<string, XGBModel> = {};
+let cachedCatBoostModel: CatBoostModel | null | undefined;
+let cachedCatBoostCalibration: CalibrationData | null = null;
+let cachedCatBoostCategoryModels: Record<string, CatBoostModel> = {};
+let cachedEnsembleWeights: EnsembleWeights | null = null;
 let modelMode: 'ranker' | 'classifier' | 'none' | undefined;
 
 function getModelDir(): string {
@@ -153,7 +225,6 @@ function getModelDir(): string {
 function loadModel(filename: string): XGBModel | null {
   const filepath = join(getModelDir(), filename);
   if (!existsSync(filepath)) {
-    console.warn(`[ML] モデルファイル未検出: ${filepath}`);
     return null;
   }
   try {
@@ -180,6 +251,56 @@ function loadFeatureNames(): string[] | null {
   }
 }
 
+function loadCalibration(filename = 'calibration.json'): CalibrationData | null {
+  const filepath = join(getModelDir(), filename);
+  if (!existsSync(filepath)) {
+    return null;
+  }
+  try {
+    const raw = readFileSync(filepath, 'utf-8');
+    const data = JSON.parse(raw) as CalibrationData;
+    if (data.x_thresholds?.length > 0 && data.y_values?.length > 0) {
+      return data;
+    }
+    return null;
+  } catch (error) {
+    console.error(`[ML] ${filename} 読み込みエラー:`, error);
+    return null;
+  }
+}
+
+function loadCatBoostModel(filename: string): CatBoostModel | null {
+  const filepath = join(getModelDir(), filename);
+  if (!existsSync(filepath)) {
+    return null;
+  }
+  try {
+    const raw = readFileSync(filepath, 'utf-8');
+    const data = JSON.parse(raw) as CatBoostModel;
+    if (data.model_type === 'catboost_oblivious' && data.trees?.length > 0) {
+      return data;
+    }
+    return null;
+  } catch (error) {
+    console.error(`[ML] ${filename} 読み込みエラー:`, error);
+    return null;
+  }
+}
+
+function loadEnsembleWeights(): EnsembleWeights | null {
+  const filepath = join(getModelDir(), 'ensemble_weights.json');
+  if (!existsSync(filepath)) {
+    return null;
+  }
+  try {
+    const raw = readFileSync(filepath, 'utf-8');
+    return JSON.parse(raw) as EnsembleWeights;
+  } catch (error) {
+    console.error('[ML] ensemble_weights.json 読み込みエラー:', error);
+    return null;
+  }
+}
+
 function ensureModelsLoaded(): boolean {
   if (modelMode !== undefined) {
     return modelMode !== 'none';
@@ -200,6 +321,55 @@ function ensureModelsLoaded(): boolean {
   if (cachedRankerModel) {
     const treeCount = cachedRankerModel.learner.gradient_booster.model.trees.length;
     console.log(`[ML] ランキングモデル読み込み完了 (trees: ${treeCount})`);
+
+    // 較正マッピング読み込み
+    cachedCalibration = loadCalibration();
+    if (cachedCalibration) {
+      console.log(`[ML] 較正マッピング読み込み完了 (${cachedCalibration.x_thresholds.length} points)`);
+    }
+
+    // カテゴリ別モデル読み込み
+    cachedCategoryModels = {};
+    for (const cat of Object.keys(CATEGORY_DEFS)) {
+      const catModel = loadModel(`xgb_ranker_${cat}.json`);
+      if (catModel) {
+        cachedCategoryModels[cat] = catModel;
+        console.log(`[ML] カテゴリモデル読み込み: ${cat}`);
+      }
+    }
+    if (Object.keys(cachedCategoryModels).length > 0) {
+      console.log(`[ML] カテゴリモデル: ${Object.keys(cachedCategoryModels).length}個`);
+    }
+
+    // CatBoost モデル読み込み (アンサンブル用)
+    cachedCatBoostModel = loadCatBoostModel('catboost_ranker.json');
+    if (cachedCatBoostModel) {
+      console.log(`[ML] CatBoostモデル読み込み完了 (${cachedCatBoostModel.tree_count} trees)`);
+
+      cachedCatBoostCalibration = loadCalibration('catboost_calibration.json');
+      if (cachedCatBoostCalibration) {
+        console.log(`[ML] CatBoost較正マッピング読み込み完了`);
+      }
+
+      // CatBoostカテゴリ別モデル
+      cachedCatBoostCategoryModels = {};
+      for (const cat of Object.keys(CATEGORY_DEFS)) {
+        const catCbModel = loadCatBoostModel(`catboost_ranker_${cat}.json`);
+        if (catCbModel) {
+          cachedCatBoostCategoryModels[cat] = catCbModel;
+        }
+      }
+      if (Object.keys(cachedCatBoostCategoryModels).length > 0) {
+        console.log(`[ML] CatBoostカテゴリモデル: ${Object.keys(cachedCatBoostCategoryModels).length}個`);
+      }
+
+      // アンサンブル重み
+      cachedEnsembleWeights = loadEnsembleWeights();
+      if (cachedEnsembleWeights) {
+        console.log(`[ML] アンサンブル重み: XGB=${cachedEnsembleWeights.xgb}, CB=${cachedEnsembleWeights.catboost}`);
+      }
+    }
+
     modelMode = 'ranker';
     return true;
   }
@@ -224,9 +394,6 @@ function sigmoid(x: number): number {
   return 1 / (1 + Math.exp(-x));
 }
 
-/**
- * 単一の木を走査してリーフの値を返す
- */
 function traverseTree(tree: XGBTree, features: number[]): number {
   let nodeId = 0;
 
@@ -235,7 +402,6 @@ function traverseTree(tree: XGBTree, features: number[]): number {
     const threshold = tree.split_conditions[nodeId];
     const featureVal = features[featureIdx];
 
-    // NaN/undefined の場合は default direction
     if (featureVal === undefined || isNaN(featureVal)) {
       nodeId = tree.default_left[nodeId]
         ? tree.left_children[nodeId]
@@ -250,9 +416,6 @@ function traverseTree(tree: XGBTree, features: number[]): number {
   return tree.base_weights[nodeId];
 }
 
-/**
- * XGBoostモデルで推論し、確率を返す (binary:logistic 前提)
- */
 function predictProba(model: XGBModel, features: number[]): number {
   const baseScoreProb = parseFloat(model.learner.learner_model_param.base_score) || 0.5;
   const clampedProb = Math.max(1e-7, Math.min(1 - 1e-7, baseScoreProb));
@@ -268,10 +431,6 @@ function predictProba(model: XGBModel, features: number[]): number {
   return sigmoid(sum);
 }
 
-/**
- * XGBRankerモデルで推論し、raw scoreを返す
- * ランキングモデルのリーフ値はそのままスコア（sigmoidは通さない）
- */
 function predictRawScore(model: XGBModel, features: number[]): number {
   const baseScore = parseFloat(model.learner.learner_model_param.base_score) || 0.5;
   const trees = model.learner.gradient_booster.model.trees;
@@ -284,19 +443,13 @@ function predictRawScore(model: XGBModel, features: number[]): number {
   return sum;
 }
 
-/**
- * softmax変換: raw scoresを確率に変換
- */
 function softmax(scores: number[]): number[] {
   const maxScore = Math.max(...scores);
-  const exps = scores.map(s => Math.exp(s - maxScore)); // 数値安定化
+  const exps = scores.map(s => Math.exp(s - maxScore));
   const sumExp = exps.reduce((s, e) => s + e, 0);
   return exps.map(e => e / sumExp);
 }
 
-/**
- * 特徴量 dict を特徴量名の順序に従って配列に変換
- */
 function featureDictToArray(
   features: Record<string, number>,
   featureNames: string[],
@@ -304,37 +457,188 @@ function featureDictToArray(
   return featureNames.map(name => features[name] ?? 0);
 }
 
+// ==================== Calibration ====================
+
+/**
+ * Isotonic Regression のピースワイズ線形補間
+ */
+function interpolateCalibration(prob: number, cal: CalibrationData): number {
+  const { x_thresholds, y_values } = cal;
+  if (x_thresholds.length === 0) return prob;
+  if (prob <= x_thresholds[0]) return y_values[0];
+  if (prob >= x_thresholds[x_thresholds.length - 1]) return y_values[y_values.length - 1];
+
+  // 二分探索
+  let lo = 0;
+  let hi = x_thresholds.length - 1;
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1;
+    if (x_thresholds[mid] <= prob) lo = mid;
+    else hi = mid;
+  }
+
+  const x0 = x_thresholds[lo];
+  const x1 = x_thresholds[hi];
+  const y0 = y_values[lo];
+  const y1 = y_values[hi];
+  const denom = x1 - x0;
+  if (denom === 0) return y0;
+
+  const t = (prob - x0) / denom;
+  return y0 + t * (y1 - y0);
+}
+
+/**
+ * softmax確率配列に較正を適用し、合計1に再正規化
+ */
+function applyCalibration(probs: number[], cal: CalibrationData): number[] {
+  const calibrated = probs.map(p => interpolateCalibration(p, cal));
+  const sum = calibrated.reduce((s, v) => s + v, 0);
+  return sum > 0 ? calibrated.map(v => v / sum) : calibrated;
+}
+
+// ==================== Category selection ====================
+
+/**
+ * レースのカテゴリを判定
+ */
+function categorizeRace(trackType: string, distance: number): string | null {
+  const tt = TRACK_TYPE_ENCODE[trackType] ?? -1;
+  for (const [cat, [catTT, dMin, dMax]] of Object.entries(CATEGORY_DEFS)) {
+    if (tt === catTT && distance >= dMin && distance <= dMax) {
+      return cat;
+    }
+  }
+  return null;
+}
+
+// ==================== CatBoost Oblivious Tree inference ====================
+
+/**
+ * CatBoost Oblivious Tree の推論
+ * 対称木: depth = splits.length, リーフ数 = 2^depth
+ * 各splitの結果(0/1)を並べてバイナリインデックスとする
+ */
+function traverseCatBoostTree(tree: CatBoostTree, features: number[]): number {
+  const depth = tree.splits.length;
+  let leafIdx = 0;
+
+  for (let d = 0; d < depth; d++) {
+    const split = tree.splits[d];
+    const featureVal = features[split.feature_index] ?? 0;
+    const bit = featureVal > split.threshold ? 1 : 0;
+    leafIdx |= (bit << d);
+  }
+
+  return tree.leaf_values[leafIdx] ?? 0;
+}
+
+function predictCatBoostRawScore(model: CatBoostModel, features: number[]): number {
+  let sum = model.bias;
+  for (const tree of model.trees) {
+    sum += traverseCatBoostTree(tree, features);
+  }
+  return sum * model.scale;
+}
+
+function predictWithCatBoost(
+  model: CatBoostModel,
+  horses: MLHorseInput[],
+  featureNames: string[],
+  calibration: CalibrationData | null,
+): number[] {
+  const rawScores = horses.map(h => {
+    const featureArray = featureDictToArray(h.features, featureNames);
+    return predictCatBoostRawScore(model, featureArray);
+  });
+
+  let probs = softmax(rawScores);
+
+  if (calibration) {
+    probs = applyCalibration(probs, calibration);
+  }
+
+  return probs;
+}
+
 // ==================== Ranking prediction ====================
 
 /**
+ * XGBランカーからsoftmax+較正済みの確率配列を返す (アンサンブル用)
+ */
+function predictWithRankerProbs(
+  model: XGBModel,
+  horses: MLHorseInput[],
+  featureNames: string[],
+  calibration: CalibrationData | null,
+): number[] {
+  const rawScores = horses.map(h => {
+    const featureArray = featureDictToArray(h.features, featureNames);
+    return predictRawScore(model, featureArray);
+  });
+
+  let probs = softmax(rawScores);
+  if (calibration) {
+    probs = applyCalibration(probs, calibration);
+  }
+  return probs;
+}
+
+/**
+ * 確率配列 → MLPredictions 変換
+ */
+function probsToMLPredictions(probs: number[], horses: MLHorseInput[]): MLPredictions {
+  const indexed = probs.map((prob, i) => ({ idx: i, prob }));
+  indexed.sort((a, b) => b.prob - a.prob);
+
+  const top3Sum = indexed.slice(0, 3).reduce((s, item) => s + item.prob, 0);
+
+  const result: MLPredictions = {};
+  for (let i = 0; i < horses.length; i++) {
+    const rank = indexed.findIndex(item => item.idx === i);
+    const placeProb = rank < 3
+      ? Math.min(0.95, probs[i] / top3Sum + 0.3)
+      : Math.min(0.80, probs[i] * 3);
+
+    result[horses[i].horseNumber] = {
+      winProb: Math.round(probs[i] * 1_000_000) / 1_000_000,
+      placeProb: Math.round(Math.min(1.0, placeProb) * 1_000_000) / 1_000_000,
+    };
+  }
+
+  return result;
+}
+
+/**
  * ランキングモデルでレース内全馬の確率を推論
+ * v6.0: 較正マッピング適用、カテゴリモデル対応
  */
 function predictWithRanker(model: XGBModel, horses: MLHorseInput[], featureNames: string[]): MLPredictions {
-  // 全馬のraw scoreを計算
   const rawScores = horses.map(h => {
     const featureArray = featureDictToArray(h.features, featureNames);
     return predictRawScore(model, featureArray);
   });
 
   // softmaxで確率に変換
-  const probs = softmax(rawScores);
+  let probs = softmax(rawScores);
+
+  // 較正マッピング適用
+  if (cachedCalibration) {
+    probs = applyCalibration(probs, cachedCalibration);
+  }
 
   // 降順ソートしてランク情報を構築
   const indexed = probs.map((prob, i) => ({ idx: i, prob }));
   indexed.sort((a, b) => b.prob - a.prob);
 
-  // 上位3頭の確率合計を placeProb の基準とする
   const top3Sum = indexed.slice(0, 3).reduce((s, item) => s + item.prob, 0);
 
   const result: MLPredictions = {};
   for (let i = 0; i < horses.length; i++) {
     const rank = indexed.findIndex(item => item.idx === i);
-    // winProb: そのまま softmax確率
-    // placeProb: 上位3頭に入る確率として近似
-    // ランクが3位以内なら高確率、それ以外は自分の確率 / top3合計を基に推定
     const placeProb = rank < 3
-      ? Math.min(0.95, probs[i] / top3Sum + 0.3)  // 上位3頭は高確率
-      : Math.min(0.80, probs[i] * 3);               // 4位以下は確率×3で近似
+      ? Math.min(0.95, probs[i] / top3Sum + 0.3)
+      : Math.min(0.80, probs[i] * 3);
 
     result[horses[i].horseNumber] = {
       winProb: Math.round(probs[i] * 1_000_000) / 1_000_000,
@@ -349,18 +653,64 @@ function predictWithRanker(model: XGBModel, horses: MLHorseInput[], featureNames
 
 /**
  * XGBoost推論を実行する。
- * ランキングモデル → 分類モデル → null の優先順で推論。
+ * カテゴリモデル → グローバルランカー → 分類モデル → null の優先順で推論。
+ * 較正マッピングがあれば自動適用。
  * モデル未配置・エラー時は null を返却（呼び出し元で加重平均フォールバック）。
  */
-export async function callMLPredict(horses: MLHorseInput[]): Promise<MLPredictions | null> {
+export async function callMLPredict(
+  horses: MLHorseInput[],
+  raceContext?: RaceContext,
+): Promise<MLPredictions | null> {
   try {
     if (!ensureModelsLoaded()) return null;
     if (!cachedFeatureNames) return null;
 
     // ランキングモデルモード
     if (modelMode === 'ranker' && cachedRankerModel) {
-      const result = predictWithRanker(cachedRankerModel, horses, cachedFeatureNames);
-      console.log(`[ML] ランキング推論完了: ${horses.length}頭`);
+      // カテゴリ判定
+      const cat = raceContext ? categorizeRace(raceContext.trackType, raceContext.distance) : null;
+
+      // XGBoost: カテゴリモデルを優先使用
+      let selectedXgbModel = cachedRankerModel;
+      let modelLabel = 'global';
+
+      if (cat && cachedCategoryModels[cat]) {
+        selectedXgbModel = cachedCategoryModels[cat];
+        modelLabel = cat;
+      }
+
+      // CatBoostアンサンブルが利用可能か
+      if (cachedCatBoostModel && cachedEnsembleWeights) {
+        let selectedCbModel = cachedCatBoostModel;
+        if (cat && cachedCatBoostCategoryModels[cat]) {
+          selectedCbModel = cachedCatBoostCategoryModels[cat];
+        }
+
+        // XGBoost + CatBoost のアンサンブル推論
+        const xgbProbs = predictWithRankerProbs(selectedXgbModel, horses, cachedFeatureNames, cachedCalibration);
+        const cbProbs = predictWithCatBoost(selectedCbModel, horses, cachedFeatureNames, cachedCatBoostCalibration);
+
+        // カテゴリ別重みがあれば使用
+        let xgbWeight = cachedEnsembleWeights.xgb;
+        let cbWeight = cachedEnsembleWeights.catboost;
+        if (cat && cachedEnsembleWeights.per_category?.[cat]) {
+          xgbWeight = cachedEnsembleWeights.per_category[cat].xgb;
+          cbWeight = cachedEnsembleWeights.per_category[cat].catboost;
+        }
+
+        // 加重平均
+        const blendedProbs = xgbProbs.map((xp, i) => xp * xgbWeight + cbProbs[i] * cbWeight);
+        const probSum = blendedProbs.reduce((s, v) => s + v, 0);
+        const normalizedProbs = probSum > 0 ? blendedProbs.map(v => v / probSum) : blendedProbs;
+
+        const result = probsToMLPredictions(normalizedProbs, horses);
+        console.log(`[ML] アンサンブル推論完了: ${horses.length}頭 (${modelLabel}, XGB=${xgbWeight} CB=${cbWeight}${cachedCalibration ? ', 較正済' : ''})`);
+        return result;
+      }
+
+      // XGBoostのみ
+      const result = predictWithRanker(selectedXgbModel, horses, cachedFeatureNames);
+      console.log(`[ML] ランキング推論完了: ${horses.length}頭 (${modelLabel}${cachedCalibration ? ', 較正済' : ''})`);
       return result;
     }
 

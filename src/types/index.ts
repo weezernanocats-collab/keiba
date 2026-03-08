@@ -183,6 +183,9 @@ export interface RecommendedBet {
   reasoning: string;
   expectedValue: number;
   odds?: number;
+  kellyFraction?: number;    // Kelly Criterion: 最適賭け率 (0-1)
+  valueEdge?: number;        // バリューエッジ: (prob × odds) - 1
+  recommendedStake?: number; // 推奨賭け率 (fractional Kelly f*/4, 0-0.25)
 }
 
 // 過去成績

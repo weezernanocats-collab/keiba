@@ -47,7 +47,6 @@ import {
   calcSireAptitudeScore,
   calcJockeyTrainerScore,
   calcTrainerAbilityScore,
-  calcHistoricalPostBias,
   calcSeasonalScore,
   calcSecondStartScore,
   type RaceHistoricalContext,
@@ -63,12 +62,34 @@ import { applyEnhancedPaceBonus, generatePaceAnalysisText, type HistoricalPacePr
 import { calcMarginScore } from './margin-score';
 import { calcWeatherScore } from './weather-score';
 import { applyVenueMultipliers } from './racecourse-profiles';
+
+// v6.0: ML特徴量用ヘルパー
+function marginToSeconds(margin: string | undefined): number {
+  if (!margin) return 0;
+  const m = margin.trim();
+  if (m === '' || m === '同着') return 0;
+  if (m === 'クビ') return 0.1;
+  if (m === 'ハナ') return 0.05;
+  if (m === 'アタマ') return 0.15;
+  if (m.includes('1/2')) return 0.3;
+  if (m.includes('3/4')) return 0.45;
+  if (m === '大差') return 5.0;
+  const num = parseFloat(m);
+  return isNaN(num) ? 0 : num * 0.6;
+}
+
+function parseCornerDelta(cornerStr: string | undefined): number {
+  if (!cornerStr) return 0;
+  const parts = cornerStr.split('-').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+  if (parts.length < 2) return 0;
+  return parts[parts.length - 2] - parts[parts.length - 1];
+}
 import { dbAll } from './database';
 
 // デフォルト重み設定 (v5.2: v5.1ベース + 着差/天候を最小ウェイトで追加, 合計1.00)
 // 新ファクターの真価は未来レースの自動校正で測定する
 const DEFAULT_WEIGHTS: Record<string, number> = {
-  // 個体分析 (v5.1据え置き、recentFormのみ-1%で新ファクター2%分を捻出)
+  // 個体分析
   recentForm: 0.15,
   courseAptitude: 0.06,
   distanceAptitude: 0.10,
@@ -77,22 +98,20 @@ const DEFAULT_WEIGHTS: Record<string, number> = {
   speedRating: 0.10,
   classPerformance: 0.04,
   runningStyle: 0.05,
-  postPositionBias: 0.03,
+  postPositionBias: 0.04,  // v6.0: historicalPostBias統合（0.03+0.03→0.04+再配分）
   rotation: 0.04,
   lastThreeFurlongs: 0.07,
   consistency: 0.04,
-  // 統計ベース分析 (v5.1据え置き)
+  // 統計ベース分析
   sireAptitude: 0.05,
-  trainerAbility: 0.03,
+  trainerAbility: 0.04,  // v6.0: +0.01（historicalPostBiasから再配分）
   jockeyTrainerCombo: 0.02,
-  historicalPostBias: 0.03,
   seasonalPattern: 0.02,
   handicapAdvantage: 0.01,
-  // 市場シグナル (v5.1据え置き)
+  // 市場シグナル
   marketOdds: 0.03,
-  // v5.2: 最小ウェイトで追加、自動校正に委ねる
   marginCompetitiveness: 0.01,
-  weatherAptitude: 0.01,
+  weatherAptitude: 0.02,  // v6.0: +0.01（historicalPostBiasから再配分）
 };
 
 // WEIGHTS はキャリブレーション結果で上書き可能
@@ -163,7 +182,6 @@ const POPULATION_PRIORS: Record<string, number> = {
   sireAptitude: 50,        // 血統は中立prior
   trainerAbility: 45,      // 調教師不明は平均以下
   jockeyTrainerCombo: 50,  // コンボは中立prior
-  historicalPostBias: 50,  // 枠バイアスは中立
   seasonalPattern: 50,     // 季節は中立
   handicapAdvantage: 50,   // 斤量は中立prior
   marketOdds: 50,          // オッズなし → 中立
@@ -193,7 +211,6 @@ function calcFactorReliability(factor: string, dataPoints: number): number {
     sireAptitude: 10,
     trainerAbility: 20,
     jockeyTrainerCombo: 5,
-    historicalPostBias: 20,
     seasonalPattern: 6,
     marketOdds: 1,
     marginCompetitiveness: 5,
@@ -267,6 +284,9 @@ interface HorseAnalysisInput {
   sireTrackWinRate?: number;
   jockeyDistanceWinRate?: number;
   jockeyCourseWinRate?: number;
+  trainerDistCatWinRate?: number;
+  trainerCondWinRate?: number;
+  trainerGradeWinRate?: number;
 }
 
 interface ScoredHorse {
@@ -340,8 +360,47 @@ export async function generatePrediction(
 
   // --- ML推論によるスコアブレンド ---
   const horseInputMap = new Map(horses.map(h => [h.entry.horseNumber, h]));
+  const raceDate = new Date(date);
   const mlInputs: MLHorseInput[] = scoredHorses.map(sh => {
     const input = horseInputMap.get(sh.entry.horseNumber);
+    const pp = input?.pastPerformances || [];
+
+    // v6.0: 騎手乗替シグナル
+    let jockeySwitchQuality = 0;
+    if (pp.length > 0 && sh.entry.jockeyName) {
+      const lastJockey = pp[0].jockeyName;
+      if (lastJockey && lastJockey !== sh.entry.jockeyName) {
+        jockeySwitchQuality = (sh.scores.jockeyAbility ?? 50) - 50;
+      }
+    }
+
+    // v6.0: コーナー加速（直近5走平均）
+    let cornerDelta = 0;
+    const cornerPerfs = pp.slice(0, 5).filter(p => p.cornerPositions);
+    if (cornerPerfs.length > 0) {
+      const deltas = cornerPerfs.map(p => parseCornerDelta(p.cornerPositions));
+      cornerDelta = deltas.reduce((s, d) => s + d, 0) / deltas.length;
+    }
+
+    // v6.0: 着差定量化
+    let avgMarginWhenWinning = 0;
+    let avgMarginWhenLosing = 0;
+    const winPerfs = pp.filter(p => p.position === 1 && p.margin);
+    const losePerfs = pp.filter(p => p.position > 1 && p.margin);
+    if (winPerfs.length > 0) {
+      avgMarginWhenWinning = winPerfs.reduce((s, p) => s + marginToSeconds(p.margin), 0) / winPerfs.length;
+    }
+    if (losePerfs.length > 0) {
+      avgMarginWhenLosing = losePerfs.reduce((s, p) => s + marginToSeconds(p.margin), 0) / losePerfs.length;
+    }
+
+    // v6.0: 休養日数
+    let daysSinceLastRace = 30;
+    if (pp.length > 0) {
+      const lastDate = new Date(pp[0].date);
+      daysSinceLastRace = Math.max(0, Math.round((raceDate.getTime() - lastDate.getTime()) / 86400000));
+    }
+
     return {
       horseNumber: sh.entry.horseNumber,
       features: buildMLFeatures(
@@ -373,12 +432,22 @@ export async function generatePrediction(
           weightStability: sh.scores._weightStability,
           weightTrendSlope: sh.scores._weightTrendSlope,
           weightOptimalDelta: sh.scores._weightOptimalDelta,
+          // v6.0: 新特徴量
+          jockeySwitchQuality,
+          cornerDelta,
+          avgMarginWhenWinning,
+          avgMarginWhenLosing,
+          daysSinceLastRace,
+          meetDay: raceId.length >= 10 ? parseInt(raceId.substring(8, 10)) || 1 : 1,
+          trainerDistCatWinRate: input?.trainerDistCatWinRate,
+          trainerCondWinRate: input?.trainerCondWinRate,
+          trainerGradeWinRate: input?.trainerGradeWinRate,
         },
       ),
     };
   });
 
-  const mlPredictions = await callMLPredict(mlInputs);
+  const mlPredictions = await callMLPredict(mlInputs, { trackType, distance });
 
   if (mlPredictions) {
     const ML_BLEND_WEIGHT = parseFloat(process.env.ML_BLEND_WEIGHT || '0.40');
@@ -430,6 +499,16 @@ export async function generatePrediction(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (analysis as any).horseScores = horseScores;
+
+  // 各馬のsoftmax確率を算出・保存（Brier Score / キャリブレーション評価用）
+  const winProbs = estimateWinProbabilities(scoredHorses);
+  const winProbabilities: Record<number, number> = {};
+  for (const sh of scoredHorses) {
+    const prob = winProbs.get(sh) || 0;
+    winProbabilities[sh.entry.horseNumber] = Math.round(prob * 10000) / 10000;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (analysis as any).winProbabilities = winProbabilities;
 
   // 信頼度算出
   const confidence = calculateConfidence(scoredHorses, ctx);
@@ -585,12 +664,7 @@ function scoreHorse(
     reasons.push(`${entry.jockeyName}×${entry.trainerName}コンビ好相性（勝率${Math.round(combo.winRate * 100)}%）`);
   }
 
-  // 16. 統計的枠順バイアス (0-100)
-  scores.historicalPostBias = calcHistoricalPostBias(ctx.courseDistStats, entry.postPosition);
-  if (ctx.courseDistStats && ctx.courseDistStats.totalRaces >= 30) {
-    if (scores.historicalPostBias >= 70) reasons.push(`${racecourseName}${distance}mでこの枠は統計的に好成績`);
-    else if (scores.historicalPostBias <= 35) reasons.push(`${racecourseName}${distance}mでこの枠は統計的に不利`);
-  }
+  // 16. (統合済み: historicalPostBias → postPositionBias に統合)
 
   // 17. 季節パターン (0-100)
   const seasonal = ctx.seasonalMap.get(entry.horseId);
@@ -693,7 +767,6 @@ function scoreHorse(
     { factor: 'sireAptitude', reliability: calcFactorReliability('sireAptitude', sireData?.totalRaces || 0), dataPoints: sireData?.totalRaces || 0 },
     { factor: 'trainerAbility', reliability: calcFactorReliability('trainerAbility', trainerStats?.totalRaces || 0), dataPoints: trainerStats?.totalRaces || 0 },
     { factor: 'jockeyTrainerCombo', reliability: calcFactorReliability('jockeyTrainerCombo', comboData?.totalRaces || 0), dataPoints: comboData?.totalRaces || 0 },
-    { factor: 'historicalPostBias', reliability: calcFactorReliability('historicalPostBias', ctx.courseDistStats?.totalRaces || 0), dataPoints: ctx.courseDistStats?.totalRaces || 0 },
     { factor: 'seasonalPattern', reliability: calcFactorReliability('seasonalPattern', seasonalData?.reduce((s, m) => s + m.races, 0) || 0), dataPoints: seasonalData?.reduce((s, m) => s + m.races, 0) || 0 },
     { factor: 'handicapAdvantage', reliability: 1.0, dataPoints: 1 },
     { factor: 'marketOdds', reliability: oddsMap.has(entry.horseNumber) ? 1.0 : 0.0, dataPoints: oddsMap.has(entry.horseNumber) ? 1 : 0 },
@@ -1699,6 +1772,16 @@ function generateBetRecommendations(
 
   const evOf = (h: ScoredHorse) => calcExpectedValue(h, winProbs);
   const oddsOf = (h: ScoredHorse) => (h.entry.odds && h.entry.odds > 0) ? h.entry.odds : undefined;
+  const probOf = (h: ScoredHorse) => winProbs.get(h) || 0;
+  const kellyOf = (h: ScoredHorse) => {
+    const odds = oddsOf(h);
+    if (!odds) return { kelly: 0, edge: -1, stake: 0 };
+    const prob = probOf(h);
+    const kelly = calcKellyFraction(prob, odds);
+    const edge = calcValueEdge(prob, odds);
+    const stake = calcRecommendedStake(kelly);
+    return { kelly, edge, stake };
+  };
 
   const isPrimary = (type: string) => strategy.primaryBets.includes(type);
   const isAvoided = (type: string) => strategy.avoidBets.includes(type);
@@ -1709,6 +1792,7 @@ function generateBetRecommendations(
   if (!isAvoided('単勝') && (pattern === '一強' || (gap12 > 5 && confidence >= 50))) {
     const ev = evOf(top);
     const isMain = isPrimary('単勝');
+    const kv = kellyOf(top);
     bets.push({
       type: '単勝',
       selections: [top.entry.horseNumber],
@@ -1717,12 +1801,20 @@ function generateBetRecommendations(
         : `${top.entry.horseName}の勝利を狙う。ただし${pattern}のため控えめに。`,
       expectedValue: ev,
       odds: oddsOf(top),
+      kellyFraction: kv.kelly,
+      valueEdge: kv.edge,
+      recommendedStake: kv.stake,
     });
   }
 
   // 複勝: ほぼ常に推奨（安定枠）
   if (!isAvoided('複勝')) {
     const isMain = isPrimary('複勝');
+    const placeOdds = oddsOf(top) ? Math.max(1.1, oddsOf(top)! * 0.35) : undefined;
+    // 複勝のKelly: 3着内確率 ≈ 上位3頭の勝率合計で按分
+    const topPlaceProb = Math.min(0.9, probOf(top) * 3 + 0.1);
+    const placeKelly = placeOdds ? calcKellyFraction(topPlaceProb, placeOdds) : 0;
+    const placeEdge = placeOdds ? calcValueEdge(topPlaceProb, placeOdds) : -1;
     bets.push({
       type: '複勝',
       selections: [top.entry.horseNumber],
@@ -1730,16 +1822,26 @@ function generateBetRecommendations(
         ? `【主力】${top.entry.horseName}の3着以内で手堅く回収。${pattern === '混戦' || pattern === '大混戦' ? '混戦のため複勝が最も安全。' : ''}${top.scores.consistency >= 70 ? '着順安定型。' : ''}`
         : `${top.entry.horseName}の3着以内は堅い。安定感重視。`,
       expectedValue: evOf(top) * 0.7,
-      odds: oddsOf(top) ? Math.max(1.1, oddsOf(top)! * 0.35) : undefined,
+      odds: placeOdds,
+      kellyFraction: placeKelly,
+      valueEdge: placeEdge,
+      recommendedStake: calcRecommendedStake(placeKelly),
     });
     // 混戦時は○も複勝推奨
     if ((pattern === '混戦' || pattern === '大混戦' || pattern === '二強') && isMain) {
+      const secPlaceOdds = oddsOf(second) ? Math.max(1.1, oddsOf(second)! * 0.35) : undefined;
+      const secPlaceProb = Math.min(0.9, probOf(second) * 3 + 0.1);
+      const secKelly = secPlaceOdds ? calcKellyFraction(secPlaceProb, secPlaceOdds) : 0;
+      const secEdge = secPlaceOdds ? calcValueEdge(secPlaceProb, secPlaceOdds) : -1;
       bets.push({
         type: '複勝',
         selections: [second.entry.horseNumber],
         reasoning: `【押さえ】${second.entry.horseName}も3着以内有力。◎と迷う実力。`,
         expectedValue: evOf(second) * 0.7,
-        odds: oddsOf(second) ? Math.max(1.1, oddsOf(second)! * 0.35) : undefined,
+        odds: secPlaceOdds,
+        kellyFraction: secKelly,
+        valueEdge: secEdge,
+        recommendedStake: calcRecommendedStake(secKelly),
       });
     }
   }
@@ -1747,6 +1849,11 @@ function generateBetRecommendations(
   // 馬連: 二強パターンやスコアが近い上位2頭
   if (!isAvoided('馬連')) {
     const isMain = isPrimary('馬連');
+    const umarenOdds = (oddsOf(top) && oddsOf(second)) ? oddsOf(top)! * oddsOf(second)! * 0.5 : undefined;
+    // 馬連確率 ≈ 上位2頭が1-2着に入る確率
+    const umarenProb = probOf(top) * probOf(second) * 2;
+    const umarenKelly = umarenOdds ? calcKellyFraction(umarenProb, umarenOdds) : 0;
+    const umarenEdge = umarenOdds ? calcValueEdge(umarenProb, umarenOdds) : -1;
     bets.push({
       type: '馬連',
       selections: [top.entry.horseNumber, second.entry.horseNumber],
@@ -1754,7 +1861,10 @@ function generateBetRecommendations(
         ? `【主力】${top.entry.horseName}と${second.entry.horseName}の組み合わせ。${pattern === '二強' ? '二強対決の本線。' : ''}${second.reasons[0] || ''}`
         : `上位2頭の組み合わせ。${second.reasons[0] || ''}`,
       expectedValue: (evOf(top) + evOf(second)) / 2,
-      odds: (oddsOf(top) && oddsOf(second)) ? oddsOf(top)! * oddsOf(second)! * 0.5 : undefined,
+      odds: umarenOdds,
+      kellyFraction: umarenKelly,
+      valueEdge: umarenEdge,
+      recommendedStake: calcRecommendedStake(umarenKelly),
     });
   }
 
@@ -1762,7 +1872,6 @@ function generateBetRecommendations(
   if (!isAvoided('ワイド')) {
     const isMain = isPrimary('ワイド');
     if (isMain && (pattern === '三つ巴' || pattern === '混戦' || pattern === '大混戦')) {
-      // BOX形式: ◎○▲（+△）のワイドBOX
       const boxHorses = pattern === '大混戦' && fourth
         ? [top, second, third, fourth]
         : [top, second, third];
@@ -1773,22 +1882,31 @@ function generateBetRecommendations(
         }
       }
       for (const [a, b] of pairs) {
+        const wideOdds = (oddsOf(a) && oddsOf(b)) ? oddsOf(a)! * oddsOf(b)! * 0.25 : undefined;
+        const wideProb = (probOf(a) + probOf(b)) * 0.5;
         bets.push({
           type: 'ワイド',
           selections: [a.entry.horseNumber, b.entry.horseNumber],
           reasoning: `【主力】ワイドBOXの一角。${a.entry.horseName}-${b.entry.horseName}。${pattern}のため着順不問で広く拾う。`,
           expectedValue: (evOf(a) + evOf(b)) / 2,
-          odds: (oddsOf(a) && oddsOf(b)) ? oddsOf(a)! * oddsOf(b)! * 0.25 : undefined,
+          odds: wideOdds,
+          kellyFraction: wideOdds ? calcKellyFraction(wideProb, wideOdds) : 0,
+          valueEdge: wideOdds ? calcValueEdge(wideProb, wideOdds) : -1,
+          recommendedStake: wideOdds ? calcRecommendedStake(calcKellyFraction(wideProb, wideOdds)) : 0,
         });
       }
     } else if (!isAvoided('ワイド') && third.totalScore > 40) {
-      // 通常: ◎→▲
+      const wideOdds = (oddsOf(top) && oddsOf(third)) ? oddsOf(top)! * oddsOf(third)! * 0.25 : undefined;
+      const wideProb = (probOf(top) + probOf(third)) * 0.5;
       bets.push({
         type: 'ワイド',
         selections: [top.entry.horseNumber, third.entry.horseNumber],
         reasoning: `${top.entry.horseName}軸で${third.entry.horseName}へ。${third.reasons[0] || '好走条件が揃っている'}`,
         expectedValue: (evOf(top) + evOf(third)) / 2,
-        odds: (oddsOf(top) && oddsOf(third)) ? oddsOf(top)! * oddsOf(third)! * 0.25 : undefined,
+        odds: wideOdds,
+        kellyFraction: wideOdds ? calcKellyFraction(wideProb, wideOdds) : 0,
+        valueEdge: wideOdds ? calcValueEdge(wideProb, wideOdds) : -1,
+        recommendedStake: wideOdds ? calcRecommendedStake(calcKellyFraction(wideProb, wideOdds)) : 0,
       });
     }
   }
@@ -1796,7 +1914,9 @@ function generateBetRecommendations(
   // 馬単: 一強パターンで◎頭固定
   if (!isAvoided('馬単') && gap12 > 5 && confidence >= 50) {
     const isMain = isPrimary('馬単');
-    // ◎→○
+    const umatanOdds = (oddsOf(top) && oddsOf(second)) ? oddsOf(top)! * oddsOf(second)! * 0.9 : undefined;
+    const umatanProb = probOf(top) * probOf(second);
+    const umatanKelly = umatanOdds ? calcKellyFraction(umatanProb, umatanOdds) : 0;
     bets.push({
       type: '馬単',
       selections: [top.entry.horseNumber, second.entry.horseNumber],
@@ -1804,16 +1924,24 @@ function generateBetRecommendations(
         ? `【主力】${top.entry.horseName}頭固定。2着${second.entry.horseName}。${gap12 > 8 ? '1着は堅い。' : ''}`
         : `${top.entry.horseName}が頭鉄板。2着に${second.entry.horseName}。`,
       expectedValue: evOf(top) * 1.5,
-      odds: (oddsOf(top) && oddsOf(second)) ? oddsOf(top)! * oddsOf(second)! * 0.9 : undefined,
+      odds: umatanOdds,
+      kellyFraction: umatanKelly,
+      valueEdge: umatanOdds ? calcValueEdge(umatanProb, umatanOdds) : -1,
+      recommendedStake: calcRecommendedStake(umatanKelly),
     });
-    // 一強なら◎→▲も
     if (isMain && third.totalScore > 40) {
+      const umatanOdds2 = (oddsOf(top) && oddsOf(third)) ? oddsOf(top)! * oddsOf(third)! * 0.9 : undefined;
+      const umatanProb2 = probOf(top) * probOf(third);
+      const umatanKelly2 = umatanOdds2 ? calcKellyFraction(umatanProb2, umatanOdds2) : 0;
       bets.push({
         type: '馬単',
         selections: [top.entry.horseNumber, third.entry.horseNumber],
         reasoning: `${top.entry.horseName}頭固定→${third.entry.horseName}。穴目の組み合わせ。`,
         expectedValue: evOf(top) * 1.3,
-        odds: (oddsOf(top) && oddsOf(third)) ? oddsOf(top)! * oddsOf(third)! * 0.9 : undefined,
+        odds: umatanOdds2,
+        kellyFraction: umatanKelly2,
+        valueEdge: umatanOdds2 ? calcValueEdge(umatanProb2, umatanOdds2) : -1,
+        recommendedStake: calcRecommendedStake(umatanKelly2),
       });
     }
   }
@@ -1821,6 +1949,9 @@ function generateBetRecommendations(
   // 三連複: 上位が明確に抜けている場合
   if (!isAvoided('三連複') && fourth && gap34 > 1.5) {
     const isMain = isPrimary('三連複');
+    const sanrenpukuOdds = (oddsOf(top) && oddsOf(second) && oddsOf(third)) ? oddsOf(top)! * oddsOf(second)! * oddsOf(third)! * 0.3 : undefined;
+    const sanrenpukuProb = probOf(top) * probOf(second) * probOf(third) * 6;
+    const sanrenpukuKelly = sanrenpukuOdds ? calcKellyFraction(sanrenpukuProb, sanrenpukuOdds) : 0;
     bets.push({
       type: '三連複',
       selections: [top.entry.horseNumber, second.entry.horseNumber, third.entry.horseNumber],
@@ -1828,37 +1959,56 @@ function generateBetRecommendations(
         ? `【主力】上位3頭のBOX。${confidence >= 60 ? '信頼度高め。' : ''}${pattern === '三つ巴' ? '3頭の着順は不問で取れる。' : ''}`
         : `上位3頭で堅く決まる想定。${confidence >= 60 ? '信頼度高め。' : '波乱の余地あり、抑え程度に。'}`,
       expectedValue: (evOf(top) + evOf(second) + evOf(third)) / 3,
-      odds: (oddsOf(top) && oddsOf(second) && oddsOf(third)) ? oddsOf(top)! * oddsOf(second)! * oddsOf(third)! * 0.3 : undefined,
+      odds: sanrenpukuOdds,
+      kellyFraction: sanrenpukuKelly,
+      valueEdge: sanrenpukuOdds ? calcValueEdge(sanrenpukuProb, sanrenpukuOdds) : -1,
+      recommendedStake: calcRecommendedStake(sanrenpukuKelly),
     });
   }
 
   // 三連単: 一強パターンかつ高信頼度
   if (!isAvoided('三連単') && gap12 > 6 && confidence >= 60 && fourth && gap34 > 2) {
+    const sanrentanOdds = (oddsOf(top) && oddsOf(second) && oddsOf(third)) ? oddsOf(top)! * oddsOf(second)! * oddsOf(third)! * 0.6 : undefined;
+    const sanrentanProb = probOf(top) * probOf(second) * probOf(third);
+    const sanrentanKelly = sanrentanOdds ? calcKellyFraction(sanrentanProb, sanrentanOdds) : 0;
     bets.push({
       type: '三連単',
       selections: [top.entry.horseNumber, second.entry.horseNumber, third.entry.horseNumber],
       reasoning: `高配当狙い。${top.entry.horseName}→${second.entry.horseName}→${third.entry.horseName}の順。`,
       expectedValue: (evOf(top) + evOf(second) + evOf(third)) / 3 * 2,
-      odds: (oddsOf(top) && oddsOf(second) && oddsOf(third)) ? oddsOf(top)! * oddsOf(second)! * oddsOf(third)! * 0.6 : undefined,
+      odds: sanrentanOdds,
+      kellyFraction: sanrentanKelly,
+      valueEdge: sanrentanOdds ? calcValueEdge(sanrentanProb, sanrentanOdds) : -1,
+      recommendedStake: calcRecommendedStake(sanrentanKelly),
     });
   }
 
-  // --- バリューベット検出 ---
+  // --- バリューベット検出（Kelly Criterion ベース） ---
+  // valueEdge > 0.10 (期待値10%+) かつ Kelly > 0.02 のみ推奨
+  const VALUE_EDGE_THRESHOLD = 0.10;
+  const MIN_KELLY_THRESHOLD = 0.02;
   for (const horse of scoredHorses) {
     if (!horse.entry.odds || horse.entry.odds <= 0) continue;
-    const ev = evOf(horse);
-    if (ev < 1.15) continue;
-
     const rank = scoredHorses.indexOf(horse) + 1;
     if (rank <= 3) continue;
 
-    const prob = winProbs.get(horse) || 0;
+    const prob = probOf(horse);
+    const odds = horse.entry.odds;
+    const edge = calcValueEdge(prob, odds);
+    const kelly = calcKellyFraction(prob, odds);
+
+    if (edge < VALUE_EDGE_THRESHOLD || kelly < MIN_KELLY_THRESHOLD) continue;
+
+    const stake = calcRecommendedStake(kelly);
     bets.push({
       type: '単勝',
       selections: [horse.entry.horseNumber],
-      reasoning: `【バリュー】${horse.entry.horseName}（${rank}位）。推定勝率${(prob * 100).toFixed(1)}%に対しオッズ${horse.entry.odds.toFixed(1)}倍は過小評価。期待値${ev.toFixed(2)}。`,
-      expectedValue: ev,
+      reasoning: `【バリュー】${horse.entry.horseName}（${rank}位）。推定勝率${(prob * 100).toFixed(1)}%に対しオッズ${odds.toFixed(1)}倍は過小評価。エッジ+${(edge * 100).toFixed(0)}% Kelly${(kelly * 100).toFixed(1)}%。`,
+      expectedValue: evOf(horse),
       odds: oddsOf(horse),
+      kellyFraction: kelly,
+      valueEdge: edge,
+      recommendedStake: stake,
     });
   }
 
@@ -1921,6 +2071,41 @@ function calcExpectedValue(
     ? horse.entry.odds
     : 1 / prob; // オッズ未取得時はフェアオッズ（EV=1.0）
   return Math.round(prob * odds * 100) / 100;
+}
+
+/**
+ * Kelly Criterion: f* = (b×p - q) / b
+ *   b = odds - 1 (ネットオッズ)
+ *   p = 推定勝率
+ *   q = 1 - p
+ *
+ * Fractional Kelly (f star / 4) で保守的に運用。
+ * 負の値（エッジなし）は 0 にクランプ。
+ */
+function calcKellyFraction(prob: number, odds: number): number {
+  if (prob <= 0 || odds <= 1) return 0;
+  const b = odds - 1;
+  const q = 1 - prob;
+  const fullKelly = (b * prob - q) / b;
+  return Math.max(0, fullKelly);
+}
+
+/**
+ * バリューエッジ = (推定勝率 × オッズ) - 1
+ * 正の値 = 期待値がプラス（市場が過小評価）
+ */
+function calcValueEdge(prob: number, odds: number): number {
+  if (prob <= 0 || odds <= 0) return -1;
+  return prob * odds - 1;
+}
+
+/** Fractional Kelly (1/4) + 上限キャップ */
+const KELLY_FRACTION_DIVISOR = 4;
+const MAX_STAKE_FRACTION = 0.25;
+
+function calcRecommendedStake(kellyFraction: number): number {
+  const fractional = kellyFraction / KELLY_FRACTION_DIVISOR;
+  return Math.min(fractional, MAX_STAKE_FRACTION);
 }
 
 // ==================== サマリー生成 ====================

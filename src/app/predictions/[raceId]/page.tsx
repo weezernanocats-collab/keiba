@@ -6,6 +6,7 @@ import GradeBadge from '@/components/GradeBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import FavoriteButton from '@/components/FavoriteButton';
 import BudgetSimulator from '@/components/BudgetSimulator';
+import MonteCarloSimulator from '@/components/MonteCarloSimulator';
 import { useFavorites } from '@/lib/use-favorites';
 
 interface Pick {
@@ -22,6 +23,7 @@ interface Analysis {
   keyFactors: string[];
   riskFactors: string[];
   bettingStrategy?: BettingStrategy;
+  winProbabilities?: Record<number, number>;
 }
 
 interface BettingStrategy {
@@ -40,6 +42,9 @@ interface Bet {
   reasoning: string;
   expectedValue: number;
   odds?: number;
+  kellyFraction?: number;
+  valueEdge?: number;
+  recommendedStake?: number;
 }
 
 interface PredictionData {
@@ -489,6 +494,23 @@ export default function PredictionDetailPage() {
                   <p className="text-sm text-muted">
                     {bet.reasoning.replace(/^【(主力|バリュー|押さえ)】/, '')}
                   </p>
+                  {(bet.kellyFraction !== undefined && bet.kellyFraction > 0) && (
+                    <div className="flex flex-wrap gap-2 mt-2 text-xs">
+                      {bet.valueEdge !== undefined && bet.valueEdge > 0 && (
+                        <span className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5 rounded">
+                          エッジ +{(bet.valueEdge * 100).toFixed(0)}%
+                        </span>
+                      )}
+                      <span className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-2 py-0.5 rounded">
+                        Kelly {(bet.kellyFraction * 100).toFixed(1)}%
+                      </span>
+                      {bet.recommendedStake !== undefined && bet.recommendedStake > 0 && (
+                        <span className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded">
+                          推奨 {(bet.recommendedStake * 100).toFixed(1)}%
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -501,6 +523,14 @@ export default function PredictionDetailPage() {
         <BudgetSimulator
           bets={prediction.recommendedBets}
           riskLevel={prediction.analysis.bettingStrategy.riskLevel}
+        />
+      )}
+
+      {/* モンテカルロ・シミュレーション */}
+      {prediction.recommendedBets.length > 0 && (
+        <MonteCarloSimulator
+          bets={prediction.recommendedBets}
+          winProbabilities={prediction.analysis.winProbabilities}
         />
       )}
 

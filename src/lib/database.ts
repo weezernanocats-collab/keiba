@@ -363,6 +363,17 @@ const SCHEMA_STATEMENTS: InStatement[] = [
   `CREATE INDEX IF NOT EXISTS idx_prediction_results_race ON prediction_results(race_id)`,
   `CREATE INDEX IF NOT EXISTS idx_scheduler_runs_date ON scheduler_runs(target_date, job_type)`,
 
+  // オッズ時系列スナップショットテーブル
+  `CREATE TABLE IF NOT EXISTS odds_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    race_id TEXT NOT NULL,
+    horse_number INTEGER NOT NULL,
+    odds REAL NOT NULL,
+    snapshot_time TEXT NOT NULL,
+    FOREIGN KEY (race_id) REFERENCES races(id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_odds_snapshots_race ON odds_snapshots(race_id, horse_number, snapshot_time)`,
+
   // マイグレーション: race_entries に odds/popularity カラム追加
   // ALTER TABLE ... ADD COLUMN はカラムが既に存在するとエラーになるため、
   // 存在チェック付きで実行する（SQLite は IF NOT EXISTS をサポートしないため try-catch で対応）
@@ -372,4 +383,8 @@ const SCHEMA_STATEMENTS: InStatement[] = [
 const MIGRATIONS = [
   `ALTER TABLE race_entries ADD COLUMN odds REAL`,
   `ALTER TABLE race_entries ADD COLUMN popularity INTEGER`,
+  `ALTER TABLE prediction_results ADD COLUMN brier_score REAL`,
+  `ALTER TABLE prediction_results ADD COLUMN log_loss REAL`,
+  `ALTER TABLE races ADD COLUMN lap_times_json TEXT`,
+  `ALTER TABLE races ADD COLUMN pace_type TEXT`,
 ];

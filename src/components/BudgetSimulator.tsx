@@ -8,6 +8,9 @@ interface Bet {
   reasoning: string;
   expectedValue: number;
   odds?: number;
+  kellyFraction?: number;
+  valueEdge?: number;
+  recommendedStake?: number;
 }
 
 interface BudgetSimulatorProps {
@@ -153,18 +156,39 @@ function getAllocations(bets: Bet[], riskLevel: string, budget: number): Allocat
     return { bet, category };
   });
 
-  // リスクレベルに基づく配分比率
+  // Kelly Criterion ベース配分が可能か
+  const hasKelly = categorized.some(c => c.bet.recommendedStake && c.bet.recommendedStake > 0);
+
+  if (hasKelly) {
+    // Kelly Criterion ベースの配分
+    const riskMultiplier = riskLevel === 'low' ? 0.5 : riskLevel === 'medium' ? 0.75 : 1.0;
+    const rawAllocations = categorized.map(({ bet, category }) => {
+      const stake = (bet.recommendedStake || 0) * riskMultiplier;
+      return { bet, category, stake };
+    });
+
+    // 正規化: 合計が100%を超えないようにスケール
+    const totalStake = rawAllocations.reduce((s, a) => s + a.stake, 0);
+    const scale = totalStake > 1 ? 1 / totalStake : 1;
+
+    return rawAllocations.map(({ bet, category, stake }) => {
+      const fraction = stake * scale;
+      const rawAmount = budget * fraction;
+      const amount = Math.max(100, Math.round(rawAmount / 100) * 100);
+      return { bet, category, amount };
+    });
+  }
+
+  // フォールバック: 従来のリスクレベルベース配分
   const ratios = riskLevel === 'low'
     ? { '主力': 0.6, 'バリュー': 0.25, '押さえ': 0.15 }
     : riskLevel === 'medium'
     ? { '主力': 0.5, 'バリュー': 0.3, '押さえ': 0.2 }
     : { '主力': 0.4, 'バリュー': 0.35, '押さえ': 0.25 };
 
-  // カテゴリ別の件数
   const counts = { '主力': 0, 'バリュー': 0, '押さえ': 0 };
   for (const c of categorized) counts[c.category]++;
 
-  // 配分計算（100円単位に丸め）
   return categorized.map(({ bet, category }) => {
     const count = counts[category] || 1;
     const categoryBudget = budget * (ratios[category] || 0.2);

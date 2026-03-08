@@ -164,7 +164,7 @@ async function main() {
         mlInputs.push({ horseNumber: entry.horse_number, features });
       }
 
-      const mlResult = await callMLPredict(mlInputs);
+      const mlResult = await callMLPredict(mlInputs, { trackType: pred.track_type, distance: pred.distance });
       if (mlResult) {
         mlProcessed++;
 

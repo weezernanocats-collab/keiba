@@ -352,7 +352,17 @@ export async function scrapeOdds(raceId: string): Promise<ScrapedOdds> {
 }
 
 // レース結果取得
+export interface ScrapedResultWithLaps {
+  results: ScrapedResult[];
+  lapTimes: number[];   // 200mごとのラップタイム (秒)
+}
+
 export async function scrapeRaceResult(raceId: string): Promise<ScrapedResult[]> {
+  const data = await scrapeRaceResultWithLaps(raceId);
+  return data.results;
+}
+
+export async function scrapeRaceResultWithLaps(raceId: string): Promise<ScrapedResultWithLaps> {
   const url = `${BASE_URL}/race/result.html?race_id=${raceId}`;
   const html = await fetchHtml(url);
   const $ = cheerio.load(html);
@@ -392,7 +402,49 @@ export async function scrapeRaceResult(raceId: string): Promise<ScrapedResult[]>
     }
   });
 
-  return results;
+  // ラップタイム抽出
+  // netkeiba result.html: <span class="RapLap">...</span> or
+  // <div class="Race_HaronTime">...</div> にラップタイムが表示される
+  const lapTimes: number[] = [];
+  const lapSelectors = [
+    '.RapLap',
+    '.Race_HaronTime',
+    '.HaronTime',
+    'td.Header:contains("ラップ")',
+  ];
+
+  for (const selector of lapSelectors) {
+    const lapEl = $(selector);
+    if (lapEl.length > 0) {
+      const lapText = lapEl.text().trim();
+      // パターン: "12.2 - 11.8 - 12.1 - ..." or "12.2-11.8-12.1-..."
+      const matches = lapText.match(/\d{1,2}\.\d/g);
+      if (matches && matches.length >= 3) {
+        for (const m of matches) {
+          lapTimes.push(parseFloat(m));
+        }
+        break;
+      }
+    }
+  }
+
+  // テーブルベースのフォールバック
+  if (lapTimes.length === 0) {
+    $('table').each((_, table) => {
+      const headerText = $(table).find('th, td.Header').first().text().trim();
+      if (headerText.includes('ラップ') || headerText.includes('Lap')) {
+        $(table).find('td').each((__, td) => {
+          const text = $(td).text().trim();
+          const val = parseFloat(text);
+          if (val >= 9.0 && val <= 15.0) {
+            lapTimes.push(val);
+          }
+        });
+      }
+    });
+  }
+
+  return { results, lapTimes };
 }
 
 // 馬の詳細情報取得
