@@ -445,7 +445,13 @@ export function mapPastPerformance(row: any): PastPerformance {
   };
 }
 
-export async function getHorsePastPerformances(horseId: string, limit: number = 100) {
+export async function getHorsePastPerformances(horseId: string, beforeDate?: string, limit: number = 100) {
+  if (beforeDate) {
+    const rows = await dbAll(`
+      SELECT * FROM past_performances WHERE horse_id = ? AND date < ? ORDER BY date DESC LIMIT ?
+    `, [horseId, beforeDate, limit]);
+    return rows.map(mapPastPerformance);
+  }
   const rows = await dbAll(`
     SELECT * FROM past_performances WHERE horse_id = ? ORDER BY date DESC LIMIT ?
   `, [horseId, limit]);
@@ -564,24 +570,28 @@ export async function getDashboardStats() {
  * jockeysテーブルに登録がない場合は race_entries から計算する。
  * どちらもなければデフォルト値を返す。
  */
-export async function getJockeyStats(jockeyId: string): Promise<{ winRate: number; placeRate: number }> {
+export async function getJockeyStats(jockeyId: string, beforeDate?: string): Promise<{ winRate: number; placeRate: number }> {
   const DEFAULT_WIN_RATE = 0.08;
   const DEFAULT_PLACE_RATE = 0.20;
 
   if (!jockeyId) return { winRate: DEFAULT_WIN_RATE, placeRate: DEFAULT_PLACE_RATE };
 
-  // まず jockeys テーブルから取得
-  const jockey = await dbGet<{ win_rate: number; place_rate: number; total_races: number }>(
-    'SELECT win_rate, place_rate, total_races FROM jockeys WHERE id = ?',
-    [jockeyId]
-  );
+  // beforeDate 未指定時は jockeys テーブルの集計済み値を使用
+  if (!beforeDate) {
+    const jockey = await dbGet<{ win_rate: number; place_rate: number; total_races: number }>(
+      'SELECT win_rate, place_rate, total_races FROM jockeys WHERE id = ?',
+      [jockeyId]
+    );
 
-  if (jockey && jockey.total_races > 0 && jockey.win_rate > 0) {
-    return { winRate: jockey.win_rate, placeRate: jockey.place_rate };
+    if (jockey && jockey.total_races > 0 && jockey.win_rate > 0) {
+      return { winRate: jockey.win_rate, placeRate: jockey.place_rate };
+    }
   }
 
-  // jockeys テーブルに登録がない場合は race_entries + races から計算
-  // place_rate = 連対率（2着以内）: calcJockeyScore の係数と整合させる
+  // race_entries + races から計算（beforeDate指定時は日付フィルタ付き）
+  const dateFilter = beforeDate ? ' AND r.date < ?' : '';
+  const args = beforeDate ? [jockeyId, beforeDate] : [jockeyId];
+
   const stats = await dbGet<{ total: number; wins: number; places: number }>(`
     SELECT
       COUNT(*) as total,
@@ -589,8 +599,8 @@ export async function getJockeyStats(jockeyId: string): Promise<{ winRate: numbe
       SUM(CASE WHEN e.result_position <= 2 THEN 1 ELSE 0 END) as places
     FROM race_entries e
     JOIN races r ON e.race_id = r.id
-    WHERE e.jockey_id = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL
-  `, [jockeyId]);
+    WHERE e.jockey_id = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL${dateFilter}
+  `, args);
 
   if (stats && stats.total >= 5) {
     return {

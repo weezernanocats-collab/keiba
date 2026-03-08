@@ -72,7 +72,7 @@ export async function GET(
       horse = { ...horse, birth_date: null };
     }
 
-    const pastPerformances = await getHorsePastPerformances(horseId, 20);
+    const pastPerformances = await getHorsePastPerformances(horseId, undefined, 20);
 
     // race_entries から直近の出走情報を補完（過去成績がない場合）
     let raceEntries: Record<string, unknown>[] = [];

@@ -17,8 +17,6 @@ for (const line of envContent.split('\n')) {
   }
 }
 
-// Gemini無料枠切れ → タイムアウト待ちを回避するため無効化
-delete process.env.GEMINI_API_KEY;
 
 import { ensureInitialized, dbAll } from '../src/lib/database';
 import { generatePrediction, type HorseAnalysisInput } from '../src/lib/prediction-engine';
@@ -123,6 +121,8 @@ let horseIdsByFather: Map<string, string[]>;
 let resultEntriesByVenueDate: Map<string, EntryRow[]>;
 // field sizes by race_id
 let fieldSizeByRace: Map<string, number>;
+// odds by race_id
+let oddsByRace: Map<string, { horse_number1: number; odds: number }[]>;
 
 // ==================== データプリロード ====================
 
@@ -193,6 +193,18 @@ async function preloadData() {
     resultEntriesByVenueDate.set(key, arr);
   }
 
+  // 7. 全オッズ（単勝のみ）
+  const allOdds = await dbAll<{ race_id: string; horse_number1: number; odds: number }>(
+    "SELECT race_id, horse_number1, odds FROM odds WHERE bet_type = '単勝'"
+  );
+  oddsByRace = new Map();
+  for (const o of allOdds) {
+    const arr = oddsByRace.get(o.race_id) || [];
+    arr.push({ horse_number1: o.horse_number1, odds: o.odds });
+    oddsByRace.set(o.race_id, arr);
+  }
+  console.log(`  odds (単勝): ${allOdds.length}`);
+
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(`  プリロード完了: ${elapsed}秒\n`);
 }
@@ -227,6 +239,13 @@ function installCacheInterceptor(client: any) {
     if (sqlNorm.includes('from past_performances where horse_id =') && sqlNorm.includes('order by date desc limit')) {
       cacheHits++;
       const perfs = perfsByHorse.get(args[0]) || [];
+      // beforeDate フィルタ対応: date < ? が含まれる場合 args=[horseId, beforeDate, limit]
+      if (sqlNorm.includes('date <') && args.length >= 3) {
+        const beforeDate = args[1] as string;
+        const limit = (args[2] as number) || 100;
+        const filtered = perfs.filter(p => p.date < beforeDate);
+        return mockResult(filtered.slice(0, limit));
+      }
       const limit = args[1] || 100;
       return mockResult(perfs.slice(0, limit));
     }
@@ -254,46 +273,86 @@ function installCacheInterceptor(client: any) {
     // --- jockey stats aggregate (race_entries + races) ---
     if (sqlNorm.includes('from race_entries e') && sqlNorm.includes('join races r') && sqlNorm.includes('e.jockey_id')) {
       cacheHits++;
-      return mockResult([computeJockeyStats(args[0])]);
+      const beforeDate = sqlNorm.includes('date <') && args.length >= 2 ? args[1] as string : undefined;
+      return mockResult([computeJockeyStats(args[0] as string, beforeDate)]);
     }
 
     // --- getCourseDistanceStats: past_performances by racecourse + track_type + distance range ---
     if (sqlNorm.includes('from past_performances') && sqlNorm.includes('racecourse_name') && sqlNorm.includes('distance between')) {
       cacheHits++;
-      return mockResult(computeCourseDistancePerfs(args[0], args[1], args[2], args[3]));
+      // args: [racecourse, trackType, minDist, maxDist, ...condGroup?, beforeDate?]
+      // beforeDate is the last arg if 'date <' is in query
+      const beforeDate = sqlNorm.includes('date <') ? args[args.length - 1] as string : undefined;
+      return mockResult(computeCourseDistancePerfs(args[0] as string, args[1] as string, args[2] as number, args[3] as number, beforeDate));
     }
 
     // --- getSireStats: past_performances JOIN horses WHERE father_name ---
     if (sqlNorm.includes('from past_performances pp') && sqlNorm.includes('join horses h') && sqlNorm.includes('father_name')) {
       cacheHits++;
-      return mockResult(computeSirePerfs(args[0]));
+      const beforeDate = sqlNorm.includes('date <') ? args[args.length - 1] as string : undefined;
+      return mockResult(computeSirePerfs(args[0] as string, beforeDate));
     }
 
     // --- getTrainerStats (race_entries + races by trainer_name) ---
     if (sqlNorm.includes('from race_entries re') && sqlNorm.includes('join races r') && sqlNorm.includes('re.trainer_name') && sqlNorm.includes('result_position is not null')) {
       cacheHits++;
-      return mockResult(computeTrainerPerfs(args[0]));
+      const beforeDate = sqlNorm.includes('date <') && args.length >= 2 ? args[1] as string : undefined;
+      return mockResult(computeTrainerPerfs(args[0] as string, beforeDate));
     }
 
     // --- getJockeyTrainerCombo ---
     if (sqlNorm.includes('from past_performances pp') && sqlNorm.includes('join horses h') && sqlNorm.includes('jockey_name') && sqlNorm.includes('trainer_name')) {
       cacheHits++;
-      return mockResult(computeJockeyTrainerPerfs(args[0], args[1]));
+      const beforeDate = sqlNorm.includes('date <') && args.length >= 3 ? args[2] as string : undefined;
+      return mockResult(computeJockeyTrainerPerfs(args[0] as string, args[1] as string, beforeDate));
     }
 
     // --- getHorseSeasonalStats ---
     if (sqlNorm.includes('from past_performances') && sqlNorm.includes('horse_id') && sqlNorm.includes('substr(date')) {
       cacheHits++;
-      return mockResult(computeSeasonalPerfs(args[0]));
+      const beforeDate = sqlNorm.includes('date <') && args.length >= 2 ? args[1] as string : undefined;
+      return mockResult(computeSeasonalPerfs(args[0] as string, beforeDate));
     }
 
     // --- getSecondStartBonus: past_performances by horse_id ORDER BY date ASC ---
     if (sqlNorm.includes('from past_performances') && sqlNorm.includes('horse_id') && sqlNorm.includes('order by date asc')) {
       cacheHits++;
       const perfs = perfsByHorse.get(args[0]) || [];
+      const beforeDate = sqlNorm.includes('date <') && args.length >= 2 ? args[1] as string : undefined;
       // 元データはdate DESC順なのでreverse + entries > 0 フィルタ
-      const filtered = perfs.filter(p => p.entries > 0).reverse();
+      const filtered = perfs
+        .filter(p => p.entries > 0 && (!beforeDate || p.date < beforeDate))
+        .reverse();
       return mockResult(filtered.map(p => ({ date: p.date, position: p.position, entries: p.entries })));
+    }
+
+    // --- getJockeyRecentForm (race_entries re + re.jockey_id + re.result_position) ---
+    if (sqlNorm.includes('from race_entries re') && sqlNorm.includes('re.jockey_id') && sqlNorm.includes('re.result_position')) {
+      cacheHits++;
+      const beforeDate = sqlNorm.includes('date <') && args.length >= 2 ? args[1] as string : undefined;
+      return mockResult(computeJockeyRecentFormRows(args[0] as string, beforeDate));
+    }
+
+    // --- getDynamicStandardTimes (past_performances + time + position <= 5) ---
+    if (sqlNorm.includes('from past_performances') && sqlNorm.includes('time is not null') && sqlNorm.includes('position <= 5')) {
+      cacheHits++;
+      const beforeDate = sqlNorm.includes('date <') ? args[args.length - 1] as string : undefined;
+      // args は [racecourse?, trackType, minDist, maxDist, ...condGroup, beforeDate?]
+      // racecourseなしバージョン: from past_performances where track_type = ?
+      const hasRacecourse = sqlNorm.includes('racecourse_name');
+      if (hasRacecourse) {
+        const trackConditions = args.slice(4, beforeDate ? -1 : undefined) as string[];
+        return mockResult(computeDynamicStdTimePerfs(args[0] as string, args[1] as string, args[2] as number, args[3] as number, trackConditions, beforeDate));
+      } else {
+        const trackConditions = args.slice(3, beforeDate ? -1 : undefined) as string[];
+        return mockResult(computeDynamicStdTimePerfs(null, args[0] as string, args[1] as number, args[2] as number, trackConditions, beforeDate));
+      }
+    }
+
+    // --- getWinOddsMap (odds by race_id + bet_type) ---
+    if (sqlNorm.includes('from odds') && sqlNorm.includes('race_id') && sqlNorm.includes('bet_type')) {
+      cacheHits++;
+      return mockResult(computeOddsRows(args[0] as string));
     }
 
     // --- calculateTodayTrackBias ---
@@ -337,11 +396,12 @@ function installCacheInterceptor(client: any) {
 
 // ==================== メモリ内計算関数 ====================
 
-function computeJockeyStats(jockeyId: string) {
+function computeJockeyStats(jockeyId: string, beforeDate?: string) {
   let total = 0, wins = 0, places = 0;
   for (const [raceId, entries] of entriesByRace) {
     const race = racesById.get(raceId);
     if (!race || race.status !== '結果確定') continue;
+    if (beforeDate && race.date >= beforeDate) continue;
     for (const e of entries) {
       if (e.jockey_id === jockeyId && e.result_position != null) {
         total++;
@@ -353,12 +413,13 @@ function computeJockeyStats(jockeyId: string) {
   return { total, wins, places };
 }
 
-function computeCourseDistancePerfs(racecourse: string, trackType: string, minDist: number, maxDist: number) {
+function computeCourseDistancePerfs(racecourse: string, trackType: string, minDist: number, maxDist: number, beforeDate?: string) {
   const results: any[] = [];
   for (const perfs of perfsByHorse.values()) {
     for (const p of perfs) {
       if (p.racecourse_name === racecourse && p.track_type === trackType
-          && p.distance >= minDist && p.distance <= maxDist && p.entries > 0) {
+          && p.distance >= minDist && p.distance <= maxDist && p.entries > 0
+          && (!beforeDate || p.date < beforeDate)) {
         results.push({
           post_position: p.post_position,
           position: p.position,
@@ -372,13 +433,13 @@ function computeCourseDistancePerfs(racecourse: string, trackType: string, minDi
   return results;
 }
 
-function computeSirePerfs(fatherName: string) {
+function computeSirePerfs(fatherName: string, beforeDate?: string) {
   const childIds = horseIdsByFather.get(fatherName) || [];
   const results: any[] = [];
   for (const hid of childIds) {
     const perfs = perfsByHorse.get(hid) || [];
     for (const p of perfs) {
-      if (p.entries > 0) {
+      if (p.entries > 0 && (!beforeDate || p.date < beforeDate)) {
         results.push({
           track_type: p.track_type,
           distance: p.distance,
@@ -392,7 +453,7 @@ function computeSirePerfs(fatherName: string) {
   return results;
 }
 
-function computeJockeyTrainerPerfs(jockeyId: string, trainerName: string) {
+function computeJockeyTrainerPerfs(jockeyId: string, trainerName: string, beforeDate?: string) {
   const jockeyName = jockeyNameById.get(jockeyId);
   if (!jockeyName) return [];
 
@@ -401,7 +462,7 @@ function computeJockeyTrainerPerfs(jockeyId: string, trainerName: string) {
     const horse = horsesById.get(horseId);
     if (!horse || horse.trainer_name !== trainerName) continue;
     for (const p of perfs) {
-      if (p.jockey_name === jockeyName && p.entries > 0) {
+      if (p.jockey_name === jockeyName && p.entries > 0 && (!beforeDate || p.date < beforeDate)) {
         results.push({ position: p.position, entries: p.entries });
       }
     }
@@ -409,11 +470,12 @@ function computeJockeyTrainerPerfs(jockeyId: string, trainerName: string) {
   return results;
 }
 
-function computeTrainerPerfs(trainerName: string) {
+function computeTrainerPerfs(trainerName: string, beforeDate?: string) {
   const results: any[] = [];
   for (const [raceId, entries] of entriesByRace) {
     const race = racesById.get(raceId);
     if (!race || race.status !== '結果確定') continue;
+    if (beforeDate && race.date >= beforeDate) continue;
     for (const e of entries) {
       if (e.trainer_name === trainerName && e.result_position != null) {
         results.push({
@@ -427,11 +489,11 @@ function computeTrainerPerfs(trainerName: string) {
   return results;
 }
 
-function computeSeasonalPerfs(horseId: string) {
+function computeSeasonalPerfs(horseId: string, beforeDate?: string) {
   const perfs = perfsByHorse.get(horseId) || [];
   const results: any[] = [];
   for (const p of perfs) {
-    if (p.date && p.entries > 0) {
+    if (p.date && p.entries > 0 && (!beforeDate || p.date < beforeDate)) {
       const monthStr = p.date.substring(5, 7);
       const month = parseInt(monthStr, 10);
       if (month >= 1 && month <= 12) {
@@ -463,6 +525,50 @@ function computeTrackBiasEntries(racecourse: string, date: string, trackType?: s
   return results;
 }
 
+function computeJockeyRecentFormRows(jockeyId: string, beforeDate?: string) {
+  const results: any[] = [];
+  for (const [raceId, entries] of entriesByRace) {
+    const race = racesById.get(raceId);
+    if (!race || race.status !== '結果確定') continue;
+    if (beforeDate && race.date >= beforeDate) continue;
+    for (const e of entries) {
+      if (e.jockey_id === jockeyId && e.result_position != null) {
+        results.push({ result_position: e.result_position, date: race.date });
+      }
+    }
+  }
+  return results;
+}
+
+function computeDynamicStdTimePerfs(
+  racecourse: string | null,
+  trackType: string,
+  minDist: number,
+  maxDist: number,
+  trackConditions: string[],
+  beforeDate?: string,
+) {
+  const results: any[] = [];
+  for (const perfs of perfsByHorse.values()) {
+    for (const p of perfs) {
+      if (racecourse && p.racecourse_name !== racecourse) continue;
+      if (p.track_type !== trackType) continue;
+      if (p.distance < minDist || p.distance > maxDist) continue;
+      if (!trackConditions.includes(p.track_condition || '')) continue;
+      if (!p.time || p.time === '') continue;
+      if (p.position > 5) continue;
+      if (beforeDate && p.date >= beforeDate) continue;
+      results.push({ time: p.time });
+    }
+  }
+  // ORDER BY date DESC LIMIT 200/300 の代わりにサイズ制限
+  return results.slice(0, racecourse ? 200 : 300);
+}
+
+function computeOddsRows(raceId: string) {
+  return oddsByRace.get(raceId) || [];
+}
+
 // ==================== モック結果生成 ====================
 
 function mockResult(rows: any[]) {
@@ -485,6 +591,7 @@ function mockResult(rows: any[]) {
 // ==================== メイン ====================
 
 const TEST_MODE = process.argv.includes('--test');
+const REGEN_MODE = process.argv.includes('--regen');
 const LIMIT = process.argv.includes('--limit')
   ? parseInt(process.argv[process.argv.indexOf('--limit') + 1], 10)
   : 0;
@@ -493,10 +600,20 @@ async function main() {
   const startTime = Date.now();
 
   if (TEST_MODE) console.log('*** テストモード: 1件のみ ***\n');
+  if (REGEN_MODE) console.log('*** 再生成モード: 全予想を削除して再生成 ***\n');
   if (LIMIT > 0) console.log(`*** 件数制限: ${LIMIT}件 ***\n`);
 
   // 1. クライアント取得 + キャッシュインストール
   const client = await ensureInitialized();
+
+  // 再生成モード: 全予想と評価結果を削除
+  if (REGEN_MODE) {
+    const { dbRun } = await import('../src/lib/database');
+    console.log('全予想を削除中...');
+    await dbRun('DELETE FROM prediction_results', []);
+    await dbRun('DELETE FROM predictions', []);
+    console.log('削除完了\n');
+  }
 
   // 2. データプリロード（Tursoから一括読み込み）
   await preloadData();
@@ -536,12 +653,17 @@ async function main() {
     if (!entries || entries.length === 0) { errors++; continue; }
 
     try {
-      // 馬データ構築（メモリキャッシュから応答）
+      // 馬データ構築（メモリキャッシュから応答、raceDate以前のデータのみ使用）
+      const raceDate = race.date;
       const horseInputs = entries.map(re => {
-        const perfs = perfsByHorse.get(re.horse_id) || [];
+        const allPerfs = perfsByHorse.get(re.horse_id) || [];
+        // Data Leakage防止: レース日以前の過去成績のみ使用
+        const perfs = allPerfs.filter(p => p.date < raceDate);
         const horse = horsesById.get(re.horse_id);
         const jockey = jockeysById.get(re.jockey_id);
 
+        // beforeDate付きのため、jockeysテーブルの集計値は使わず
+        // キャッシュインターセプター経由で日付フィルタ済み値を取得する
         let jockeyWinRate = 0.08;
         let jockeyPlaceRate = 0.20;
         if (jockey && jockey.total_races > 0 && jockey.win_rate > 0) {

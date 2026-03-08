@@ -35,9 +35,9 @@ export async function GET(
         // 再生成
         const horseInputs = await Promise.all(
           race.entries.map(async (re: RaceEntry) => {
-            const pastPerfs = await getHorsePastPerformances(re.horseId, 100);
+            const pastPerfs = await getHorsePastPerformances(re.horseId, race.date, 100);
             const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
-            const jockeyStats = await getJockeyStats(re.jockeyId);
+            const jockeyStats = await getJockeyStats(re.jockeyId, race.date);
             return {
               entry: re,
               pastPerformances: pastPerfs,

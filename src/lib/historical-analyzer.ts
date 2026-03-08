@@ -103,6 +103,7 @@ export async function buildRaceContext(
   distance: number,
   month: number,
   horses: { horseId: string; fatherName: string; jockeyId: string; trainerName: string }[],
+  raceDate?: string,
 ): Promise<RaceHistoricalContext> {
   const uniqueSires = [...new Set(horses.map(h => h.fatherName).filter(Boolean))];
   const uniqueTrainers = [...new Set(horses.map(h => h.trainerName).filter(Boolean))];
@@ -123,18 +124,18 @@ export async function buildRaceContext(
     jockeyFormResults,
     paceProfile,
   ] = await Promise.all([
-    getCourseDistanceStats(racecourseName, trackType, distance),
-    Promise.all(uniqueSires.map(async s => [s, await getSireStats(s)] as const)),
+    getCourseDistanceStats(racecourseName, trackType, distance, raceDate),
+    Promise.all(uniqueSires.map(async s => [s, await getSireStats(s, raceDate)] as const)),
     Promise.all(uniqueJTKeys.map(async key => {
       const [jid, tname] = key.split('__');
-      return [key, await getJockeyTrainerCombo(jid, tname)] as const;
+      return [key, await getJockeyTrainerCombo(jid, tname, raceDate)] as const;
     })),
-    Promise.all(uniqueTrainers.map(async t => [t, await getTrainerStats(t)] as const)),
-    Promise.all(horses.map(async h => [h.horseId, await getHorseSeasonalStats(h.horseId)] as const)),
-    Promise.all(horses.map(async h => [h.horseId, await getSecondStartBonus(h.horseId)] as const)),
-    getDynamicStandardTimes(racecourseName, trackType, distance, '良'),
-    Promise.all(uniqueJockeys.map(async jid => [jid, await getJockeyRecentForm(jid)] as const)),
-    getPaceProfile(racecourseName, trackType, distance),
+    Promise.all(uniqueTrainers.map(async t => [t, await getTrainerStats(t, raceDate)] as const)),
+    Promise.all(horses.map(async h => [h.horseId, await getHorseSeasonalStats(h.horseId, raceDate)] as const)),
+    Promise.all(horses.map(async h => [h.horseId, await getSecondStartBonus(h.horseId, raceDate)] as const)),
+    getDynamicStandardTimes(racecourseName, trackType, distance, '良', raceDate),
+    Promise.all(uniqueJockeys.map(async jid => [jid, await getJockeyRecentForm(jid, raceDate)] as const)),
+    getPaceProfile(racecourseName, trackType, distance, raceDate),
   ]);
 
   const sireStatsMap = new Map<string, SireStats>();
@@ -164,8 +165,12 @@ async function getCourseDistanceStats(
   racecourseName: string,
   trackType: string,
   distance: number,
+  raceDate?: string,
 ): Promise<CourseDistanceStats | null> {
   const tolerance = 100;
+
+  const dateFilter = raceDate ? ' AND date < ?' : '';
+  const args = [racecourseName, trackType, distance - tolerance, distance + tolerance, ...(raceDate ? [raceDate] : [])];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: any[] = await dbAll(`
@@ -174,8 +179,8 @@ async function getCourseDistanceStats(
     WHERE racecourse_name = ?
     AND track_type = ?
     AND distance BETWEEN ? AND ?
-    AND entries > 0
-  `, [racecourseName, trackType, distance - tolerance, distance + tolerance]);
+    AND entries > 0${dateFilter}
+  `, args);
 
   // v4: 閾値を10→3に緩和（少ないデータでも部分的に活用、重み調整はエンジン側で行う）
   if (rows.length < 3) return null;
@@ -231,15 +236,18 @@ async function getCourseDistanceStats(
   };
 }
 
-async function getSireStats(sireName: string): Promise<SireStats | null> {
+async function getSireStats(sireName: string, raceDate?: string): Promise<SireStats | null> {
+  const dateFilter = raceDate ? ' AND pp.date < ?' : '';
+  const args = [sireName, ...(raceDate ? [raceDate] : [])];
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: any[] = await dbAll(`
     SELECT pp.track_type, pp.distance, pp.track_condition, pp.position, pp.entries
     FROM past_performances pp
     JOIN horses h ON pp.horse_id = h.id
     WHERE h.father_name = ?
-    AND pp.entries > 0
-  `, [sireName]);
+    AND pp.entries > 0${dateFilter}
+  `, args);
 
   // v4: 閾値を5→2に緩和（少ないデータでも部分的に活用）
   if (rows.length < 2) return null;
@@ -296,9 +304,10 @@ async function getSireStats(sireName: string): Promise<SireStats | null> {
   };
 }
 
-async function getJockeyTrainerCombo(jockeyId: string, trainerName: string): Promise<JockeyTrainerCombo | null> {
-  // race_entries + races テーブルから結果確定レースのコンボ成績を集計
-  // ただし、past_performances にも jockey_name と trainer_name (horsesから) があるので活用
+async function getJockeyTrainerCombo(jockeyId: string, trainerName: string, raceDate?: string): Promise<JockeyTrainerCombo | null> {
+  const dateFilter = raceDate ? ' AND pp.date < ?' : '';
+  const args = [jockeyId, trainerName, ...(raceDate ? [raceDate] : [])];
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: any[] = await dbAll(`
     SELECT pp.position, pp.entries
@@ -306,8 +315,8 @@ async function getJockeyTrainerCombo(jockeyId: string, trainerName: string): Pro
     JOIN horses h ON pp.horse_id = h.id
     WHERE pp.jockey_name = (SELECT name FROM jockeys WHERE id = ?)
     AND h.trainer_name = ?
-    AND pp.entries > 0
-  `, [jockeyId, trainerName]);
+    AND pp.entries > 0${dateFilter}
+  `, args);
 
   // v4: 閾値を3→1に緩和
   if (rows.length < 1) return null;
@@ -327,8 +336,10 @@ async function getJockeyTrainerCombo(jockeyId: string, trainerName: string): Pro
   };
 }
 
-async function getTrainerStats(trainerName: string): Promise<TrainerStats | null> {
-  // race_entries + races から調教師の成績を集計
+async function getTrainerStats(trainerName: string, raceDate?: string): Promise<TrainerStats | null> {
+  const dateFilter = raceDate ? ' AND r.date < ?' : '';
+  const args = [trainerName, ...(raceDate ? [raceDate] : [])];
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: any[] = await dbAll(`
     SELECT re.result_position, r.track_type, r.date
@@ -336,8 +347,8 @@ async function getTrainerStats(trainerName: string): Promise<TrainerStats | null
     JOIN races r ON r.id = re.race_id
     WHERE r.status = '結果確定'
       AND re.trainer_name = ?
-      AND re.result_position IS NOT NULL
-  `, [trainerName]);
+      AND re.result_position IS NOT NULL${dateFilter}
+  `, args);
 
   if (rows.length < 5) return null;
 
@@ -346,8 +357,9 @@ async function getTrainerStats(trainerName: string): Promise<TrainerStats | null
   let dirtWins = 0, dirtRaces = 0;
   let recentWins = 0, recentRaces = 0;
 
-  // 直近1年の閾値
-  const oneYearAgo = new Date();
+  // 直近1年の閾値（raceDate基準）
+  const baseDate = raceDate ? new Date(raceDate) : new Date();
+  const oneYearAgo = new Date(baseDate);
   oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
   const oneYearAgoStr = oneYearAgo.toISOString().slice(0, 10);
 
@@ -380,7 +392,10 @@ async function getTrainerStats(trainerName: string): Promise<TrainerStats | null
   };
 }
 
-async function getHorseSeasonalStats(horseId: string): Promise<SeasonalStats[]> {
+async function getHorseSeasonalStats(horseId: string, raceDate?: string): Promise<SeasonalStats[]> {
+  const dateFilter = raceDate ? ' AND date < ?' : '';
+  const args = [horseId, ...(raceDate ? [raceDate] : [])];
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: any[] = await dbAll(`
     SELECT
@@ -389,8 +404,8 @@ async function getHorseSeasonalStats(horseId: string): Promise<SeasonalStats[]> 
     FROM past_performances
     WHERE horse_id = ?
     AND date IS NOT NULL
-    AND entries > 0
-  `, [horseId]);
+    AND entries > 0${dateFilter}
+  `, args);
 
   // v4: 閾値を3→1に緩和
   if (rows.length < 1) return [];
@@ -419,15 +434,18 @@ async function getHorseSeasonalStats(horseId: string): Promise<SeasonalStats[]> 
  * 叩き良化パターン分析
  * 60日以上の休み明け初戦 vs 2戦目の成績差を計算
  */
-async function getSecondStartBonus(horseId: string): Promise<SecondStartBonus | null> {
+async function getSecondStartBonus(horseId: string, raceDate?: string): Promise<SecondStartBonus | null> {
+  const dateFilter = raceDate ? ' AND date < ?' : '';
+  const args = [horseId, ...(raceDate ? [raceDate] : [])];
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: any[] = await dbAll(`
     SELECT date, position, entries
     FROM past_performances
     WHERE horse_id = ?
-    AND entries > 0
+    AND entries > 0${dateFilter}
     ORDER BY date ASC
-  `, [horseId]);
+  `, args);
 
   if (rows.length < 4) return null;
 
@@ -474,17 +492,21 @@ async function getPaceProfile(
   racecourseName: string,
   trackType: string,
   distance: number,
+  raceDate?: string,
 ): Promise<HistoricalPaceProfile | null> {
   const tolerance = 200;
+  const dateFilter = raceDate ? ' AND date < ?' : '';
+  const args = [racecourseName, trackType, distance - tolerance, distance + tolerance, ...(raceDate ? [raceDate] : [])];
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: any[] = await dbAll(`
     SELECT corner_positions, position, entries
     FROM past_performances
     WHERE racecourse_name = ? AND track_type = ?
       AND distance BETWEEN ? AND ?
-      AND entries > 0 AND position > 0
+      AND entries > 0 AND position > 0${dateFilter}
     ORDER BY date DESC LIMIT 500
-  `, [racecourseName, trackType, distance - tolerance, distance + tolerance]);
+  `, args);
 
   if (rows.length < 20) return null;
 
@@ -675,6 +697,7 @@ export async function getDynamicStandardTimes(
   trackType: string,
   distance: number,
   trackCondition: string,
+  raceDate?: string,
 ): Promise<DynamicStandardTime | null> {
   const tolerance = 50; // ±50m（より厳密にマッチ）
   const condGroup = (trackCondition === '重' || trackCondition === '不良')
@@ -682,6 +705,8 @@ export async function getDynamicStandardTimes(
     : (trackCondition === '稍重' ? ['稍重'] : ['良']);
 
   const placeholders = condGroup.map(() => '?').join(',');
+  const dateFilter = raceDate ? ' AND date < ?' : '';
+  const dateArgs = raceDate ? [raceDate] : [];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: any[] = await dbAll(`
@@ -692,10 +717,10 @@ export async function getDynamicStandardTimes(
     AND distance BETWEEN ? AND ?
     AND track_condition IN (${placeholders})
     AND time IS NOT NULL AND time != ''
-    AND position <= 5
+    AND position <= 5${dateFilter}
     ORDER BY date DESC
     LIMIT 200
-  `, [racecourseName, trackType, distance - tolerance, distance + tolerance, ...condGroup]);
+  `, [racecourseName, trackType, distance - tolerance, distance + tolerance, ...condGroup, ...dateArgs]);
 
   if (rows.length < 5) {
     // コース限定でデータ不足 → 全場の同条件にフォールバック
@@ -707,10 +732,10 @@ export async function getDynamicStandardTimes(
       AND distance BETWEEN ? AND ?
       AND track_condition IN (${placeholders})
       AND time IS NOT NULL AND time != ''
-      AND position <= 5
+      AND position <= 5${dateFilter}
       ORDER BY date DESC
       LIMIT 300
-    `, [trackType, distance - tolerance, distance + tolerance, ...condGroup]);
+    `, [trackType, distance - tolerance, distance + tolerance, ...condGroup, ...dateArgs]);
 
     if (fallbackRows.length < 5) return null;
 
@@ -775,17 +800,20 @@ export interface JockeyRecentForm {
 /**
  * 騎手の直近30日と年間の勝率トレンドを算出
  */
-export async function getJockeyRecentForm(jockeyId: string): Promise<JockeyRecentForm | null> {
+export async function getJockeyRecentForm(jockeyId: string, raceDate?: string): Promise<JockeyRecentForm | null> {
   if (!jockeyId) return null;
 
-  const now = new Date();
-  const d30 = new Date(now);
+  const baseDate = raceDate ? new Date(raceDate) : new Date();
+  const d30 = new Date(baseDate);
   d30.setDate(d30.getDate() - 30);
   const d30Str = d30.toISOString().slice(0, 10);
 
-  const d365 = new Date(now);
+  const d365 = new Date(baseDate);
   d365.setFullYear(d365.getFullYear() - 1);
   const d365Str = d365.toISOString().slice(0, 10);
+
+  const dateFilter = raceDate ? ' AND r.date < ?' : '';
+  const args = [jockeyId, ...(raceDate ? [raceDate] : [])];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: any[] = await dbAll(`
@@ -794,8 +822,8 @@ export async function getJockeyRecentForm(jockeyId: string): Promise<JockeyRecen
     JOIN races r ON r.id = re.race_id
     WHERE re.jockey_id = ?
     AND r.status = '結果確定'
-    AND re.result_position IS NOT NULL
-  `, [jockeyId]);
+    AND re.result_position IS NOT NULL${dateFilter}
+  `, args);
 
   if (rows.length < 5) return null;
 

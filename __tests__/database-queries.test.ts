@@ -341,7 +341,7 @@ describe('past performances', () => {
       });
     }
 
-    const pp3 = await getHorsePastPerformances('h001', 3);
+    const pp3 = await getHorsePastPerformances('h001', undefined, 3);
     expect(pp3.length).toBe(3);
   });
 });

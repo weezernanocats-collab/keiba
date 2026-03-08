@@ -360,7 +360,7 @@ async function executeMorningFetch(date: string): Promise<void> {
             fatherName: horse.fatherName, motherName: horse.motherName,
             trainerName: horse.trainerName, ownerName: horse.ownerName,
           });
-          const existingPerfs = await getHorsePastPerformances(horse.id, 200);
+          const existingPerfs = await getHorsePastPerformances(horse.id, undefined, 200);
           const existingKeys = new Set(existingPerfs.map((p: PastPerformance) => `${p.date}_${p.raceName}`));
           for (const perf of horse.pastPerformances.slice(0, 50)) {
             const key = `${perf.date}_${perf.raceName}`;
@@ -396,9 +396,9 @@ async function executeMorningFetch(date: string): Promise<void> {
         const horseInputs = await Promise.all(
           (raceData.entries as import('@/types').RaceEntry[]).map(async (re) => {
             const [pastPerfs, horseData, jockeyStats, trainerStats] = await Promise.all([
-              getHorsePastPerformances(re.horseId, 100),
+              getHorsePastPerformances(re.horseId, date, 100),
               getHorseById(re.horseId) as Promise<{ father_name?: string } | null>,
-              getJockeyStats(re.jockeyId),
+              getJockeyStats(re.jockeyId, date),
               getTrainerStats(re.trainerName),
             ]);
             const fatherName = horseData?.father_name || '';
@@ -488,9 +488,9 @@ async function executeAfternoonPredictions(date: string): Promise<void> {
         const horseInputs = await Promise.all(
           (raceData.entries as import('@/types').RaceEntry[]).map(async (re) => {
             const [pastPerfs, horseData, jockeyStats, trainerStats] = await Promise.all([
-              getHorsePastPerformances(re.horseId, 100),
+              getHorsePastPerformances(re.horseId, date, 100),
               getHorseById(re.horseId) as Promise<{ father_name?: string } | null>,
-              getJockeyStats(re.jockeyId),
+              getJockeyStats(re.jockeyId, date),
               getTrainerStats(re.trainerName),
             ]);
             const fatherName = horseData?.father_name || '';

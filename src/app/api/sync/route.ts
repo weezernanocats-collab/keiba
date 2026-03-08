@@ -632,7 +632,7 @@ async function syncHorseDetail(entry: SyncLogEntry, horseId: string): Promise<Sc
   entry.stats.horsesScraped++;
 
   // Insert past performances (only new ones)
-  const existingPerfs = await getHorsePastPerformances(horse.id, 100);
+  const existingPerfs = await getHorsePastPerformances(horse.id, undefined, 100);
   const existingDates = new Set(existingPerfs.map((p: PastPerformance) => p.date));
 
   for (const perf of horse.pastPerformances) {
@@ -739,9 +739,9 @@ async function syncFull(entry: SyncLogEntry, date?: string): Promise<void> {
       // Build horse analysis inputs for prediction engine
       const horseInputs = [];
       for (const re of raceData.entries) {
-        const pastPerfs = await getHorsePastPerformances(re.horseId, 100);
+        const pastPerfs = await getHorsePastPerformances(re.horseId, targetDate, 100);
         const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
-        const jockeyStats = await getJockeyStats(re.jockeyId);
+        const jockeyStats = await getJockeyStats(re.jockeyId, targetDate);
         horseInputs.push({
           entry: re,
           pastPerformances: pastPerfs,
@@ -886,9 +886,9 @@ async function syncRegeneratePredictions(entry: SyncLogEntry, date?: string): Pr
 
       const horseInputs = [];
       for (const re of raceData.entries) {
-        const pastPerfs = await getHorsePastPerformances(re.horseId, 100);
+        const pastPerfs = await getHorsePastPerformances(re.horseId, targetDate, 100);
         const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
-        const jockeyStats = await getJockeyStats(re.jockeyId);
+        const jockeyStats = await getJockeyStats(re.jockeyId, targetDate);
         horseInputs.push({
           entry: re,
           pastPerformances: pastPerfs,

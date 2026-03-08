@@ -90,9 +90,9 @@ async function main() {
   // Step 2: 各馬データ取得
   const horseInputs = [];
   for (const re of raceData.entries) {
-    const pastPerfs = await getHorsePastPerformances(re.horseId, 100);
+    const pastPerfs = await getHorsePastPerformances(re.horseId, race.date, 100);
     const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
-    const jockeyStats = await getJockeyStats(re.jockeyId);
+    const jockeyStats = await getJockeyStats(re.jockeyId, race.date);
     horseInputs.push({
       entry: re,
       pastPerformances: pastPerfs,

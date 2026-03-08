@@ -15,8 +15,6 @@ for (const line of envContent.split('\n')) {
   }
 }
 
-// Gemini無効化（タイムアウト回避）
-delete process.env.GEMINI_API_KEY;
 
 import { ensureInitialized, dbAll, dbRun } from '../src/lib/database';
 import { generatePrediction } from '../src/lib/prediction-engine';
@@ -82,9 +80,9 @@ async function main() {
       const horseInputs = await Promise.all(
         (raceData.entries as RaceEntry[]).map(async (re) => {
           const [pastPerfs, horseData, jockeyStats, trainerStats] = await Promise.all([
-            getHorsePastPerformances(re.horseId, 100),
+            getHorsePastPerformances(re.horseId, race.date, 100),
             getHorseById(re.horseId) as Promise<{ father_name?: string } | null>,
-            getJockeyStats(re.jockeyId),
+            getJockeyStats(re.jockeyId, race.date),
             getTrainerStats(re.trainerName),
           ]);
           const fatherName = horseData?.father_name || '';

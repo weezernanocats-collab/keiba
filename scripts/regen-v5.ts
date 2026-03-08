@@ -20,7 +20,6 @@ for (const line of envContent.split('\n')) {
   if (match && !process.env[match[1]]) process.env[match[1]] = match[2];
 }
 
-delete process.env.GEMINI_API_KEY;
 
 import { ensureInitialized, dbAll, dbGet, dbRun } from '../src/lib/database';
 import { generatePrediction, type HorseAnalysisInput } from '../src/lib/prediction-engine';

@@ -484,13 +484,6 @@ export default function AdminPage() {
             </div>
             <p className="text-xs text-muted">XGBoost MLモデルを自動再学習 (GitHub Actions)</p>
           </div>
-          <div className="bg-gray-800/50 rounded-lg p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-blue-400 text-sm">i</span>
-              <span className="text-sm font-medium">Gemini AI解説</span>
-            </div>
-            <p className="text-xs text-muted">予想生成時にGemini APIで自動テキスト強化（GEMINI_API_KEY設定時）</p>
-          </div>
         </div>
       </div>
 

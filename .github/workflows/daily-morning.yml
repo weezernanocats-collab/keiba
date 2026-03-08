@@ -40,7 +40,6 @@ jobs:
         run: |
           echo "TURSO_DATABASE_URL=\"${{ secrets.TURSO_DATABASE_URL }}\"" > .env.local
           echo "TURSO_AUTH_TOKEN=\"${{ secrets.TURSO_AUTH_TOKEN }}\"" >> .env.local
-          echo "GEMINI_API_KEY=\"${{ secrets.GEMINI_API_KEY }}\"" >> .env.local
 
       - name: Run morning pipeline (data fetch + predictions)
         run: npx tsx -r tsconfig-paths/register scripts/daily-pipeline.ts --job ${{ github.event.inputs.job || 'morning' }}

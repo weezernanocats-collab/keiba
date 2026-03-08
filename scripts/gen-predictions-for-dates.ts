@@ -14,11 +14,6 @@ for (const line of envContent.split('\n')) {
   if (match && !process.env[match[1]]) process.env[match[1]] = match[2];
 }
 
-// --no-gemini フラグ
-if (process.argv.includes('--no-gemini')) {
-  delete process.env.GEMINI_API_KEY;
-}
-
 // --afternoon フラグ（午前の傾向をサマリに含める + 未実施レースのみ対象）
 const IS_AFTERNOON = process.argv.includes('--afternoon');
 
@@ -47,9 +42,9 @@ async function processRace(race: {
   const horseInputs = await Promise.all(
     (raceData.entries as RaceEntry[]).map(async (re) => {
       const [pastPerfs, horseData, jockeyStats, trainerStats] = await Promise.all([
-        getHorsePastPerformances(re.horseId, 100),
+        getHorsePastPerformances(re.horseId, race.date, 100),
         getHorseById(re.horseId) as Promise<{ father_name?: string } | null>,
-        getJockeyStats(re.jockeyId),
+        getJockeyStats(re.jockeyId, race.date),
         getTrainerStats(re.trainerName),
       ]);
       const fatherName = horseData?.father_name || '';
@@ -93,8 +88,7 @@ async function main() {
   }
 
   const startTime = Date.now();
-  const geminiEnabled = !!process.env.GEMINI_API_KEY;
-  process.stdout.write(`設定: concurrency=${CONCURRENCY}, gemini=${geminiEnabled ? 'ON' : 'OFF'}\n`);
+  process.stdout.write(`設定: concurrency=${CONCURRENCY}\n`);
 
   await ensureCalibrationLoaded();
 

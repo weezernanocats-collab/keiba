@@ -408,9 +408,10 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
 
           const horseInputs = await Promise.all(
             raceData.entries.map(async (re: import('@/types').RaceEntry) => {
-              const pastPerfs = await getHorsePastPerformances(re.horseId, maxPP);
+              const raceDate = allRaces.find(r => r.id === detail.id)?.date || today;
+              const pastPerfs = await getHorsePastPerformances(re.horseId, raceDate, maxPP);
               const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
-              const jockeyStats = await getJockeyStats(re.jockeyId);
+              const jockeyStats = await getJockeyStats(re.jockeyId, raceDate);
               return {
                 entry: re,
                 pastPerformances: pastPerfs,
@@ -464,7 +465,7 @@ export async function runBulkImport(config: BulkImportConfig): Promise<BulkImpor
 // ==================== ヘルパー ====================
 
 async function importHorsePastPerformances(horse: ScrapedHorseDetail, maxPP: number): Promise<number> {
-  const existingPerfs = await getHorsePastPerformances(horse.id, 200);
+  const existingPerfs = await getHorsePastPerformances(horse.id, undefined, 200);
   const existingDates = new Set(existingPerfs.map((p: PastPerformance) => `${p.date}_${p.racecourseName}_${p.raceName}`));
 
   let imported = 0;
@@ -966,9 +967,9 @@ async function processChunkPhase(
 
           const horseInputs = await Promise.all(
             raceData.entries.map(async (re: import('@/types').RaceEntry) => {
-              const pastPerfs = await getHorsePastPerformances(re.horseId, 100);
+              const pastPerfs = await getHorsePastPerformances(re.horseId, race.date, 100);
               const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
-              const jockeyStats = await getJockeyStats(re.jockeyId);
+              const jockeyStats = await getJockeyStats(re.jockeyId, race.date);
               return {
                 entry: re,
                 pastPerformances: pastPerfs,

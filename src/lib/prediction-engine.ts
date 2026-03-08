@@ -55,7 +55,6 @@ import {
   type JockeyRecentForm,
   type CourseDistanceStats,
 } from './historical-analyzer';
-import { enhancePredictionWithGemini, type GeminiRaceContext } from './gemini-enhancer';
 import { callMLPredict, buildMLFeatures, type MLHorseInput } from './ml-client';
 import { calculateTodayTrackBias, type TodayTrackBias } from './track-bias';
 import { categorizeRace, applyCategoryMultipliers } from './weight-profiles';
@@ -295,7 +294,7 @@ export async function generatePrediction(
   const cond = trackCondition || '良';
   const month = new Date(date).getMonth() + 1;
 
-  // 統計コンテキストを構築（1レースにつき1回）
+  // 統計コンテキストを構築（1レースにつき1回、beforeDateフィルタ付き）
   const ctx = await buildRaceContext(
     racecourseName, trackType, distance, month,
     horses.map(h => ({
@@ -304,6 +303,7 @@ export async function generatePrediction(
       jockeyId: h.entry.jockeyId,
       trainerName: h.entry.trainerName,
     })),
+    date,
   );
 
   // 平均斤量を算出（斤量ファクター用）
@@ -456,26 +456,7 @@ export async function generatePrediction(
     recommendedBets,
   };
 
-  // Gemini による分析テキスト強化（APIキー未設定時やエラー時はそのまま返却）
-  const geminiCtx: GeminiRaceContext = {
-    trackType,
-    distance,
-    trackCondition: cond,
-    racecourseName,
-    grade,
-    horseScores: scoredHorses.slice(0, 6).map(sh => ({
-      horseName: sh.entry.horseName,
-      horseNumber: sh.entry.horseNumber,
-      totalScore: sh.totalScore,
-      factorScores: Object.fromEntries(
-        Object.entries(sh.scores).filter(([k]) => !k.startsWith('_'))
-      ),
-      runningStyle: sh.runningStyle,
-      fatherName: sh.fatherName,
-    })),
-  };
-
-  return enhancePredictionWithGemini(rawPrediction, geminiCtx);
+  return rawPrediction;
 }
 
 // ==================== メインスコアリング ====================
