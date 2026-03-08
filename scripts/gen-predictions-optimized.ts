@@ -613,6 +613,11 @@ async function main() {
   // 1. クライアント取得 + キャッシュインストール
   const client = await ensureInitialized();
 
+  // 校正済みウェイトをDBから読み込んで適用
+  const { ensureCalibrationLoaded } = await import('../src/lib/accuracy-tracker');
+  await ensureCalibrationLoaded();
+  console.log('校正済みウェイト適用完了');
+
   // 再生成モード: 全予想と評価結果を削除
   if (REGEN_MODE) {
     const { dbRun } = await import('../src/lib/database');
