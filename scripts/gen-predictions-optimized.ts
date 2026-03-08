@@ -595,6 +595,9 @@ function mockResult(rows: any[]) {
 
 const TEST_MODE = process.argv.includes('--test');
 const REGEN_MODE = process.argv.includes('--regen');
+const DATE_FILTER = process.argv.includes('--date')
+  ? process.argv[process.argv.indexOf('--date') + 1]
+  : '';
 const LIMIT = process.argv.includes('--limit')
   ? parseInt(process.argv[process.argv.indexOf('--limit') + 1], 10)
   : 0;
@@ -604,6 +607,7 @@ async function main() {
 
   if (TEST_MODE) console.log('*** テストモード: 1件のみ ***\n');
   if (REGEN_MODE) console.log('*** 再生成モード: 全予想を削除して再生成 ***\n');
+  if (DATE_FILTER) console.log(`*** 日付フィルタ: ${DATE_FILTER} (出走確定含む) ***\n`);
   if (LIMIT > 0) console.log(`*** 件数制限: ${LIMIT}件 ***\n`);
 
   // 1. クライアント取得 + キャッシュインストール
@@ -621,12 +625,17 @@ async function main() {
   // 2. データプリロード（Tursoから一括読み込み）
   await preloadData();
 
-  // 3. 予想未生成の結果確定レース一覧
+  // 3. 予想未生成レース一覧
+  const statusFilter = DATE_FILTER
+    ? `r.status IN ('結果確定', '出走確定') AND r.date = ?`
+    : `r.status = '結果確定'`;
+  const statusArgs = DATE_FILTER ? [DATE_FILTER] : [];
   const racesWithoutPreds = await dbAll<{ id: string }>(
     `SELECT r.id FROM races r
-     WHERE r.status = '結果確定'
+     WHERE ${statusFilter}
        AND r.id NOT IN (SELECT race_id FROM predictions)
-     ORDER BY r.date, r.id`
+     ORDER BY r.date, r.id`,
+    statusArgs
   );
 
   const targetCount = TEST_MODE ? 1 : (LIMIT > 0 ? Math.min(LIMIT, racesWithoutPreds.length) : racesWithoutPreds.length);

@@ -518,7 +518,7 @@ export async function generatePrediction(
   analysis.bettingStrategy = bettingStrategy;
 
   // 推奨馬券（戦略ベース）
-  const recommendedBets = generateBetRecommendations(scoredHorses, confidence, bettingStrategy);
+  const recommendedBets = generateBetRecommendations(scoredHorses, confidence, bettingStrategy, oddsMap);
 
   // サマリー生成
   const summary = generateSummary(topPicks, analysis, raceName, confidence, todayBias, options?.isAfternoon);
@@ -1759,6 +1759,7 @@ function generateBetRecommendations(
   scoredHorses: ScoredHorse[],
   confidence: number,
   strategy: BettingStrategy,
+  oddsMap?: Map<number, number>,
 ): RecommendedBet[] {
   const bets: RecommendedBet[] = [];
   if (scoredHorses.length < 3) return bets;
@@ -1771,7 +1772,10 @@ function generateBetRecommendations(
   const { pattern, gap12, gap23, gap34 } = classifyRacePattern(scoredHorses);
 
   const evOf = (h: ScoredHorse) => calcExpectedValue(h, winProbs);
-  const oddsOf = (h: ScoredHorse) => (h.entry.odds && h.entry.odds > 0) ? h.entry.odds : undefined;
+  const oddsOf = (h: ScoredHorse) => {
+    if (h.entry.odds && h.entry.odds > 0) return h.entry.odds;
+    return oddsMap?.get(h.entry.horseNumber) ?? undefined;
+  };
   const probOf = (h: ScoredHorse) => winProbs.get(h) || 0;
   const kellyOf = (h: ScoredHorse) => {
     const odds = oddsOf(h);
