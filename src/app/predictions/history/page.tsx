@@ -64,6 +64,11 @@ const GRADE_FILTERS = [
   { label: 'G2', value: 'G2' },
   { label: 'G3', value: 'G3' },
   { label: 'オープン', value: 'オープン' },
+  { label: '3勝', value: '3勝クラス' },
+  { label: '2勝', value: '2勝クラス' },
+  { label: '1勝', value: '1勝クラス' },
+  { label: '未勝利', value: '未勝利' },
+  { label: '新馬', value: '新馬' },
 ] as const;
 
 const rankLabels = ['\u25CE', '\u25CB', '\u25B2', '\u25B3', '\u00D7', '\u2606'];

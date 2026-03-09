@@ -22,9 +22,24 @@ export async function GET(request: NextRequest) {
     const conditions: string[] = ["r.status = '結果確定'"];
     const params: (string | number)[] = [];
 
+    // グレードフィルタ: G1/G2/G3はgradeカラム、他は名前ベースでSQL LIKE
     if (gradeFilter) {
-      conditions.push('r.grade = ?');
-      params.push(gradeFilter);
+      if (['G1', 'G2', 'G3'].includes(gradeFilter)) {
+        conditions.push('r.grade = ?');
+        params.push(gradeFilter);
+      } else if (gradeFilter === '新馬') {
+        conditions.push("r.name LIKE '%新馬%'");
+      } else if (gradeFilter === '未勝利') {
+        conditions.push("r.name LIKE '%未勝利%'");
+      } else if (gradeFilter === '1勝クラス') {
+        conditions.push("(r.name LIKE '%1勝クラス%' OR r.name LIKE '%1勝%')");
+      } else if (gradeFilter === '2勝クラス') {
+        conditions.push("(r.name LIKE '%2勝クラス%' OR r.name LIKE '%2勝%')");
+      } else if (gradeFilter === '3勝クラス') {
+        conditions.push("(r.name LIKE '%3勝クラス%' OR r.name LIKE '%3勝%')");
+      } else if (gradeFilter === 'オープン') {
+        conditions.push("(r.name LIKE '%オープン%' OR r.name LIKE '%ステークス%' OR r.name LIKE '%カップ%')");
+      }
     }
 
     if (resultFilter === 'win') {

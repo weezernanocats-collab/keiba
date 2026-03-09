@@ -35,16 +35,16 @@ export async function GET(request: NextRequest) {
       evaluated_at: string;
       race_date: string;
       racecourse_name: string;
+      race_name: string;
       grade: string | null;
       top_pick_horse_id: string | null;
       predicted_confidence: number;
-      // race_entries から取得した本命馬のオッズ
       top_pick_odds: number | null;
     }>(
       `SELECT pr.race_id, pr.win_hit, pr.place_hit, pr.bet_roi,
               pr.bet_investment, pr.bet_return, pr.evaluated_at,
               pr.predicted_confidence, pr.top_pick_horse_id,
-              r.date as race_date, r.racecourse_name, r.grade,
+              r.date as race_date, r.racecourse_name, r.name as race_name, r.grade,
               re.odds as top_pick_odds
        FROM prediction_results pr
        JOIN races r ON r.id = pr.race_id
@@ -157,10 +157,10 @@ export async function GET(request: NextRequest) {
       .filter(v => v.total >= 3)
       .sort((a, b) => b.total - a.total);
 
-    // ==================== Feature 1: グレード別統計 ====================
+    // ==================== Feature 1: グレード/条件クラス別統計 ====================
     const gradeBuckets: Record<string, { total: number; win: number; place: number; invested: number; returned: number }> = {};
     for (const r of results) {
-      const grade = r.grade || '一般';
+      const grade = classifyRace(r.grade, r.race_name);
       if (!gradeBuckets[grade]) gradeBuckets[grade] = { total: 0, win: 0, place: 0, invested: 0, returned: 0 };
       gradeBuckets[grade].total++;
       if (r.win_hit) gradeBuckets[grade].win++;
@@ -170,7 +170,7 @@ export async function GET(request: NextRequest) {
     }
 
     // グレード表示順
-    const gradeOrder = ['G1', 'G2', 'G3', 'リステッド', 'オープン', '3勝クラス', '2勝クラス', '1勝クラス', '未勝利', '新馬', '一般'];
+    const gradeOrder = ['G1', 'G2', 'G3', 'リステッド', 'オープン', '3勝クラス', '2勝クラス', '1勝クラス', '未勝利', '新馬', 'その他'];
     const gradeStats = Object.entries(gradeBuckets)
       .map(([grade, val]) => ({
         grade,
@@ -322,4 +322,20 @@ export async function GET(request: NextRequest) {
     console.error('accuracy-stats エラー:', error);
     return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });
   }
+}
+
+/** レースのグレード + レース名から条件クラスを判定 */
+function classifyRace(grade: string | null, raceName: string): string {
+  if (grade === 'G1') return 'G1';
+  if (grade === 'G2') return 'G2';
+  if (grade === 'G3') return 'G3';
+  if (raceName.includes('新馬')) return '新馬';
+  if (raceName.includes('未勝利')) return '未勝利';
+  if (raceName.includes('1勝クラス') || raceName.includes('1勝')) return '1勝クラス';
+  if (raceName.includes('2勝クラス') || raceName.includes('2勝')) return '2勝クラス';
+  if (raceName.includes('3勝クラス') || raceName.includes('3勝')) return '3勝クラス';
+  if (raceName.includes('リステッド') || raceName.includes('Listed')) return 'リステッド';
+  if (raceName.includes('オープン')) return 'オープン';
+  if (raceName.includes('ステークス') || raceName.includes('カップ') || raceName.includes('賞')) return 'オープン';
+  return 'その他';
 }

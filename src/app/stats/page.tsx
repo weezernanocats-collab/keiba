@@ -74,6 +74,13 @@ const GRADE_COLORS: Record<string, string> = {
   G1: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 border-red-300',
   G2: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 border-blue-300',
   G3: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 border-green-300',
+  'リステッド': 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300 border-teal-300',
+  'オープン': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300 border-purple-300',
+  '3勝クラス': 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300 border-indigo-300',
+  '2勝クラス': 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300 border-sky-300',
+  '1勝クラス': 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300 border-cyan-300',
+  '未勝利': 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 border-amber-300',
+  '新馬': 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300 border-pink-300',
 };
 
 export default function StatsPage() {
