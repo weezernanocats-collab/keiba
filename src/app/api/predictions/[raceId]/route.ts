@@ -120,10 +120,15 @@ export async function GET(
         }));
 
         // 推奨馬券の的中判定
-        const actualTop3 = [...entryResults.entries()]
+        const entryNameMap = new Map<number, string>();
+        for (const entry of race.entries) {
+          entryNameMap.set(entry.horseNumber, entry.horseName);
+        }
+        const actualTop3Detailed = [...entryResults.entries()]
           .sort((a, b) => a[1] - b[1])
           .slice(0, 3)
-          .map(([num]) => num);
+          .map(([num]) => ({ horseNumber: num, horseName: entryNameMap.get(num) || '' }));
+        const actualTop3 = actualTop3Detailed.map(h => h.horseNumber);
         const actualWinner = actualTop3[0];
 
         const betResults = augmentedPrediction.recommendedBets.map((bet: { type: string; selections: number[] }) => {
@@ -155,6 +160,7 @@ export async function GET(
           pickResults,
           betResults,
           actualTop3,
+          actualTop3Detailed,
         };
       } catch (verErr) {
         console.error('答え合わせデータ取得エラー:', verErr);

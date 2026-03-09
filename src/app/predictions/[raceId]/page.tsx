@@ -94,6 +94,11 @@ interface BetResult extends Bet {
   hit: boolean;
 }
 
+interface ActualTop3Entry {
+  horseNumber: number;
+  horseName: string;
+}
+
 interface Verification {
   winHit: boolean;
   placeHit: boolean;
@@ -102,6 +107,7 @@ interface Verification {
   pickResults: PickResult[];
   betResults: BetResult[];
   actualTop3: number[];
+  actualTop3Detailed?: ActualTop3Entry[];
 }
 
 interface ScoreBucket {
@@ -305,6 +311,38 @@ export default function PredictionDetailPage() {
               ROI: {verification.roi}%
             </span>
           </div>
+
+          {/* 実着順TOP3サマリー */}
+          {verification.actualTop3.length > 0 && (
+            <div className="bg-gray-50 dark:bg-gray-800/30 rounded-lg p-4 mb-4">
+              <h3 className="text-xs font-bold text-muted mb-2">実際の結果</h3>
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                {(verification.actualTop3Detailed || verification.actualTop3.map(n => ({ horseNumber: n, horseName: '' }))).map((horse, i) => {
+                  const pickIdx = prediction.topPicks.findIndex(p => p.horseNumber === horse.horseNumber);
+                  const label = pickIdx >= 0 ? rankLabels[pickIdx] : null;
+                  const picked = verification.pickResults.find(p => p.horseNumber === horse.horseNumber);
+                  const name = horse.horseName || picked?.horseName || '';
+                  return (
+                    <span key={horse.horseNumber} className="flex items-center gap-1">
+                      {i > 0 && <span className="text-muted mx-1">→</span>}
+                      <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
+                        i === 0 ? 'bg-yellow-400 text-black' :
+                        i === 1 ? 'bg-gray-300 text-black' :
+                        'bg-amber-600 text-white'
+                      }`}>{i + 1}</span>
+                      <span className="font-bold">{horse.horseNumber}番</span>
+                      {name && <span>{name}</span>}
+                      {label ? (
+                        <span className="text-xs bg-accent/15 text-accent px-1.5 py-0.5 rounded font-medium">{label}</span>
+                      ) : (
+                        <span className="text-xs bg-gray-200 dark:bg-gray-700 text-muted px-1.5 py-0.5 rounded">圏外</span>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* 予想 vs 実結果テーブル */}
           <div className="overflow-x-auto mb-4">
