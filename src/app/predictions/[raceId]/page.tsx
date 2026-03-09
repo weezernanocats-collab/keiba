@@ -123,6 +123,31 @@ export default function PredictionDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const { toggleRace, isRaceFavorite } = useFavorites();
 
+  // セクションナビ用（Hooksは条件分岐の前に置く必要がある）
+  const [activeSection, setActiveSection] = useState('');
+  const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
+  const setSectionRef = useCallback((id: string) => (el: HTMLElement | null) => {
+    sectionRefs.current[id] = el;
+  }, []);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setActiveSection(entry.target.id);
+          }
+        }
+      },
+      { rootMargin: '-80px 0px -60% 0px', threshold: 0.1 }
+    );
+    const refs = sectionRefs.current;
+    for (const el of Object.values(refs)) {
+      if (el) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, [prediction, verification]);
+
   useEffect(() => {
     async function fetchData() {
       try {
@@ -169,31 +194,6 @@ export default function PredictionDetailPage() {
       </div>
     );
   }
-
-  // セクションナビ用
-  const [activeSection, setActiveSection] = useState('');
-  const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
-  const setSectionRef = useCallback((id: string) => (el: HTMLElement | null) => {
-    sectionRefs.current[id] = el;
-  }, []);
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setActiveSection(entry.target.id);
-          }
-        }
-      },
-      { rootMargin: '-80px 0px -60% 0px', threshold: 0.1 }
-    );
-    const refs = sectionRefs.current;
-    for (const el of Object.values(refs)) {
-      if (el) observer.observe(el);
-    }
-    return () => observer.disconnect();
-  }, [prediction, verification]);
 
   const sections = [
     ...(verification ? [{ id: 'verification', label: '答え合わせ' }] : []),
