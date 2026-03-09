@@ -142,6 +142,7 @@ export function makeScoredHorse(overrides: Record<string, unknown> = {}) {
     },
     reasons: (overrides.reasons as string[]) || ['テスト理由'],
     runningStyle: (overrides.runningStyle as '逃げ' | '先行' | '差し' | '追込' | '不明') || '差し',
+    escapeRate: (overrides.escapeRate as number) ?? 0,
     fatherName: (overrides.fatherName as string) || 'テスト父馬',
   };
 }

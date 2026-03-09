@@ -155,6 +155,8 @@ export interface PredictionPick {
   horseName: string;
   score: number;
   reasons: string[];
+  runningStyle?: string;
+  escapeRate?: number;  // 逃げ率 (0-100)
 }
 
 export interface MarketAnalysisEntry {

@@ -645,9 +645,19 @@ describe('calculateConfidence', () => {
 
 // ==================== 推奨馬券 ====================
 
+const mockStrategy = {
+  pattern: '混戦' as const,
+  patternLabel: 'テスト',
+  recommendation: 'テスト推奨',
+  riskLevel: 'medium' as const,
+  primaryBets: ['複勝'],
+  avoidBets: [],
+  budgetAdvice: 'テスト',
+};
+
 describe('generateBetRecommendations', () => {
   it('3頭未満は空配列', () => {
-    expect(generateBetRecommendations([makeScoredHorse()], 50)).toEqual([]);
+    expect(generateBetRecommendations([makeScoredHorse()], 50, mockStrategy)).toEqual([]);
   });
 
   it('必ず複勝と馬連を含む', () => {
@@ -657,7 +667,7 @@ describe('generateBetRecommendations', () => {
       makeScoredHorse({ totalScore: 60, entry: { horseNumber: 3, horseName: '馬3' } }),
       makeScoredHorse({ totalScore: 50, entry: { horseNumber: 4, horseName: '馬4' } }),
     ];
-    const bets = generateBetRecommendations(horses, 60);
+    const bets = generateBetRecommendations(horses, 60, mockStrategy);
     const types = bets.map(b => b.type);
     expect(types).toContain('複勝');
     expect(types).toContain('馬連');
@@ -670,7 +680,7 @@ describe('generateBetRecommendations', () => {
       makeScoredHorse({ totalScore: 55, entry: { horseNumber: 3, horseName: '馬3' } }),
       makeScoredHorse({ totalScore: 50, entry: { horseNumber: 4, horseName: '馬4' } }),
     ];
-    const bets = generateBetRecommendations(horses, 60);
+    const bets = generateBetRecommendations(horses, 60, mockStrategy);
     const types = bets.map(b => b.type);
     expect(types).toContain('単勝');
   });

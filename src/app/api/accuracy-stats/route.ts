@@ -4,44 +4,93 @@ import { dbAll } from '@/lib/database';
 /**
  * 的中率統計API
  * クエリパラメータ: ?days=30 | 60 | 180 | all (デフォルト: all)
+ *
+ * 返却データ:
+ *   - summary: 全体サマリ（単勝/複勝/ROI）
+ *   - rolling: ローリングウィンドウ推移
+ *   - confidenceStats: 信頼度バケット別
+ *   - venueStats: 競馬場別
+ *   - gradeStats: グレード別（G1/G2/G3等）
+ *   - roiBreakdown: 単勝ROI / 複勝ROI
+ *   - betTypeStats: 推奨馬券種別の的中率・ROI
  */
 export async function GET(request: NextRequest) {
   try {
     const daysParam = request.nextUrl.searchParams.get('days');
     const days = daysParam && daysParam !== 'all' ? parseInt(daysParam, 10) : 0;
 
-    // 日付フィルタ用
     const dateFilter = days > 0
       ? `AND r.date >= date('now', '-${days} days')`
       : '';
 
-    // prediction_results + races を JOIN して日付フィルタ
+    // メインクエリ: prediction_results + races + race_entries(オッズ) を JOIN
+    // 1回のクエリでグレード/オッズ含む全データを取得（Turso Read最小化）
     const results = await dbAll<{
       race_id: string;
       win_hit: number;
       place_hit: number;
       bet_roi: number;
+      bet_investment: number;
+      bet_return: number;
       evaluated_at: string;
       race_date: string;
       racecourse_name: string;
+      grade: string | null;
+      top_pick_horse_id: string | null;
+      predicted_confidence: number;
+      // race_entries から取得した本命馬のオッズ
+      top_pick_odds: number | null;
     }>(
-      `SELECT pr.race_id, pr.win_hit, pr.place_hit, pr.bet_roi, pr.evaluated_at,
-              r.date as race_date, r.racecourse_name
+      `SELECT pr.race_id, pr.win_hit, pr.place_hit, pr.bet_roi,
+              pr.bet_investment, pr.bet_return, pr.evaluated_at,
+              pr.predicted_confidence, pr.top_pick_horse_id,
+              r.date as race_date, r.racecourse_name, r.grade,
+              re.odds as top_pick_odds
        FROM prediction_results pr
        JOIN races r ON r.id = pr.race_id
+       LEFT JOIN race_entries re ON re.race_id = pr.race_id AND re.horse_id = pr.top_pick_horse_id
        WHERE r.status = '結果確定' ${dateFilter}
        ORDER BY r.date ASC, pr.evaluated_at ASC`,
       [],
     );
 
-    // 信頼度マップ
-    const predRows = await dbAll<{ race_id: string; confidence: number }>(
-      'SELECT race_id, confidence FROM predictions',
+    // 馬券種別統計用: predictions の bets_json を取得
+    // 既に取得した race_id セットで JOIN して Turso Read を最小化
+    const betRows = await dbAll<{
+      race_id: string;
+      bets_json: string;
+    }>(
+      `SELECT p.race_id, p.bets_json
+       FROM predictions p
+       JOIN prediction_results pr ON p.race_id = pr.race_id
+       JOIN races r ON r.id = pr.race_id
+       WHERE r.status = '結果確定' ${dateFilter}
+         AND p.bets_json IS NOT NULL AND p.bets_json != '[]'`,
       [],
     );
-    const confidenceMap = new Map(predRows.map(r => [r.race_id, r.confidence]));
 
-    // Rolling 50R ウィンドウ（データが50件未満ならウィンドウを小さく）
+    // 結果着順マップ（馬券判定用）- 1クエリで一括取得
+    const raceIdsWithBets = [...new Set(betRows.map(b => b.race_id))];
+    const entryResultMap = new Map<string, Map<number, number>>(); // race_id -> (horse_number -> position)
+
+    if (raceIdsWithBets.length > 0) {
+      const BATCH = 200;
+      for (let i = 0; i < raceIdsWithBets.length; i += BATCH) {
+        const batch = raceIdsWithBets.slice(i, i + BATCH);
+        const ph = batch.map(() => '?').join(',');
+        const entries = await dbAll<{ race_id: string; horse_number: number; result_position: number }>(
+          `SELECT race_id, horse_number, result_position FROM race_entries
+           WHERE race_id IN (${ph}) AND result_position IS NOT NULL`,
+          batch,
+        );
+        for (const e of entries) {
+          if (!entryResultMap.has(e.race_id)) entryResultMap.set(e.race_id, new Map());
+          entryResultMap.get(e.race_id)!.set(e.horse_number, e.result_position);
+        }
+      }
+    }
+
+    // Rolling ウィンドウ
     const windowSize = Math.min(50, Math.max(10, Math.floor(results.length / 3)));
     const rolling: { index: number; date: string; winRate: number; placeRate: number; roi: number }[] = [];
     if (results.length >= windowSize) {
@@ -64,7 +113,7 @@ export async function GET(request: NextRequest) {
     // 信頼度バケット別
     const confBuckets: Record<string, { total: number; win: number; place: number }> = {};
     for (const r of results) {
-      const conf = confidenceMap.get(r.race_id) ?? 50;
+      const conf = r.predicted_confidence ?? 50;
       const bucketKey = conf < 30 ? '0-30'
         : conf < 40 ? '30-40'
         : conf < 50 ? '40-50'
@@ -108,6 +157,146 @@ export async function GET(request: NextRequest) {
       .filter(v => v.total >= 3)
       .sort((a, b) => b.total - a.total);
 
+    // ==================== Feature 1: グレード別統計 ====================
+    const gradeBuckets: Record<string, { total: number; win: number; place: number; invested: number; returned: number }> = {};
+    for (const r of results) {
+      const grade = r.grade || '一般';
+      if (!gradeBuckets[grade]) gradeBuckets[grade] = { total: 0, win: 0, place: 0, invested: 0, returned: 0 };
+      gradeBuckets[grade].total++;
+      if (r.win_hit) gradeBuckets[grade].win++;
+      if (r.place_hit) gradeBuckets[grade].place++;
+      gradeBuckets[grade].invested += r.bet_investment || 100;
+      gradeBuckets[grade].returned += r.bet_return || 0;
+    }
+
+    // グレード表示順
+    const gradeOrder = ['G1', 'G2', 'G3', 'リステッド', 'オープン', '3勝クラス', '2勝クラス', '1勝クラス', '未勝利', '新馬', '一般'];
+    const gradeStats = Object.entries(gradeBuckets)
+      .map(([grade, val]) => ({
+        grade,
+        total: val.total,
+        winRate: val.total > 0 ? Math.round(val.win / val.total * 1000) / 10 : 0,
+        placeRate: val.total > 0 ? Math.round(val.place / val.total * 1000) / 10 : 0,
+        roi: val.invested > 0 ? Math.round(val.returned / val.invested * 1000) / 10 : 0,
+      }))
+      .sort((a, b) => {
+        const ai = gradeOrder.indexOf(a.grade);
+        const bi = gradeOrder.indexOf(b.grade);
+        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+      });
+
+    // ==================== Feature 3: 単勝/複勝別ROI ====================
+    let totalWinInvested = 0;
+    let totalWinReturned = 0;
+    let totalPlaceInvested = 0;
+    let totalPlaceReturned = 0;
+
+    for (const r of results) {
+      const inv = r.bet_investment || 100;
+      // 単勝ROI
+      totalWinInvested += inv;
+      totalWinReturned += r.bet_return || 0;
+
+      // 複勝ROI: place_hit × 複勝オッズ（単勝オッズ × 0.35 で近似）
+      totalPlaceInvested += inv;
+      if (r.place_hit) {
+        const placeOdds = r.top_pick_odds ? Math.max(1.1, r.top_pick_odds * 0.35) : 0;
+        totalPlaceReturned += inv * placeOdds;
+      }
+    }
+
+    const roiBreakdown = {
+      winRoi: totalWinInvested > 0
+        ? Math.round(totalWinReturned / totalWinInvested * 1000) / 10 : 0,
+      placeRoi: totalPlaceInvested > 0
+        ? Math.round(totalPlaceReturned / totalPlaceInvested * 1000) / 10 : 0,
+      winInvested: totalWinInvested,
+      winReturned: Math.round(totalWinReturned),
+      placeInvested: totalPlaceInvested,
+      placeReturned: Math.round(totalPlaceReturned),
+    };
+
+    // ==================== Feature 4: 推奨馬券種別統計 ====================
+    const betTypeBuckets: Record<string, {
+      total: number;
+      hit: number;
+      invested: number;
+      returned: number;
+      oddsSum: number;
+      oddsCount: number;
+    }> = {};
+
+    for (const row of betRows) {
+      let bets: { type: string; selections: number[]; odds?: number; expectedValue?: number }[];
+      try {
+        bets = JSON.parse(row.bets_json);
+      } catch { continue; }
+      if (!Array.isArray(bets)) continue;
+
+      const posMap = entryResultMap.get(row.race_id);
+      if (!posMap) continue;
+
+      const top3 = [...posMap.entries()]
+        .sort((a, b) => a[1] - b[1])
+        .slice(0, 3)
+        .map(([num]) => num);
+      const winner = top3[0];
+
+      for (const bet of bets) {
+        const type = bet.type;
+        if (!betTypeBuckets[type]) {
+          betTypeBuckets[type] = { total: 0, hit: 0, invested: 0, returned: 0, oddsSum: 0, oddsCount: 0 };
+        }
+        const bucket = betTypeBuckets[type];
+        bucket.total++;
+        bucket.invested += 100;
+
+        if (bet.odds && bet.odds > 0) {
+          bucket.oddsSum += bet.odds;
+          bucket.oddsCount++;
+        }
+
+        // 的中判定
+        let isHit = false;
+        const sels = bet.selections || [];
+        if (type === '単勝') {
+          isHit = sels[0] === winner;
+        } else if (type === '複勝') {
+          isHit = top3.includes(sels[0]);
+        } else if (type === '馬連' || type === 'ワイド') {
+          isHit = sels.length >= 2 && sels.every(s => top3.includes(s));
+        } else if (type === '馬単') {
+          isHit = sels[0] === winner && sels.length >= 2 && top3.includes(sels[1]);
+        } else if (type === '三連複') {
+          isHit = sels.length >= 3 && sels.every(s => top3.includes(s));
+        } else if (type === '三連単') {
+          isHit = sels.length >= 3 &&
+            sels[0] === top3[0] && sels[1] === top3[1] && sels[2] === top3[2];
+        }
+
+        if (isHit) {
+          bucket.hit++;
+          bucket.returned += 100 * (bet.odds || 0);
+        }
+      }
+    }
+
+    const betTypeOrder = ['単勝', '複勝', '馬連', 'ワイド', '馬単', '三連複', '三連単'];
+    const betTypeStats = Object.entries(betTypeBuckets)
+      .map(([type, val]) => ({
+        type,
+        total: val.total,
+        hitRate: val.total > 0 ? Math.round(val.hit / val.total * 1000) / 10 : 0,
+        roi: val.invested > 0 ? Math.round(val.returned / val.invested * 1000) / 10 : 0,
+        avgOdds: val.oddsCount > 0 ? Math.round(val.oddsSum / val.oddsCount * 10) / 10 : 0,
+        hitCount: val.hit,
+      }))
+      .sort((a, b) => {
+        const ai = betTypeOrder.indexOf(a.type);
+        const bi = betTypeOrder.indexOf(b.type);
+        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+      });
+
     // 全体サマリ
     const totalWin = results.reduce((s, r) => s + r.win_hit, 0);
     const totalPlace = results.reduce((s, r) => s + r.place_hit, 0);
@@ -124,6 +313,9 @@ export async function GET(request: NextRequest) {
       rollingWindowSize: windowSize,
       confidenceStats,
       venueStats,
+      gradeStats,
+      roiBreakdown,
+      betTypeStats,
       period: days > 0 ? `${days}日` : '全期間',
     });
   } catch (error) {

@@ -16,6 +16,8 @@ interface Pick {
   horseName: string;
   score: number;
   reasons: string[];
+  runningStyle?: string;
+  escapeRate?: number;
 }
 
 interface MarketEntry {
@@ -334,6 +336,22 @@ export default function PredictionDetailPage() {
                   <div className="flex items-center gap-3">
                     <span className="text-lg font-bold">{rankLabels[idx] || '\u2606'}</span>
                     <span className="text-xl font-bold">{pick.horseNumber}番 {pick.horseName}</span>
+                    {pick.runningStyle && (
+                      <span className={`text-xs px-2 py-0.5 rounded font-bold ${
+                        pick.runningStyle === '逃げ'
+                          ? 'bg-orange-100 dark:bg-orange-800/40 text-orange-700 dark:text-orange-300'
+                          : pick.runningStyle === '先行'
+                          ? 'bg-sky-100 dark:bg-sky-800/40 text-sky-700 dark:text-sky-300'
+                          : pick.runningStyle === '差し'
+                          ? 'bg-emerald-100 dark:bg-emerald-800/40 text-emerald-700 dark:text-emerald-300'
+                          : pick.runningStyle === '追込'
+                          ? 'bg-purple-100 dark:bg-purple-800/40 text-purple-700 dark:text-purple-300'
+                          : 'bg-gray-100 dark:bg-gray-800/40 text-gray-500'
+                      }`}>
+                        {pick.runningStyle}
+                        {pick.escapeRate != null && pick.runningStyle === '逃げ' ? ` ${pick.escapeRate}%` : ''}
+                      </span>
+                    )}
                     {prediction.analysis.valueHorses?.includes(pick.horseNumber) && (
                       <span className="text-xs bg-amber-100 dark:bg-amber-800/40 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded font-bold">
                         妙味あり

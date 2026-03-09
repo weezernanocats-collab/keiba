@@ -301,6 +301,7 @@ interface ScoredHorse {
   scores: Record<string, number>;
   reasons: string[];
   runningStyle: RunningStyle;
+  escapeRate: number;  // 逃げ率 (0-100)
   fatherName: string;
 }
 
@@ -511,6 +512,8 @@ export async function generatePrediction(
     horseName: sh.entry.horseName,
     score: Math.round(sh.totalScore * 100) / 100,
     reasons: sh.reasons,
+    runningStyle: sh.runningStyle,
+    escapeRate: sh.escapeRate,
   }));
 
   // レース分析（当日バイアス + ペースプロファイルも含める）
@@ -618,8 +621,12 @@ function scoreHorse(
   const reasons: string[] = [];
   const scores: Record<string, number> = {};
 
-  // 脚質判定
-  const runStyle = detectRunningStyle(pp);
+  // 脚質判定（逃げ率も取得）
+  const { style: runStyle, escapeRate } = detectRunningStyleWithRate(pp);
+
+  // 逃げ率が高い馬にはreasonを追加
+  if (escapeRate >= 60) reasons.push(`逃げ率${escapeRate}%（逃げ馬）`);
+  else if (escapeRate >= 30) reasons.push(`逃げ率${escapeRate}%`);
 
   // ==================== 個体分析 ====================
 
@@ -858,13 +865,22 @@ function scoreHorse(
   scores._dataReliability = avgReliability * 100;
   scores._totalDataPoints = reliabilities.reduce((s, r) => s + r.dataPoints, 0);
 
-  return { entry, totalScore, scores, reasons, runningStyle: runStyle, fatherName };
+  return { entry, totalScore, scores, reasons, runningStyle: runStyle, escapeRate, fatherName };
 }
 
 // ==================== 脚質判定 ====================
 
+interface RunningStyleResult {
+  style: RunningStyle;
+  escapeRate: number;  // 逃げ率 (0-100)
+}
+
 function detectRunningStyle(pp: PastPerformance[]): RunningStyle {
-  if (pp.length === 0) return '不明';
+  return detectRunningStyleWithRate(pp).style;
+}
+
+function detectRunningStyleWithRate(pp: PastPerformance[]): RunningStyleResult {
+  if (pp.length === 0) return { style: '不明', escapeRate: 0 };
 
   const recent = pp.slice(0, 15);
   let escapeCount = 0;
@@ -892,13 +908,18 @@ function detectRunningStyle(pp: PastPerformance[]): RunningStyle {
   }
 
   const total = escapeCount + frontCount + stalkerCount + closerCount;
-  if (total === 0) return '不明';
+  if (total === 0) return { style: '不明', escapeRate: 0 };
 
-  if (escapeCount / total >= 0.4) return '逃げ';
-  if (frontCount / total >= 0.4) return '先行';
-  if ((escapeCount + frontCount) / total >= 0.6) return '先行';
-  if (closerCount / total >= 0.4) return '追込';
-  return '差し';
+  const escapeRate = Math.round(escapeCount / total * 100);
+
+  let style: RunningStyle;
+  if (escapeCount / total >= 0.4) style = '逃げ';
+  else if (frontCount / total >= 0.4) style = '先行';
+  else if ((escapeCount + frontCount) / total >= 0.6) style = '先行';
+  else if (closerCount / total >= 0.4) style = '追込';
+  else style = '差し';
+
+  return { style, escapeRate };
 }
 
 function calcRunningStyleBase(style: RunningStyle, distance: number): number {

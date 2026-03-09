@@ -69,11 +69,16 @@ export default function PredictionsPage() {
 
   return (
     <div className="space-y-6 animate-fadeIn">
-      <div>
-        <h1 className="text-2xl font-bold">AI予想</h1>
-        <p className="text-muted text-sm mt-1">
-          過去の成績データを多角的に分析し、各レースの予想を提供します。
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">AI予想</h1>
+          <p className="text-muted text-sm mt-1">
+            過去の成績データを多角的に分析し、各レースの予想を提供します。
+          </p>
+        </div>
+        <Link href="/predictions/history" className="text-sm text-accent hover:underline">
+          過去予想の結果 &rarr;
+        </Link>
       </div>
 
       {races.length === 0 ? (
