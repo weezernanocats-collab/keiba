@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbAll } from '@/lib/database';
+import { isBetHit } from '@/lib/bet-utils';
 
 /**
  * 的中率統計API
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest) {
       ? `AND r.date >= date('now', '-${days} days')`
       : '';
 
-    // メインクエリ: prediction_results + races + race_entries(オッズ) を JOIN
+    // メインクエリ: prediction_results + races + race_entries(オッズ) + odds(複勝実オッズ) を JOIN
     // 1回のクエリでグレード/オッズ含む全データを取得（Turso Read最小化）
     const results = await dbAll<{
       race_id: string;
@@ -40,15 +41,19 @@ export async function GET(request: NextRequest) {
       top_pick_horse_id: string | null;
       predicted_confidence: number;
       top_pick_odds: number | null;
+      top_pick_horse_number: number | null;
+      place_min_odds: number | null;
     }>(
       `SELECT pr.race_id, pr.win_hit, pr.place_hit, pr.bet_roi,
               pr.bet_investment, pr.bet_return, pr.evaluated_at,
               pr.predicted_confidence, pr.top_pick_horse_id,
               r.date as race_date, r.racecourse_name, r.name as race_name, r.grade,
-              re.odds as top_pick_odds
+              re.odds as top_pick_odds, re.horse_number as top_pick_horse_number,
+              o.min_odds as place_min_odds
        FROM prediction_results pr
        JOIN races r ON r.id = pr.race_id
        LEFT JOIN race_entries re ON re.race_id = pr.race_id AND re.horse_id = pr.top_pick_horse_id
+       LEFT JOIN odds o ON o.race_id = pr.race_id AND o.bet_type = '複勝' AND o.horse_number1 = re.horse_number
        WHERE r.status = '結果確定' ${dateFilter}
        ORDER BY r.date ASC, pr.evaluated_at ASC`,
       [],
@@ -197,10 +202,12 @@ export async function GET(request: NextRequest) {
       totalWinInvested += inv;
       totalWinReturned += r.bet_return || 0;
 
-      // 複勝ROI: place_hit × 複勝オッズ（単勝オッズ × 0.35 で近似）
+      // 複勝ROI: oddsテーブルの実min_oddsを優先、なければ単勝オッズ×0.35で近似
       totalPlaceInvested += inv;
       if (r.place_hit) {
-        const placeOdds = r.top_pick_odds ? Math.max(1.1, r.top_pick_odds * 0.35) : 0;
+        const placeOdds = r.place_min_odds
+          ? r.place_min_odds
+          : (r.top_pick_odds ? Math.max(1.1, r.top_pick_odds * 0.35) : 0);
         totalPlaceReturned += inv * placeOdds;
       }
     }
@@ -240,7 +247,6 @@ export async function GET(request: NextRequest) {
         .sort((a, b) => a[1] - b[1])
         .slice(0, 3)
         .map(([num]) => num);
-      const winner = top3[0];
 
       for (const bet of bets) {
         const type = bet.type;
@@ -257,22 +263,8 @@ export async function GET(request: NextRequest) {
         }
 
         // 的中判定
-        let isHit = false;
         const sels = bet.selections || [];
-        if (type === '単勝') {
-          isHit = sels[0] === winner;
-        } else if (type === '複勝') {
-          isHit = top3.includes(sels[0]);
-        } else if (type === '馬連' || type === 'ワイド') {
-          isHit = sels.length >= 2 && sels.every(s => top3.includes(s));
-        } else if (type === '馬単') {
-          isHit = sels[0] === winner && sels.length >= 2 && top3.includes(sels[1]);
-        } else if (type === '三連複') {
-          isHit = sels.length >= 3 && sels.every(s => top3.includes(s));
-        } else if (type === '三連単') {
-          isHit = sels.length >= 3 &&
-            sels[0] === top3[0] && sels[1] === top3[1] && sels[2] === top3[2];
-        }
+        const isHit = isBetHit(type, sels, top3);
 
         if (isHit) {
           bucket.hit++;

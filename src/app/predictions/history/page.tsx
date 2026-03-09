@@ -18,8 +18,18 @@ interface PickResult {
 interface BetResult {
   type: string;
   selections: number[];
-  odds?: number;
+  odds: number;
   hit: boolean;
+  isEstimated: boolean;
+  investment: number;
+  payout: number;
+  profit: number;
+}
+
+interface BetSummary {
+  totalInvestment: number;
+  totalPayout: number;
+  totalProfit: number;
 }
 
 interface HistoryItem {
@@ -41,6 +51,7 @@ interface HistoryItem {
   betReturn: number;
   pickResults: PickResult[];
   betResults: BetResult[];
+  betSummary: BetSummary;
   actualTop3: number[];
 }
 
@@ -196,24 +207,25 @@ export default function PredictionHistoryPage() {
                       </span>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
-                      {item.winHit && (
+                      {item.betSummary.totalProfit > 0 ? (
                         <span className="px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-xs rounded font-bold">
-                          単勝的中
+                          +{item.betSummary.totalProfit.toLocaleString()}円
                         </span>
+                      ) : item.betSummary.totalProfit === 0 && item.betResults.some(b => b.hit) ? (
+                        <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 text-xs rounded font-bold">
+                          ±0円
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 text-xs rounded font-bold">
+                          {item.betSummary.totalProfit.toLocaleString()}円
+                        </span>
+                      )}
+                      {item.winHit && (
+                        <span className="text-xs text-green-600 dark:text-green-400 font-medium">単勝</span>
                       )}
                       {!item.winHit && item.placeHit && (
-                        <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 text-xs rounded font-bold">
-                          複勝的中
-                        </span>
+                        <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">複勝</span>
                       )}
-                      {!item.winHit && !item.placeHit && (
-                        <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 text-xs rounded">
-                          不的中
-                        </span>
-                      )}
-                      <span className={`text-sm font-bold ${item.roi > 0 ? 'text-green-600' : 'text-red-500'}`}>
-                        {item.roi > 0 ? '+' : ''}{item.roi}%
-                      </span>
                       <span className="text-muted text-sm">{expandedId === item.raceId ? '\u25B2' : '\u25BC'}</span>
                     </div>
                   </div>
@@ -269,22 +281,66 @@ export default function PredictionHistoryPage() {
                       </div>
                     </div>
 
-                    {/* 推奨馬券の結果 */}
+                    {/* 推奨馬券の収支 */}
                     {item.betResults.length > 0 && (
                       <div>
-                        <h3 className="text-sm font-bold text-muted mb-2">推奨馬券の結果</h3>
-                        <div className="flex flex-wrap gap-2">
-                          {item.betResults.map((bet, idx) => (
-                            <span key={idx} className={`px-2 py-1 rounded text-xs font-medium ${
-                              bet.hit
-                                ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border border-green-300'
-                                : 'bg-gray-100 dark:bg-gray-800 text-gray-500 border border-gray-300 dark:border-gray-600'
-                            }`}>
-                              {bet.type} {bet.selections.join('-')}
-                              {bet.odds ? ` (${bet.odds.toFixed(1)}倍)` : ''}
-                              {bet.hit ? ' 的中' : ''}
-                            </span>
-                          ))}
+                        <h3 className="text-sm font-bold text-muted mb-2">推奨馬券の収支</h3>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b dark:border-gray-700 text-left text-xs text-muted">
+                                <th className="py-1 pr-2">券種</th>
+                                <th className="py-1 px-2">買い目</th>
+                                <th className="py-1 px-2 text-right">オッズ</th>
+                                <th className="py-1 px-2 text-center">結果</th>
+                                <th className="py-1 px-2 text-right">収支</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {item.betResults.map((bet, idx) => (
+                                <tr key={idx} className="border-b dark:border-gray-800">
+                                  <td className="py-1.5 pr-2 font-medium">{bet.type}</td>
+                                  <td className="py-1.5 px-2 font-mono">{bet.selections.join('-')}</td>
+                                  <td className="py-1.5 px-2 text-right font-mono">
+                                    {bet.odds > 0 ? `${bet.odds.toFixed(1)}倍` : '-'}
+                                    {bet.isEstimated && bet.odds > 0 && (
+                                      <span className="text-xs text-muted ml-0.5">(推定)</span>
+                                    )}
+                                  </td>
+                                  <td className="py-1.5 px-2 text-center">
+                                    {bet.hit ? (
+                                      <span className="px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-xs rounded font-bold">
+                                        的中
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs text-gray-400">不的中</span>
+                                    )}
+                                  </td>
+                                  <td className={`py-1.5 px-2 text-right font-bold font-mono ${
+                                    bet.profit > 0 ? 'text-green-600' : bet.profit < 0 ? 'text-red-500' : ''
+                                  }`}>
+                                    {bet.profit > 0 ? '+' : ''}{bet.profit.toLocaleString()}円
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr className="border-t-2 dark:border-gray-600 font-bold">
+                                <td colSpan={2} className="py-2 pr-2">合計</td>
+                                <td className="py-2 px-2 text-right text-xs text-muted">
+                                  投資{item.betSummary.totalInvestment.toLocaleString()}円
+                                </td>
+                                <td className="py-2 px-2 text-center text-xs text-muted">
+                                  回収{item.betSummary.totalPayout.toLocaleString()}円
+                                </td>
+                                <td className={`py-2 px-2 text-right font-mono ${
+                                  item.betSummary.totalProfit > 0 ? 'text-green-600' : item.betSummary.totalProfit < 0 ? 'text-red-500' : ''
+                                }`}>
+                                  {item.betSummary.totalProfit > 0 ? '+' : ''}{item.betSummary.totalProfit.toLocaleString()}円
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
                         </div>
                       </div>
                     )}

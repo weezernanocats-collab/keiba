@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbAll } from '@/lib/database';
+import { isBetHit } from '@/lib/bet-utils';
 
 /**
  * 過去予想履歴API
@@ -102,17 +103,38 @@ export async function GET(request: NextRequest) {
     // 各レースの実着順を一括取得（予想vs結果の対比用）
     const raceIds = rows.map(r => r.race_id);
     const entryResultMap = new Map<string, Map<number, number>>();
+    // 実オッズマップ: race_id -> bet_type -> horse_numbers_key -> { odds, minOdds }
+    const realOddsMap = new Map<string, Map<string, Map<string, { odds: number; minOdds: number | null }>>>();
 
     if (raceIds.length > 0) {
       const ph = raceIds.map(() => '?').join(',');
-      const entries = await dbAll<{ race_id: string; horse_number: number; result_position: number }>(
-        `SELECT race_id, horse_number, result_position FROM race_entries
-         WHERE race_id IN (${ph}) AND result_position IS NOT NULL`,
-        raceIds,
-      );
+      const [entries, oddsRows] = await Promise.all([
+        dbAll<{ race_id: string; horse_number: number; result_position: number }>(
+          `SELECT race_id, horse_number, result_position FROM race_entries
+           WHERE race_id IN (${ph}) AND result_position IS NOT NULL`,
+          raceIds,
+        ),
+        dbAll<{
+          race_id: string; bet_type: string;
+          horse_number1: number; horse_number2: number | null; horse_number3: number | null;
+          odds: number; min_odds: number | null;
+        }>(
+          `SELECT race_id, bet_type, horse_number1, horse_number2, horse_number3, odds, min_odds
+           FROM odds WHERE race_id IN (${ph}) AND bet_type IN ('単勝', '複勝')`,
+          raceIds,
+        ),
+      ]);
       for (const e of entries) {
         if (!entryResultMap.has(e.race_id)) entryResultMap.set(e.race_id, new Map());
         entryResultMap.get(e.race_id)!.set(e.horse_number, e.result_position);
+      }
+      for (const o of oddsRows) {
+        if (!realOddsMap.has(o.race_id)) realOddsMap.set(o.race_id, new Map());
+        const byType = realOddsMap.get(o.race_id)!;
+        if (!byType.has(o.bet_type)) byType.set(o.bet_type, new Map());
+        const nums = [o.horse_number1, o.horse_number2, o.horse_number3].filter((n): n is number => n != null);
+        const key = nums.join('-');
+        byType.get(o.bet_type)!.set(key, { odds: o.odds, minOdds: o.min_odds });
       }
     }
 
@@ -133,8 +155,6 @@ export async function GET(request: NextRequest) {
         .sort((a, b) => a[1] - b[1])
         .slice(0, 3)
         .map(([num]) => num);
-      const winner = top3[0];
-
       // 予想馬の実着順を付与
       const pickResults = picks.slice(0, 6).map(p => ({
         ...p,
@@ -143,18 +163,48 @@ export async function GET(request: NextRequest) {
         placeHit: (posMap.get(p.horseNumber) ?? 99) <= 3,
       }));
 
-      // 馬券の的中判定
+      // 馬券の的中判定 + 収支計算
+      const raceOdds = realOddsMap.get(row.race_id);
       const betResults = bets.map(bet => {
-        let isHit = false;
         const sels = bet.selections || [];
-        if (bet.type === '単勝') isHit = sels[0] === winner;
-        else if (bet.type === '複勝') isHit = top3.includes(sels[0]);
-        else if (bet.type === '馬連' || bet.type === 'ワイド') isHit = sels.every(s => top3.includes(s));
-        else if (bet.type === '馬単') isHit = sels[0] === winner && sels.length >= 2 && top3.includes(sels[1]);
-        else if (bet.type === '三連複') isHit = sels.length >= 3 && sels.every(s => top3.includes(s));
-        else if (bet.type === '三連単') isHit = sels.length >= 3 && sels[0] === top3[0] && sels[1] === top3[1] && sels[2] === top3[2];
-        return { ...bet, hit: isHit };
+        const isHit = isBetHit(bet.type, sels, top3);
+
+        // 実オッズ検索（単勝/複勝のみ実オッズあり）
+        let realOddsValue: number | null = null;
+        let isEstimated = true;
+        if (raceOdds) {
+          const byType = raceOdds.get(bet.type);
+          if (byType) {
+            const key = sels.join('-');
+            const found = byType.get(key);
+            if (found) {
+              realOddsValue = bet.type === '複勝' ? (found.minOdds ?? found.odds) : found.odds;
+              isEstimated = false;
+            }
+          }
+        }
+
+        const odds = realOddsValue ?? (bet.odds && bet.odds > 0 ? bet.odds : null);
+        const investment = 100;
+        const payout = isHit && odds != null ? Math.round(investment * odds) : (isHit ? investment : 0);
+        const profit = payout - investment;
+
+        return {
+          type: bet.type,
+          selections: sels,
+          hit: isHit,
+          odds: odds ?? 0,
+          isEstimated,
+          investment,
+          payout,
+          profit,
+        };
       });
+
+      // レースごとの収支サマリ
+      const totalInvestment = betResults.reduce((s, b) => s + b.investment, 0);
+      const totalPayout = betResults.reduce((s, b) => s + b.payout, 0);
+      const totalProfit = totalPayout - totalInvestment;
 
       return {
         raceId: row.race_id,
@@ -175,6 +225,7 @@ export async function GET(request: NextRequest) {
         betReturn: Math.round(row.bet_return || 0),
         pickResults,
         betResults,
+        betSummary: { totalInvestment, totalPayout, totalProfit },
         actualTop3: top3,
       };
     });
