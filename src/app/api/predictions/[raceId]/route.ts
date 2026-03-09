@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getPredictionByRaceId, getRaceById, getHorseById, getHorsePastPerformances, getJockeyStats, savePrediction } from '@/lib/queries';
 import { dbRun, dbAll } from '@/lib/database';
 import { generatePrediction } from '@/lib/prediction-engine';
+import { isBetHit } from '@/lib/bet-utils';
 import { seedAllData } from '@/lib/seed-data';
 import type { RaceEntry } from '@/types';
 
@@ -131,26 +132,46 @@ export async function GET(
         const actualTop3 = actualTop3Detailed.map(h => h.horseNumber);
         const actualWinner = actualTop3[0];
 
-        const betResults = augmentedPrediction.recommendedBets.map((bet: { type: string; selections: number[] }) => {
-          let hitStatus = false;
-          if (bet.type === '単勝') {
-            hitStatus = bet.selections[0] === actualWinner;
-          } else if (bet.type === '複勝') {
-            hitStatus = actualTop3.includes(bet.selections[0]);
-          } else if (bet.type === '馬連' || bet.type === 'ワイド') {
-            hitStatus = bet.selections.every(s => actualTop3.includes(s));
-          } else if (bet.type === '馬単') {
-            hitStatus = bet.selections[0] === actualWinner && actualTop3.includes(bet.selections[1]);
-          } else if (bet.type === '三連複') {
-            hitStatus = bet.selections.every(s => actualTop3.includes(s));
-          } else if (bet.type === '三連単') {
-            hitStatus = bet.selections.length >= 3 &&
-              bet.selections[0] === actualTop3[0] &&
-              bet.selections[1] === actualTop3[1] &&
-              bet.selections[2] === actualTop3[2];
+        // 実オッズ取得（単勝・複勝のみ）
+        const oddsRows = await dbAll<{
+          bet_type: string; horse_number1: number;
+          odds: number; min_odds: number | null;
+        }>(
+          `SELECT bet_type, horse_number1, odds, min_odds
+           FROM odds WHERE race_id = ? AND bet_type IN ('単勝', '複勝')`,
+          [raceId],
+        );
+        const oddsMap = new Map<string, { odds: number; minOdds: number | null }>();
+        for (const o of oddsRows) {
+          oddsMap.set(`${o.bet_type}-${o.horse_number1}`, { odds: o.odds, minOdds: o.min_odds });
+        }
+
+        const betResults = augmentedPrediction.recommendedBets.map((bet: { type: string; selections: number[]; odds?: number }) => {
+          const sels = bet.selections || [];
+          const isHit = isBetHit(bet.type, sels, actualTop3);
+
+          // 実オッズ検索
+          let realOddsValue: number | null = null;
+          let isEstimated = true;
+          if (bet.type === '単勝' || bet.type === '複勝') {
+            const found = oddsMap.get(`${bet.type}-${sels[0]}`);
+            if (found) {
+              realOddsValue = bet.type === '複勝' ? (found.minOdds ?? found.odds) : found.odds;
+              isEstimated = false;
+            }
           }
-          return { ...bet, hit: hitStatus };
+          const odds = realOddsValue ?? (bet.odds && bet.odds > 0 ? bet.odds : null);
+          const investment = 100;
+          const payout = isHit && odds != null ? Math.round(investment * odds) : (isHit ? investment : 0);
+          const profit = payout - investment;
+
+          return { ...bet, hit: isHit, odds: odds ?? 0, isEstimated, investment, payout, profit };
         });
+
+        // 推奨馬券全体の収支
+        const totalInvestment = betResults.reduce((s: number, b: { investment: number }) => s + b.investment, 0);
+        const totalPayout = betResults.reduce((s: number, b: { payout: number }) => s + b.payout, 0);
+        const totalProfit = totalPayout - totalInvestment;
 
         verification = {
           winHit: predResult[0]?.win_hit === 1,
@@ -159,6 +180,7 @@ export async function GET(
           roi: Math.round((predResult[0]?.bet_roi ?? 0) * 100),
           pickResults,
           betResults,
+          betSummary: { totalInvestment, totalPayout, totalProfit },
           actualTop3,
           actualTop3Detailed,
         };

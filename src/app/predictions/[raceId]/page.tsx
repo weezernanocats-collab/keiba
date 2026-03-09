@@ -90,8 +90,19 @@ interface PickResult extends Pick {
   placeHit: boolean;
 }
 
-interface BetResult extends Bet {
+interface BetResultDetail extends Bet {
   hit: boolean;
+  odds: number;
+  isEstimated: boolean;
+  investment: number;
+  payout: number;
+  profit: number;
+}
+
+interface BetSummary {
+  totalInvestment: number;
+  totalPayout: number;
+  totalProfit: number;
 }
 
 interface ActualTop3Entry {
@@ -105,7 +116,8 @@ interface Verification {
   top3InTop6: number;
   roi: number;
   pickResults: PickResult[];
-  betResults: BetResult[];
+  betResults: BetResultDetail[];
+  betSummary?: BetSummary;
   actualTop3: number[];
   actualTop3Detailed?: ActualTop3Entry[];
 }
@@ -307,9 +319,17 @@ export default function PredictionDetailPage() {
             }`}>
               複勝: {verification.placeHit ? '的中!' : '不的中'}
             </span>
-            <span className="px-4 py-2 rounded-lg text-sm font-bold bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-              ROI: {verification.roi}%
-            </span>
+            {verification.betSummary && (
+              <span className={`px-4 py-2 rounded-lg text-sm font-bold ${
+                verification.betSummary.totalProfit > 0
+                  ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                  : verification.betSummary.totalProfit === 0
+                  ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                  : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+              }`}>
+                収支: {verification.betSummary.totalProfit > 0 ? '+' : ''}{verification.betSummary.totalProfit}円
+              </span>
+            )}
           </div>
 
           {/* 実着順TOP3サマリー */}
@@ -390,20 +410,62 @@ export default function PredictionDetailPage() {
             </table>
           </div>
 
-          {/* 推奨馬券の的中判定 */}
+          {/* 推奨馬券の収支 */}
           {verification.betResults.length > 0 && (
             <div>
               <h3 className="text-sm font-bold text-muted mb-2">推奨馬券の結果</h3>
-              <div className="flex flex-wrap gap-2">
-                {verification.betResults.map((bet, idx) => (
-                  <span key={idx} className={`px-3 py-1.5 rounded text-xs font-medium ${
-                    bet.hit
-                      ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border border-green-300'
-                      : 'bg-gray-100 dark:bg-gray-800 text-gray-500 border border-gray-300 dark:border-gray-600'
-                  }`}>
-                    {bet.type} {bet.selections.join('-')} {bet.hit ? '的中' : '不的中'}
-                  </span>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b dark:border-gray-700 text-left">
+                      <th className="py-2">券種</th>
+                      <th className="py-2">買い目</th>
+                      <th className="py-2 text-right">オッズ</th>
+                      <th className="py-2 text-center">結果</th>
+                      <th className="py-2 text-right">収支</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {verification.betResults.map((bet, idx) => (
+                      <tr key={idx} className="border-b dark:border-gray-800">
+                        <td className="py-2 font-medium">{bet.type}</td>
+                        <td className="py-2 font-mono">{bet.selections.join('-')}</td>
+                        <td className="py-2 text-right text-muted">
+                          {bet.odds > 0 ? `${bet.odds.toFixed(1)}倍` : '-'}
+                          {bet.isEstimated && bet.odds > 0 && <span className="text-xs ml-0.5">(推定)</span>}
+                        </td>
+                        <td className="py-2 text-center">
+                          {bet.hit ? (
+                            <span className="px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-xs rounded font-bold">的中</span>
+                          ) : (
+                            <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 text-xs rounded">不的中</span>
+                          )}
+                        </td>
+                        <td className={`py-2 text-right font-bold ${
+                          bet.profit > 0 ? 'text-green-600 dark:text-green-400' :
+                          bet.profit < 0 ? 'text-red-600 dark:text-red-400' : ''
+                        }`}>
+                          {bet.profit > 0 ? '+' : ''}{bet.profit}円
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {verification.betSummary && (
+                    <tfoot>
+                      <tr className="border-t-2 dark:border-gray-600 font-bold">
+                        <td colSpan={2} className="py-2">合計</td>
+                        <td className="py-2 text-right text-muted text-xs">投資{verification.betSummary.totalInvestment}円</td>
+                        <td className="py-2 text-center text-xs">回収{verification.betSummary.totalPayout}円</td>
+                        <td className={`py-2 text-right ${
+                          verification.betSummary.totalProfit > 0 ? 'text-green-600 dark:text-green-400' :
+                          verification.betSummary.totalProfit < 0 ? 'text-red-600 dark:text-red-400' : ''
+                        }`}>
+                          {verification.betSummary.totalProfit > 0 ? '+' : ''}{verification.betSummary.totalProfit}円
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
               </div>
             </div>
           )}
