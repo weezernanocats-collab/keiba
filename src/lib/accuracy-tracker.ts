@@ -152,7 +152,15 @@ export async function evaluateRacePrediction(raceId: string): Promise<Prediction
   const betInvestment = BET_AMOUNT;
   let betReturn = 0;
   if (winHit) {
-    const topPickOdds = topPickResult?.odds ?? 0;
+    let topPickOdds = topPickResult?.odds ?? 0;
+    // race_entries.odds が null の場合、odds テーブルからフォールバック取得
+    if (topPickOdds === 0 && topPickResult) {
+      const oddsRow = await dbGet<{ odds: number }>(
+        "SELECT odds FROM odds WHERE race_id = ? AND bet_type = '単勝' AND horse_number1 = ?",
+        [raceId, topPickResult.horse_number]
+      );
+      if (oddsRow) topPickOdds = oddsRow.odds;
+    }
     betReturn = BET_AMOUNT * topPickOdds;
   }
   const betRoi = betReturn / betInvestment;
