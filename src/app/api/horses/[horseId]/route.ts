@@ -78,7 +78,7 @@ export async function GET(
     let raceEntries: Record<string, unknown>[] = [];
     if (pastPerformances.length === 0) {
       raceEntries = await dbAll<Record<string, unknown>>(
-        `SELECT re.horse_number, re.jockey_name, re.handicap_weight,
+        `SELECT re.race_id, re.horse_number, re.jockey_name, re.handicap_weight,
                 re.result_position, re.result_time, re.result_last_three_furlongs,
                 re.result_weight, re.result_weight_change,
                 r.name as race_name, r.date, r.racecourse_name, r.track_type,

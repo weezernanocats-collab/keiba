@@ -33,6 +33,7 @@ interface HorseDetail {
 }
 
 interface RaceEntryRow {
+  race_id?: string;
   horse_number: number;
   jockey_name: string;
   handicap_weight: number;
@@ -52,6 +53,7 @@ interface RaceEntryRow {
 }
 
 interface PastPerf {
+  raceId?: string;
   date: string;
   raceName: string;
   racecourseName: string;
@@ -256,7 +258,11 @@ export default function HorseDetailPage() {
                     <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
                       <td className="px-3 py-2 whitespace-nowrap text-muted">{pp.date}</td>
                       <td className="px-3 py-2">{pp.racecourseName}</td>
-                      <td className="px-3 py-2 font-medium">{pp.raceName}</td>
+                      <td className="px-3 py-2 font-medium">
+                        <Link href={`/races/${pp.raceId || ''}`} className={pp.raceId ? 'text-accent hover:underline' : ''}>
+                          {pp.raceName}
+                        </Link>
+                      </td>
                       <td className="px-3 py-2 text-center text-muted">{pp.trackType}{pp.distance}m</td>
                       <td className="px-3 py-2 text-center">
                         <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
@@ -318,7 +324,11 @@ export default function HorseDetailPage() {
                     <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
                       <td className="px-3 py-2 whitespace-nowrap text-muted">{re.date}</td>
                       <td className="px-3 py-2">{re.racecourse_name}</td>
-                      <td className="px-3 py-2 font-medium">{re.race_name}</td>
+                      <td className="px-3 py-2 font-medium">
+                        <Link href={`/races/${re.race_id || ''}`} className={re.race_id ? 'text-accent hover:underline' : ''}>
+                          {re.race_name}
+                        </Link>
+                      </td>
                       <td className="px-3 py-2 text-center text-muted">{re.track_type}{re.distance}m</td>
                       <td className="px-3 py-2 text-center">
                         {re.result_position ? (

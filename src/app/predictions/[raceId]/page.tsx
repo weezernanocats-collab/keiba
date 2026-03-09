@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
@@ -170,6 +170,42 @@ export default function PredictionDetailPage() {
     );
   }
 
+  // セクションナビ用
+  const [activeSection, setActiveSection] = useState('');
+  const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
+  const setSectionRef = useCallback((id: string) => (el: HTMLElement | null) => {
+    sectionRefs.current[id] = el;
+  }, []);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setActiveSection(entry.target.id);
+          }
+        }
+      },
+      { rootMargin: '-80px 0px -60% 0px', threshold: 0.1 }
+    );
+    const refs = sectionRefs.current;
+    for (const el of Object.values(refs)) {
+      if (el) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, [prediction, verification]);
+
+  const sections = [
+    ...(verification ? [{ id: 'verification', label: '答え合わせ' }] : []),
+    { id: 'summary', label: 'サマリー' },
+    { id: 'picks', label: '予想印' },
+    ...(prediction?.analysis.marketAnalysis ? [{ id: 'market', label: '市場比較' }] : []),
+    { id: 'analysis', label: 'レース分析' },
+    ...(prediction?.analysis.bettingStrategy ? [{ id: 'strategy', label: '馬券戦略' }] : []),
+    ...(prediction && prediction.recommendedBets.length > 0 ? [{ id: 'bets', label: '推奨馬券' }] : []),
+    ...(prediction && prediction.recommendedBets.length > 0 && prediction.analysis.bettingStrategy ? [{ id: 'simulator', label: 'シミュレーション' }] : []),
+  ];
+
   const rankLabels = ['\u25CE 本命', '\u25CB 対抗', '\u25B2 単穴', '\u25B3 連下', '\u00D7 注意', '\u2606 穴'];
   const rankColors = [
     'bg-red-50 border-red-300 dark:bg-red-900/20 dark:border-red-800',
@@ -223,9 +259,30 @@ export default function PredictionDetailPage() {
         </div>
       </div>
 
+      {/* セクションナビ */}
+      {sections.length > 2 && (
+        <nav className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-card-border -mx-4 px-4 py-2 overflow-x-auto">
+          <div className="flex gap-1 min-w-max">
+            {sections.map(s => (
+              <button
+                key={s.id}
+                onClick={() => sectionRefs.current[s.id]?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
+                  activeSection === s.id
+                    ? 'bg-accent text-white'
+                    : 'bg-card-bg text-muted hover:bg-gray-100 dark:hover:bg-gray-800'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </nav>
+      )}
+
       {/* 答え合わせ (B2) - 結果確定済みの場合 */}
       {verification && (
-        <div className="bg-card-bg border-2 border-amber-400 dark:border-amber-600 rounded-xl p-6">
+        <div id="verification" ref={setSectionRef('verification')} className="bg-card-bg border-2 border-amber-400 dark:border-amber-600 rounded-xl p-6 scroll-mt-16">
           <h2 className="text-lg font-bold mb-4">📋 答え合わせ</h2>
 
           {/* 全体結果バッジ */}
@@ -316,13 +373,13 @@ export default function PredictionDetailPage() {
       )}
 
       {/* サマリー */}
-      <div className="bg-card-bg border border-card-border rounded-xl p-6">
+      <div id="summary" ref={setSectionRef('summary')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-16">
         <h2 className="text-lg font-bold mb-3">予想サマリー</h2>
         <div className="whitespace-pre-line text-sm leading-relaxed">{prediction.summary}</div>
       </div>
 
       {/* トップピック */}
-      <div>
+      <div id="picks" ref={setSectionRef('picks')} className="scroll-mt-16">
         <h2 className="text-lg font-bold mb-4">予想印</h2>
         <div className="space-y-3">
           {prediction.topPicks.map((pick, idx) => {
@@ -382,6 +439,7 @@ export default function PredictionDetailPage() {
 
       {/* モデル vs 市場オッズ */}
       {prediction.analysis.marketAnalysis && prediction.analysis.valueHorses && prediction.analysis.overround && (
+        <div id="market" ref={setSectionRef('market')} className="scroll-mt-16">
         <ModelVsMarket
           marketAnalysis={prediction.analysis.marketAnalysis}
           valueHorses={prediction.analysis.valueHorses}
@@ -390,10 +448,11 @@ export default function PredictionDetailPage() {
             prediction.topPicks.map(p => [p.horseNumber, p.horseName])
           )}
         />
+        </div>
       )}
 
       {/* レース分析 */}
-      <div className="bg-card-bg border border-card-border rounded-xl p-6">
+      <div id="analysis" ref={setSectionRef('analysis')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-16">
         <h2 className="text-lg font-bold mb-4">レース分析</h2>
         <div className="space-y-4">
           <div>
@@ -433,7 +492,7 @@ export default function PredictionDetailPage() {
 
       {/* 馬券戦略 */}
       {prediction.analysis.bettingStrategy && (
-        <div className="bg-card-bg border border-card-border rounded-xl p-6">
+        <div id="strategy" ref={setSectionRef('strategy')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-16">
           <h2 className="text-lg font-bold mb-4">馬券戦略</h2>
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-3">
@@ -500,7 +559,7 @@ export default function PredictionDetailPage() {
 
       {/* 推奨馬券 */}
       {prediction.recommendedBets.length > 0 && (
-        <div>
+        <div id="bets" ref={setSectionRef('bets')} className="scroll-mt-16">
           <h2 className="text-lg font-bold mb-4">推奨馬券</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {prediction.recommendedBets.map((bet, idx) => {
@@ -565,16 +624,22 @@ export default function PredictionDetailPage() {
         </div>
       )}
 
-      {/* B5: 金額シミュレーション */}
+      {/* B5: 金額シミュレーション & モンテカルロ */}
       {prediction.recommendedBets.length > 0 && prediction.analysis.bettingStrategy && (
-        <BudgetSimulator
-          bets={prediction.recommendedBets}
-          riskLevel={prediction.analysis.bettingStrategy.riskLevel}
-        />
+        <div id="simulator" ref={setSectionRef('simulator')} className="scroll-mt-16 space-y-6">
+          <BudgetSimulator
+            bets={prediction.recommendedBets}
+            riskLevel={prediction.analysis.bettingStrategy.riskLevel}
+          />
+          <MonteCarloSimulator
+            bets={prediction.recommendedBets}
+            winProbabilities={prediction.analysis.winProbabilities}
+          />
+        </div>
       )}
 
-      {/* モンテカルロ・シミュレーション */}
-      {prediction.recommendedBets.length > 0 && (
+      {/* モンテカルロのみ（bettingStrategyがない場合） */}
+      {prediction.recommendedBets.length > 0 && !prediction.analysis.bettingStrategy && (
         <MonteCarloSimulator
           bets={prediction.recommendedBets}
           winProbabilities={prediction.analysis.winProbabilities}

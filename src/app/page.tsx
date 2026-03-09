@@ -80,6 +80,18 @@ export default function HomePage() {
           >
             レース一覧
           </Link>
+          <Link
+            href="/stats"
+            className="bg-white/20 hover:bg-white/30 px-6 py-3 rounded-lg font-medium transition-colors"
+          >
+            的中率分析
+          </Link>
+          <Link
+            href="/calendar"
+            className="bg-white/20 hover:bg-white/30 px-6 py-3 rounded-lg font-medium transition-colors"
+          >
+            カレンダー
+          </Link>
         </div>
       </section>
 

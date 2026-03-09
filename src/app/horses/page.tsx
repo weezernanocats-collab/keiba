@@ -79,49 +79,73 @@ export default function HorsesPage() {
       {loading ? (
         <LoadingSpinner />
       ) : (
-        <div className="bg-card-bg border border-card-border rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 dark:bg-gray-800/50">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium">馬名</th>
-                  <th className="px-3 py-3 text-center font-medium">性齢</th>
-                  <th className="px-3 py-3 text-left font-medium">父</th>
-                  <th className="px-3 py-3 text-left font-medium">調教師</th>
-                  <th className="px-3 py-3 text-center font-medium">成績</th>
-                  <th className="px-3 py-3 text-right font-medium">獲得賞金</th>
-                  <th className="px-3 py-3 text-center font-medium">調子</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-card-border">
-                {horses.map(horse => (
-                  <tr key={horse.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
-                    <td className="px-4 py-3">
-                      <Link href={`/horses/${horse.id}`} className="text-accent hover:underline font-medium">
-                        {horse.name}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-3 text-center text-muted">{horse.sex}{horse.age}</td>
-                    <td className="px-3 py-3 text-muted">{horse.father_name}</td>
-                    <td className="px-3 py-3 text-muted">{horse.trainer_name}</td>
-                    <td className="px-3 py-3 text-center">
-                      <span className="font-mono">
-                        {horse.total_races}戦{horse.wins}勝
-                        <span className="text-muted"> [{horse.wins}-{horse.seconds}-{horse.thirds}-{horse.total_races - horse.wins - horse.seconds - horse.thirds}]</span>
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 text-right">{(horse.total_earnings / 10000).toFixed(0)}万円</td>
-                    <td className="px-3 py-3 text-center">
-                      <span className={conditionColor(horse.condition_overall)}>
-                        {horse.condition_overall}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <>
+          {/* モバイル: カード表示 */}
+          <div className="md:hidden space-y-3">
+            {horses.map(horse => (
+              <Link key={horse.id} href={`/horses/${horse.id}`} className="block bg-card-bg border border-card-border rounded-xl p-4 hover:border-accent/50 transition-colors">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-accent font-bold">{horse.name}</span>
+                  <span className={conditionColor(horse.condition_overall) + ' text-xs'}>{horse.condition_overall}</span>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-muted mb-2">
+                  <span>{horse.sex}{horse.age}</span>
+                  {horse.father_name && <span>父: {horse.father_name}</span>}
+                  {horse.trainer_name && <span>{horse.trainer_name}</span>}
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-mono">{horse.total_races}戦{horse.wins}勝 [{horse.wins}-{horse.seconds}-{horse.thirds}-{horse.total_races - horse.wins - horse.seconds - horse.thirds}]</span>
+                  <span className="text-muted">{(horse.total_earnings / 10000).toFixed(0)}万円</span>
+                </div>
+              </Link>
+            ))}
           </div>
-        </div>
+
+          {/* デスクトップ: テーブル表示 */}
+          <div className="hidden md:block bg-card-bg border border-card-border rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 dark:bg-gray-800/50">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium">馬名</th>
+                    <th className="px-3 py-3 text-center font-medium">性齢</th>
+                    <th className="px-3 py-3 text-left font-medium">父</th>
+                    <th className="px-3 py-3 text-left font-medium">調教師</th>
+                    <th className="px-3 py-3 text-center font-medium">成績</th>
+                    <th className="px-3 py-3 text-right font-medium">獲得賞金</th>
+                    <th className="px-3 py-3 text-center font-medium">調子</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-card-border">
+                  {horses.map(horse => (
+                    <tr key={horse.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
+                      <td className="px-4 py-3">
+                        <Link href={`/horses/${horse.id}`} className="text-accent hover:underline font-medium">
+                          {horse.name}
+                        </Link>
+                      </td>
+                      <td className="px-3 py-3 text-center text-muted">{horse.sex}{horse.age}</td>
+                      <td className="px-3 py-3 text-muted">{horse.father_name}</td>
+                      <td className="px-3 py-3 text-muted">{horse.trainer_name}</td>
+                      <td className="px-3 py-3 text-center">
+                        <span className="font-mono">
+                          {horse.total_races}戦{horse.wins}勝
+                          <span className="text-muted"> [{horse.wins}-{horse.seconds}-{horse.thirds}-{horse.total_races - horse.wins - horse.seconds - horse.thirds}]</span>
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-right">{(horse.total_earnings / 10000).toFixed(0)}万円</td>
+                      <td className="px-3 py-3 text-center">
+                        <span className={conditionColor(horse.condition_overall)}>
+                          {horse.condition_overall}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
 
       {!loading && horses.length === 0 && (

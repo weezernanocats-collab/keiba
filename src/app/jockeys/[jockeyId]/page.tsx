@@ -21,6 +21,7 @@ interface JockeyDetail {
 }
 
 interface RecentResult {
+  race_id?: string;
   race_name: string;
   date: string;
   racecourse_name: string;
@@ -152,7 +153,11 @@ export default function JockeyDetailPage() {
                     <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
                       <td className="px-4 py-2 text-muted">{r.date}</td>
                       <td className="px-3 py-2">{r.racecourse_name}</td>
-                      <td className="px-3 py-2 font-medium">{r.race_name}</td>
+                      <td className="px-3 py-2 font-medium">
+                        {r.race_id ? (
+                          <Link href={`/races/${r.race_id}`} className="text-accent hover:underline">{r.race_name}</Link>
+                        ) : r.race_name}
+                      </td>
                       <td className="px-3 py-2 text-muted">{r.track_type}{r.distance}m</td>
                       <td className="px-3 py-2">{r.horse_name}</td>
                       <td className="px-3 py-2 text-center">
