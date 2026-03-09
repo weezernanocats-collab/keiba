@@ -84,7 +84,13 @@ const GRADE_FILTERS = [
 
 const rankLabels = ['\u25CE', '\u25CB', '\u25B2', '\u25B3', '\u00D7', '\u2606'];
 
+export { PredictionHistoryContent };
+
 export default function PredictionHistoryPage() {
+  return <PredictionHistoryContent embedded={false} />;
+}
+
+function PredictionHistoryContent({ embedded = false }: { embedded?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [pagination, setPagination] = useState<Pagination | null>(null);
@@ -123,15 +129,17 @@ export default function PredictionHistoryPage() {
   };
 
   return (
-    <div className="space-y-6 animate-fadeIn">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">過去予想の結果</h1>
-        <div className="flex gap-2">
-          <Link href="/predictions" className="text-sm text-accent hover:underline">予想一覧</Link>
-          <span className="text-muted">|</span>
-          <Link href="/stats" className="text-sm text-accent hover:underline">統計</Link>
+    <div className={`space-y-6 ${embedded ? '' : 'animate-fadeIn'}`}>
+      {!embedded && (
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">過去予想の結果</h1>
+          <div className="flex gap-2">
+            <Link href="/predictions" className="text-sm text-accent hover:underline">予想一覧</Link>
+            <span className="text-muted">|</span>
+            <Link href="/stats" className="text-sm text-accent hover:underline">統計</Link>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* フィルタ */}
       <div className="flex flex-wrap gap-4">
