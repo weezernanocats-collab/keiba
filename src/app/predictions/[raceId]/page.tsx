@@ -319,17 +319,18 @@ export default function PredictionDetailPage() {
             }`}>
               複勝: {verification.placeHit ? '的中!' : '不的中'}
             </span>
-            {verification.betSummary && (
-              <span className={`px-4 py-2 rounded-lg text-sm font-bold ${
-                verification.betSummary.totalProfit > 0
-                  ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                  : verification.betSummary.totalProfit === 0
-                  ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
-                  : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-              }`}>
-                収支: {verification.betSummary.totalProfit > 0 ? '+' : ''}{verification.betSummary.totalProfit}円
-              </span>
-            )}
+            {verification.betSummary && verification.betSummary.totalInvestment > 0 && (() => {
+              const roi = Math.round(verification.betSummary!.totalPayout / verification.betSummary!.totalInvestment * 100);
+              return (
+                <span className={`px-4 py-2 rounded-lg text-sm font-bold ${
+                  roi >= 100
+                    ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                    : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                }`}>
+                  ROI: {roi}%
+                </span>
+              );
+            })()}
           </div>
 
           {/* 実着順TOP3サマリー */}
@@ -422,7 +423,7 @@ export default function PredictionDetailPage() {
                       <th className="py-2">買い目</th>
                       <th className="py-2 text-right">オッズ</th>
                       <th className="py-2 text-center">結果</th>
-                      <th className="py-2 text-right">収支</th>
+                      <th className="py-2 text-right">ROI</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -442,25 +443,23 @@ export default function PredictionDetailPage() {
                           )}
                         </td>
                         <td className={`py-2 text-right font-bold ${
-                          bet.profit > 0 ? 'text-green-600 dark:text-green-400' :
-                          bet.profit < 0 ? 'text-red-600 dark:text-red-400' : ''
+                          bet.payout >= bet.investment ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
                         }`}>
-                          {bet.profit > 0 ? '+' : ''}{bet.profit}円
+                          {bet.investment > 0 ? Math.round(bet.payout / bet.investment * 100) : 0}%
                         </td>
                       </tr>
                     ))}
                   </tbody>
-                  {verification.betSummary && (
+                  {verification.betSummary && verification.betSummary.totalInvestment > 0 && (
                     <tfoot>
                       <tr className="border-t-2 dark:border-gray-600 font-bold">
                         <td colSpan={2} className="py-2">合計</td>
                         <td className="py-2 text-right text-muted text-xs">投資{verification.betSummary.totalInvestment}円</td>
                         <td className="py-2 text-center text-xs">回収{verification.betSummary.totalPayout}円</td>
                         <td className={`py-2 text-right ${
-                          verification.betSummary.totalProfit > 0 ? 'text-green-600 dark:text-green-400' :
-                          verification.betSummary.totalProfit < 0 ? 'text-red-600 dark:text-red-400' : ''
+                          verification.betSummary.totalPayout >= verification.betSummary.totalInvestment ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
                         }`}>
-                          {verification.betSummary.totalProfit > 0 ? '+' : ''}{verification.betSummary.totalProfit}円
+                          ROI {Math.round(verification.betSummary.totalPayout / verification.betSummary.totalInvestment * 100)}%
                         </td>
                       </tr>
                     </tfoot>

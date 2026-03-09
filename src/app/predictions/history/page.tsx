@@ -215,19 +215,18 @@ function PredictionHistoryContent({ embedded = false }: { embedded?: boolean }) 
                       </span>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
-                      {item.betSummary.totalProfit > 0 ? (
-                        <span className="px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-xs rounded font-bold">
-                          +{item.betSummary.totalProfit.toLocaleString()}円
-                        </span>
-                      ) : item.betSummary.totalProfit === 0 && item.betResults.some(b => b.hit) ? (
-                        <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 text-xs rounded font-bold">
-                          ±0円
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 text-xs rounded font-bold">
-                          {item.betSummary.totalProfit.toLocaleString()}円
-                        </span>
-                      )}
+                      {item.betSummary.totalInvestment > 0 && (() => {
+                        const roi = Math.round(item.betSummary.totalPayout / item.betSummary.totalInvestment * 100);
+                        return (
+                          <span className={`px-2 py-0.5 text-xs rounded font-bold ${
+                            roi >= 100
+                              ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'
+                              : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300'
+                          }`}>
+                            ROI {roi}%
+                          </span>
+                        );
+                      })()}
                       {item.winHit && (
                         <span className="text-xs text-green-600 dark:text-green-400 font-medium">単勝</span>
                       )}
@@ -301,7 +300,7 @@ function PredictionHistoryContent({ embedded = false }: { embedded?: boolean }) 
                                 <th className="py-1 px-2">買い目</th>
                                 <th className="py-1 px-2 text-right">オッズ</th>
                                 <th className="py-1 px-2 text-center">結果</th>
-                                <th className="py-1 px-2 text-right">収支</th>
+                                <th className="py-1 px-2 text-right">ROI</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -325,9 +324,9 @@ function PredictionHistoryContent({ embedded = false }: { embedded?: boolean }) 
                                     )}
                                   </td>
                                   <td className={`py-1.5 px-2 text-right font-bold font-mono ${
-                                    bet.profit > 0 ? 'text-green-600' : bet.profit < 0 ? 'text-red-500' : ''
+                                    bet.payout >= bet.investment ? 'text-green-600' : 'text-red-500'
                                   }`}>
-                                    {bet.profit > 0 ? '+' : ''}{bet.profit.toLocaleString()}円
+                                    {bet.investment > 0 ? Math.round(bet.payout / bet.investment * 100) : 0}%
                                   </td>
                                 </tr>
                               ))}
@@ -342,9 +341,9 @@ function PredictionHistoryContent({ embedded = false }: { embedded?: boolean }) 
                                   回収{item.betSummary.totalPayout.toLocaleString()}円
                                 </td>
                                 <td className={`py-2 px-2 text-right font-mono ${
-                                  item.betSummary.totalProfit > 0 ? 'text-green-600' : item.betSummary.totalProfit < 0 ? 'text-red-500' : ''
+                                  item.betSummary.totalPayout >= item.betSummary.totalInvestment ? 'text-green-600' : 'text-red-500'
                                 }`}>
-                                  {item.betSummary.totalProfit > 0 ? '+' : ''}{item.betSummary.totalProfit.toLocaleString()}円
+                                  ROI {item.betSummary.totalInvestment > 0 ? Math.round(item.betSummary.totalPayout / item.betSummary.totalInvestment * 100) : 0}%
                                 </td>
                               </tr>
                             </tfoot>
