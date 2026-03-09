@@ -237,6 +237,8 @@ export async function GET(request: NextRequest) {
   const rows: Array<{
     race_id: string;
     horse_number: number;
+    position: number;
+    odds: number;
     features: number[];
     label_win: number;
     label_place: number;
@@ -306,6 +308,8 @@ export async function GET(request: NextRequest) {
       rows.push({
         race_id: pred.race_id,
         horse_number: entry.horse_number,
+        position: entry.result_position,
+        odds: entry.odds ?? 0,
         features,
         label_win: entry.result_position === 1 ? 1 : 0,
         label_place: entry.result_position <= 3 ? 1 : 0,
