@@ -143,12 +143,37 @@ export async function scrapeRaceCard(raceId: string): Promise<ScrapedRaceDetail>
   const timeMatch = raceInfo.match(/(\d{1,2}:\d{2})/);
 
   // Grade detection: netkeiba uses CSS classes (Icon_GradeType1=G1, etc.) or text
+  // Icon_GradeType の番号体系:
+  //   1=G1, 2=G2, 3=G3, 5=リステッド, 10=オープン,
+  //   15=3勝クラス, 16=2勝クラス, 17=1勝クラス, 18=未勝利, 19=新馬
   const gradeText = $('span.RaceGrade, span.Icon_GradeType').text().trim();
-  const gradeClasses = $('span.Icon_GradeType').map((_, el) => $(el).attr('class') || '').get().join(' ');
+  const gradeClassList = $('span.Icon_GradeType').map((_, el) => $(el).attr('class') || '').get();
+  // 個別クラスに分割して正確にマッチ（Icon_GradeType1 が Icon_GradeType10 等にマッチしないよう）
+  const allClasses = gradeClassList.flatMap(c => c.split(/\s+/));
+  const hasGradeClass = (suffix: string) => allClasses.includes(`Icon_GradeType${suffix}`);
   let grade: string | undefined;
-  if (gradeText.includes('G1') || gradeText.includes('Ｇ１') || gradeClasses.includes('Icon_GradeType1 ') || gradeClasses.endsWith('Icon_GradeType1')) grade = 'G1';
-  else if (gradeText.includes('G2') || gradeText.includes('Ｇ２') || gradeClasses.includes('Icon_GradeType2')) grade = 'G2';
-  else if (gradeText.includes('G3') || gradeText.includes('Ｇ３') || gradeClasses.includes('Icon_GradeType3')) grade = 'G3';
+  if (gradeText.includes('G1') || gradeText.includes('Ｇ１') || hasGradeClass('1')) grade = 'G1';
+  else if (gradeText.includes('G2') || gradeText.includes('Ｇ２') || hasGradeClass('2')) grade = 'G2';
+  else if (gradeText.includes('G3') || gradeText.includes('Ｇ３') || hasGradeClass('3')) grade = 'G3';
+  else if (hasGradeClass('5')) grade = 'リステッド';
+  else if (hasGradeClass('10')) grade = 'オープン';
+  else if (hasGradeClass('15')) grade = '3勝クラス';
+  else if (hasGradeClass('16')) grade = '2勝クラス';
+  else if (hasGradeClass('17')) grade = '1勝クラス';
+  else if (hasGradeClass('18')) grade = '未勝利';
+  else if (hasGradeClass('19')) grade = '新馬';
+
+  // RaceData02 からクラス情報を補完（CSS クラスで検出できなかった場合）
+  if (!grade) {
+    const raceData02 = $('div.RaceData02, span.RaceData02').text().trim();
+    const raceTitleFull = raceName + ' ' + raceData02;
+    if (raceTitleFull.includes('新馬')) grade = '新馬';
+    else if (raceTitleFull.includes('未勝利')) grade = '未勝利';
+    else if (raceTitleFull.includes('1勝クラス')) grade = '1勝クラス';
+    else if (raceTitleFull.includes('2勝クラス')) grade = '2勝クラス';
+    else if (raceTitleFull.includes('3勝クラス')) grade = '3勝クラス';
+    else if (raceTitleFull.includes('オープン')) grade = 'オープン';
+  }
 
   // 出走馬
   // netkeiba の出馬表テーブルは各馬行に class="HorseList" を付与。
