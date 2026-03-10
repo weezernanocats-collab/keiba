@@ -110,6 +110,45 @@ export function useFavorites() {
     return favorites.horses.includes(horseId);
   }, [favorites.horses]);
 
+  /** 指定プロフィールでレースがお気に入りか判定（localStorage直接参照） */
+  const isRaceFavoriteInProfile = useCallback((raceId: string, targetProfile: Profile) => {
+    const favs = loadFavorites(targetProfile);
+    return favs.races.includes(raceId);
+  }, []);
+
+  /** 指定プロフィールでお気に入りレースをトグル */
+  const toggleRaceForProfile = useCallback((raceId: string, targetProfile: Profile) => {
+    const favs = loadFavorites(targetProfile);
+    const races = favs.races.includes(raceId)
+      ? favs.races.filter(id => id !== raceId)
+      : [...favs.races, raceId];
+    const next = { ...favs, races };
+    saveFavorites(targetProfile, next);
+    // アクティブプロフィールの場合はstateも更新
+    if (targetProfile === profile) {
+      setFavorites(next);
+    }
+  }, [profile]);
+
+  /** 指定プロフィールで馬がお気に入りか判定 */
+  const isHorseFavoriteInProfile = useCallback((horseId: string, targetProfile: Profile) => {
+    const favs = loadFavorites(targetProfile);
+    return favs.horses.includes(horseId);
+  }, []);
+
+  /** 指定プロフィールでお気に入り馬をトグル */
+  const toggleHorseForProfile = useCallback((horseId: string, targetProfile: Profile) => {
+    const favs = loadFavorites(targetProfile);
+    const horses = favs.horses.includes(horseId)
+      ? favs.horses.filter(id => id !== horseId)
+      : [...favs.horses, horseId];
+    const next = { ...favs, horses };
+    saveFavorites(targetProfile, next);
+    if (targetProfile === profile) {
+      setFavorites(next);
+    }
+  }, [profile]);
+
   return {
     profile,
     setProfile,
@@ -118,5 +157,9 @@ export function useFavorites() {
     toggleHorse,
     isRaceFavorite,
     isHorseFavorite,
+    isRaceFavoriteInProfile,
+    toggleRaceForProfile,
+    isHorseFavoriteInProfile,
+    toggleHorseForProfile,
   };
 }

@@ -10,7 +10,7 @@ import { getCacheHeaders } from '@/lib/api-helpers';
  *   ?page=1 (ページ番号, デフォルト1)
  *   ?limit=20 (1ページあたり件数)
  *   ?grade=G1 (グレードフィルタ)
- *   ?result=win|place|miss (結果フィルタ)
+ *   ?result=win|place|miss|umaren|wide|umatan|sanrenpuku|sanrentan (結果フィルタ)
  */
 export async function GET(request: NextRequest) {
   try {
@@ -38,12 +38,20 @@ export async function GET(request: NextRequest) {
       params.push(gradeFilter);
     }
 
+    const BET_TYPE_MAP: Record<string, string> = {
+      umaren: '馬連', wide: 'ワイド', umatan: '馬単',
+      sanrenpuku: '三連複', sanrentan: '三連単',
+    };
+
     if (resultFilter === 'win') {
       conditions.push('pr.win_hit = 1');
     } else if (resultFilter === 'place') {
       conditions.push('pr.place_hit = 1 AND pr.win_hit = 0');
     } else if (resultFilter === 'miss') {
       conditions.push('pr.place_hit = 0');
+    } else if (BET_TYPE_MAP[resultFilter]) {
+      conditions.push("pr.bet_hit_types LIKE ?");
+      params.push(`%${BET_TYPE_MAP[resultFilter]}%`);
     }
 
     const whereClause = conditions.join(' AND ');

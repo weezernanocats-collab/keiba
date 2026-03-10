@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import FavoriteButton from '@/components/FavoriteButton';
+import FavoriteProfilePopover from '@/components/FavoriteProfilePopover';
 import { useFavorites } from '@/lib/use-favorites';
 
 interface EntryRow {
@@ -60,7 +60,7 @@ export default function RaceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'shutuba' | 'odds' | 'result'>('shutuba');
   const [fetchingOdds, setFetchingOdds] = useState(false);
-  const { toggleRace, isRaceFavorite } = useFavorites();
+  const { isRaceFavoriteInProfile, toggleRaceForProfile } = useFavorites();
 
   useEffect(() => {
     async function fetchData() {
@@ -126,7 +126,7 @@ export default function RaceDetailPage() {
         <div className="flex flex-wrap items-start gap-3 mb-3">
           <GradeBadge grade={race.grade} />
           <h1 className="text-2xl font-bold">{race.name}</h1>
-          <FavoriteButton isFavorite={isRaceFavorite(raceId)} onToggle={() => toggleRace(raceId)} showLabel />
+          <FavoriteProfilePopover checkFavorite={(p) => isRaceFavoriteInProfile(raceId, p)} onToggle={(p) => toggleRaceForProfile(raceId, p)} />
         </div>
         <div className="flex flex-wrap gap-4 text-sm text-muted">
           <span>📅 {race.date} {race.time || ''}</span>
@@ -142,16 +142,14 @@ export default function RaceDetailPage() {
             {race.status}
           </span>
         </div>
-        {race.status !== '結果確定' && (
-          <div className="mt-4">
-            <Link
-              href={`/predictions/${race.id}`}
-              className="inline-block bg-accent text-white px-5 py-2 rounded-lg font-medium hover:bg-accent-light transition-colors"
-            >
-              🤖 AI予想を見る
-            </Link>
-          </div>
-        )}
+        <div className="mt-4">
+          <Link
+            href={`/predictions/${race.id}`}
+            className="inline-block bg-accent text-white px-5 py-2 rounded-lg font-medium hover:bg-accent-light transition-colors"
+          >
+            {race.status === '結果確定' ? '📊 AI予想結果を見る' : '🤖 AI予想を見る'}
+          </Link>
+        </div>
       </div>
 
       {/* タブ */}

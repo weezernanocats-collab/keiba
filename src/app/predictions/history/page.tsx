@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -73,14 +73,11 @@ const RESULT_FILTERS = [
   { label: '単勝的中', value: 'win' },
   { label: '複勝的中', value: 'place' },
   { label: '不的中', value: 'miss' },
-] as const;
-
-const BET_TYPE_FILTERS = [
-  { label: '馬連的中', value: '馬連' },
-  { label: 'ワイド的中', value: 'ワイド' },
-  { label: '馬単的中', value: '馬単' },
-  { label: '三連複的中', value: '三連複' },
-  { label: '三連単的中', value: '三連単' },
+  { label: '馬連的中', value: 'umaren' },
+  { label: 'ワイド的中', value: 'wide' },
+  { label: '馬単的中', value: 'umatan' },
+  { label: '三連複的中', value: 'sanrenpuku' },
+  { label: '三連単的中', value: 'sanrentan' },
 ] as const;
 
 const GRADE_FILTERS = [
@@ -110,7 +107,6 @@ function PredictionHistoryContent({ embedded = false }: { embedded?: boolean }) 
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [page, setPage] = useState(1);
   const [resultFilter, setResultFilter] = useState('');
-  const [betTypeFilter, setBetTypeFilter] = useState('');
   const [gradeFilter, setGradeFilter] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -136,19 +132,10 @@ function PredictionHistoryContent({ embedded = false }: { embedded?: boolean }) 
     fetchData();
   }, [fetchData]);
 
-  // 券種フィルタはクライアントサイドで適用（ページ内20件からフィルタ）
-  const filteredHistory = useMemo(() => {
-    if (!betTypeFilter) return history;
-    return history.filter(item =>
-      item.betResults.some(bet => bet.type === betTypeFilter && bet.hit)
-    );
-  }, [history, betTypeFilter]);
-
   // フィルタ変更時はページ1に戻す
   const handleFilterChange = (type: 'result' | 'grade', value: string) => {
     if (type === 'result') setResultFilter(value);
     else setGradeFilter(value);
-    setBetTypeFilter('');
     setPage(1);
   };
 
@@ -169,35 +156,21 @@ function PredictionHistoryContent({ embedded = false }: { embedded?: boolean }) 
       <div className="flex flex-wrap gap-4">
         <div>
           <span className="text-xs text-muted mr-2">結果:</span>
-          {RESULT_FILTERS.map(f => (
-            <button
-              key={f.value}
-              onClick={() => handleFilterChange('result', f.value)}
-              className={`px-3 py-1 rounded text-xs font-medium mr-1 transition-colors ${
-                resultFilter === f.value && !betTypeFilter
-                  ? 'bg-primary text-white'
-                  : 'bg-card-bg border border-card-border hover:bg-gray-100 dark:hover:bg-gray-700'
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-        <div>
-          <span className="text-xs text-muted mr-2">券種:</span>
-          {BET_TYPE_FILTERS.map(f => (
-            <button
-              key={f.value}
-              onClick={() => { setBetTypeFilter(betTypeFilter === f.value ? '' : f.value); setResultFilter(''); }}
-              className={`px-3 py-1 rounded text-xs font-medium mr-1 transition-colors ${
-                betTypeFilter === f.value
-                  ? 'bg-primary text-white'
-                  : 'bg-card-bg border border-card-border hover:bg-gray-100 dark:hover:bg-gray-700'
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
+          <div className="inline-flex flex-wrap gap-1">
+            {RESULT_FILTERS.map(f => (
+              <button
+                key={f.value}
+                onClick={() => handleFilterChange('result', f.value)}
+                className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                  resultFilter === f.value
+                    ? 'bg-primary text-white'
+                    : 'bg-card-bg border border-card-border hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div>
           <span className="text-xs text-muted mr-2">グレード:</span>
@@ -217,22 +190,16 @@ function PredictionHistoryContent({ embedded = false }: { embedded?: boolean }) 
         </div>
       </div>
 
-      {betTypeFilter && (
-        <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded px-3 py-1.5">
-          ページ内フィルタ: 現在表示中の{history.length}件から「{betTypeFilter}的中」を抽出（{filteredHistory.length}件）
-        </div>
-      )}
-
       {loading ? (
         <LoadingSpinner message="過去予想を読み込んでいます..." />
-      ) : filteredHistory.length === 0 ? (
+      ) : history.length === 0 ? (
         <div className="text-center py-12 text-muted">
           <p>該当する予想結果がありません</p>
         </div>
       ) : (
         <>
           {/* 件数表示 */}
-          {pagination && !betTypeFilter && (
+          {pagination && (
             <div className="text-sm text-muted">
               {pagination.totalCount}件中 {(pagination.page - 1) * pagination.limit + 1}-
               {Math.min(pagination.page * pagination.limit, pagination.totalCount)}件を表示
@@ -241,7 +208,7 @@ function PredictionHistoryContent({ embedded = false }: { embedded?: boolean }) 
 
           {/* 予想結果リスト */}
           <div className="space-y-3">
-            {filteredHistory.map(item => (
+            {history.map(item => (
               <div
                 key={item.raceId}
                 className="bg-card-bg border border-card-border rounded-xl overflow-hidden"
@@ -370,7 +337,7 @@ function PredictionHistoryContent({ embedded = false }: { embedded?: boolean }) 
           </div>
 
           {/* ページネーション */}
-          {pagination && pagination.totalPages > 1 && !betTypeFilter && (
+          {pagination && pagination.totalPages > 1 && (
             <div className="flex justify-center gap-2">
               <button
                 onClick={() => setPage(p => Math.max(1, p - 1))}

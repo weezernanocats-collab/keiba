@@ -3,7 +3,7 @@ import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import FavoriteButton from '@/components/FavoriteButton';
+import FavoriteProfilePopover from '@/components/FavoriteProfilePopover';
 import { useFavorites } from '@/lib/use-favorites';
 
 interface RaceRow {
@@ -26,7 +26,7 @@ export default function RacesPage() {
   const [trackFilter, setTrackFilter] = useState<string>('all');
   const [gradeFilter, setGradeFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
-  const { toggleRace, isRaceFavorite } = useFavorites();
+  const { isRaceFavoriteInProfile, toggleRaceForProfile } = useFavorites();
 
   useEffect(() => {
     async function fetchRaces() {
@@ -188,22 +188,18 @@ export default function RacesPage() {
                           >
                             出馬表
                           </Link>
-                          {race.status !== '結果確定' && (
-                            <>
-                              {' / '}
-                              <Link
-                                href={`/predictions/${race.id}`}
-                                className="text-accent hover:underline text-xs"
-                              >
-                                予想
-                              </Link>
-                            </>
-                          )}
+                          {' / '}
+                          <Link
+                            href={`/predictions/${race.id}`}
+                            className="text-accent hover:underline text-xs font-medium"
+                          >
+                            {race.status === '結果確定' ? '予想結果' : 'AI予想'}
+                          </Link>
                         </td>
                         <td className="px-2 py-3 text-center">
-                          <FavoriteButton
-                            isFavorite={isRaceFavorite(race.id)}
-                            onToggle={() => toggleRace(race.id)}
+                          <FavoriteProfilePopover
+                            checkFavorite={(p) => isRaceFavoriteInProfile(race.id, p)}
+                            onToggle={(p) => toggleRaceForProfile(race.id, p)}
                             size="sm"
                           />
                         </td>

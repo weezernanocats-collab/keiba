@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useFavorites, PROFILES } from '@/lib/use-favorites';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import FavoriteButton from '@/components/FavoriteButton';
+import FavoriteProfilePopover from '@/components/FavoriteProfilePopover';
 
 interface RaceInfo {
   id: string;
@@ -26,7 +26,7 @@ interface HorseInfo {
 }
 
 export default function FavoritesPage() {
-  const { profile, setProfile, favorites, toggleRace, toggleHorse, isRaceFavorite, isHorseFavorite } = useFavorites();
+  const { profile, setProfile, favorites, isRaceFavoriteInProfile, toggleRaceForProfile, isHorseFavoriteInProfile, toggleHorseForProfile } = useFavorites();
   const [races, setRaces] = useState<RaceInfo[]>([]);
   const [horses, setHorses] = useState<HorseInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -142,9 +142,9 @@ export default function FavoritesPage() {
                         {race.date} | {race.racecourseName} {race.raceNumber}R | {race.trackType}{race.distance}m
                       </div>
                     </Link>
-                    <FavoriteButton
-                      isFavorite={isRaceFavorite(race.id)}
-                      onToggle={() => toggleRace(race.id)}
+                    <FavoriteProfilePopover
+                      checkFavorite={(p) => isRaceFavoriteInProfile(race.id, p)}
+                      onToggle={(p) => toggleRaceForProfile(race.id, p)}
                     />
                   </div>
                 ))
@@ -165,9 +165,9 @@ export default function FavoritesPage() {
                         {horse.sex}{horse.age}歳 | {horse.trainerName}厩舎
                       </div>
                     </Link>
-                    <FavoriteButton
-                      isFavorite={isHorseFavorite(horse.id)}
-                      onToggle={() => toggleHorse(horse.id)}
+                    <FavoriteProfilePopover
+                      checkFavorite={(p) => isHorseFavoriteInProfile(horse.id, p)}
+                      onToggle={(p) => toggleHorseForProfile(horse.id, p)}
                     />
                   </div>
                 ))

@@ -4,7 +4,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import FavoriteButton from '@/components/FavoriteButton';
+import FavoriteProfilePopover from '@/components/FavoriteProfilePopover';
 import { useFavorites } from '@/lib/use-favorites';
 import { PredictionHistoryContent } from './history/page';
 
@@ -107,7 +107,7 @@ function PredictionsPageInner() {
 function UpcomingRaces() {
   const [races, setRaces] = useState<RaceRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const { toggleRace, isRaceFavorite } = useFavorites();
+  const { isRaceFavoriteInProfile, toggleRaceForProfile } = useFavorites();
 
   useEffect(() => {
     async function fetchRaces() {
@@ -190,9 +190,9 @@ function UpcomingRaces() {
                       <ConfidenceBadge value={race.confidence} />
                     </td>
                     <td className="py-2 px-1 text-center">
-                      <FavoriteButton
-                        isFavorite={isRaceFavorite(race.id)}
-                        onToggle={() => toggleRace(race.id)}
+                      <FavoriteProfilePopover
+                        checkFavorite={(p) => isRaceFavoriteInProfile(race.id, p)}
+                        onToggle={(p) => toggleRaceForProfile(race.id, p)}
                         size="sm"
                       />
                     </td>
@@ -225,9 +225,9 @@ function UpcomingRaces() {
                 </Link>
                 <div className="flex items-center gap-2 shrink-0">
                   <ConfidenceBadge value={race.confidence} />
-                  <FavoriteButton
-                    isFavorite={isRaceFavorite(race.id)}
-                    onToggle={() => toggleRace(race.id)}
+                  <FavoriteProfilePopover
+                    checkFavorite={(p) => isRaceFavoriteInProfile(race.id, p)}
+                    onToggle={(p) => toggleRaceForProfile(race.id, p)}
                     size="sm"
                   />
                 </div>

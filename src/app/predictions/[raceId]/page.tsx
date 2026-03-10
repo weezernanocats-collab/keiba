@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import FavoriteButton from '@/components/FavoriteButton';
+import FavoriteProfilePopover from '@/components/FavoriteProfilePopover';
 import BudgetSimulator from '@/components/BudgetSimulator';
 import MonteCarloSimulator from '@/components/MonteCarloSimulator';
 import ModelVsMarket from '@/components/ModelVsMarket';
@@ -149,7 +149,7 @@ export default function PredictionDetailPage() {
   const [betTypeStats, setBetTypeStats] = useState<BetTypeStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { toggleRace, isRaceFavorite } = useFavorites();
+  const { isRaceFavoriteInProfile, toggleRaceForProfile } = useFavorites();
 
   // セクションナビ用（Hooksは条件分岐の前に置く必要がある）
   const [activeSection, setActiveSection] = useState('');
@@ -271,7 +271,7 @@ export default function PredictionDetailPage() {
     <div className="space-y-6 animate-fadeIn">
       <div className="flex items-center justify-between">
         <Link href="/predictions" className="text-sm text-accent hover:underline">&larr; 予想一覧に戻る</Link>
-        <FavoriteButton isFavorite={isRaceFavorite(raceId)} onToggle={() => toggleRace(raceId)} showLabel />
+        <FavoriteProfilePopover checkFavorite={(p) => isRaceFavoriteInProfile(raceId, p)} onToggle={(p) => toggleRaceForProfile(raceId, p)} />
       </div>
 
       {/* レース情報ヘッダー */}

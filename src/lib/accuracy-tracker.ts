@@ -12,6 +12,7 @@
  */
 
 import { dbAll, dbGet, dbRun } from './database';
+import { isBetHit } from './bet-utils';
 import { applyCalibrationWeights } from './prediction-engine';
 import { saveCalibrationWeights, getActiveCalibrationWeights, saveCategoryCalibration, getActiveCategoryCalibrations } from './queries';
 import { categorizeRace, applyCalibratedCategoryMultipliers, type RaceCategory } from './weight-profiles';
@@ -168,17 +169,28 @@ export async function evaluateRacePrediction(raceId: string): Promise<Prediction
   // Brier Score & Log Loss 算出（analysis_json に winProbabilities があれば）
   const { brierScore, logLoss } = computeScoringRules(prediction.analysis_json, results);
 
+  // 馬券的中タイプ算出（単勝・複勝以外の券種で的中したもの）
+  const top3Numbers = results.slice(0, 3).map(r => r.horse_number);
+  let betsForHitCheck: { type: string; selections: number[] }[] = [];
+  try {
+    betsForHitCheck = JSON.parse(prediction.bets_json || '[]');
+  } catch { /* skip */ }
+  const betHitTypes = betsForHitCheck
+    .filter(bet => !['単勝', '複勝'].includes(bet.type) && isBetHit(bet.type, bet.selections, top3Numbers))
+    .map(bet => bet.type);
+  const betHitTypesStr = betHitTypes.length > 0 ? betHitTypes.join(',') : '';
+
   // DB に記録
   await dbRun(`
     INSERT INTO prediction_results
       (race_id, prediction_id, top_pick_horse_id, top_pick_actual_position,
        win_hit, place_hit, top3_picks_hit, predicted_confidence,
-       bet_investment, bet_return, bet_roi, brier_score, log_loss)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       bet_investment, bet_return, bet_roi, brier_score, log_loss, bet_hit_types)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     raceId, prediction.id, topPick.horseId, topPickActualPosition,
     winHit ? 1 : 0, placeHit ? 1 : 0, top3PicksHit, prediction.confidence,
-    betInvestment, betReturn, betRoi, brierScore, logLoss,
+    betInvestment, betReturn, betRoi, brierScore, logLoss, betHitTypesStr,
   ]);
 
   return {
