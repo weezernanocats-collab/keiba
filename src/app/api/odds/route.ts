@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getOddsByRaceId, upsertOdds, upsertRaceEntryOdds } from '@/lib/queries';
-import { seedAllData } from '@/lib/seed-data';
+import { getCacheHeaders } from '@/lib/api-helpers';
 import { scrapeOdds, scrapeRaceResult } from '@/lib/scraper';
 
 export async function GET(request: NextRequest) {
   try {
-    await seedAllData();
-
     const { searchParams } = request.nextUrl;
     const raceId = searchParams.get('raceId');
 
@@ -15,7 +13,7 @@ export async function GET(request: NextRequest) {
     }
 
     const odds = await getOddsByRaceId(raceId);
-    return NextResponse.json({ odds });
+    return NextResponse.json({ odds }, { headers: getCacheHeaders('races') });
   } catch (error) {
     console.error('オッズAPI エラー:', error);
     return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });

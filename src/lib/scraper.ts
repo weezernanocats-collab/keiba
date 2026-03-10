@@ -175,6 +175,34 @@ export async function scrapeRaceCard(raceId: string): Promise<ScrapedRaceDetail>
     else if (raceTitleFull.includes('オープン')) grade = 'オープン';
   }
 
+  // G1/G2/G3でない場合、RaceData02 span[4] からクラス情報を取得
+  // 例: 「オープン」「３勝クラス」「２勝クラス」「１勝クラス」「未勝利」「新馬」
+  if (!grade) {
+    const raceData02Spans = $('div.RaceData02 span');
+    let classText = '';
+    raceData02Spans.each((i, el) => {
+      if (i === 4) classText = $(el).text().trim();
+    });
+    const normalized = classText.replace(/３/g, '3').replace(/２/g, '2').replace(/１/g, '1');
+    if (normalized.includes('3勝クラス')) grade = '3勝クラス';
+    else if (normalized.includes('2勝クラス')) grade = '2勝クラス';
+    else if (normalized.includes('1勝クラス')) grade = '1勝クラス';
+    else if (normalized.includes('オープン')) grade = 'オープン';
+    else if (normalized.includes('リステッド') || normalized.includes('Listed')) grade = 'リステッド';
+    else if (normalized.includes('新馬')) grade = '新馬';
+    else if (normalized.includes('未勝利')) grade = '未勝利';
+  }
+
+  // フォールバック: レース名からクラスを推定
+  if (!grade) {
+    if (raceName.includes('新馬')) grade = '新馬';
+    else if (raceName.includes('未勝利')) grade = '未勝利';
+    else if (raceName.includes('1勝クラス') || raceName.includes('1勝')) grade = '1勝クラス';
+    else if (raceName.includes('2勝クラス') || raceName.includes('2勝')) grade = '2勝クラス';
+    else if (raceName.includes('3勝クラス') || raceName.includes('3勝')) grade = '3勝クラス';
+    else if (raceName.includes('オープン')) grade = 'オープン';
+  }
+
   // 出走馬
   // netkeiba の出馬表テーブルは各馬行に class="HorseList" を付与。
   // 列は td のクラス名で特定（インデックスに依存しない）:

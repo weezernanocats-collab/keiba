@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getDashboardStats } from '@/lib/queries';
-import { seedAllData } from '@/lib/seed-data';
+import { getCacheHeaders } from '@/lib/api-helpers';
 
 export async function GET() {
   try {
-    await seedAllData();
     const stats = await getDashboardStats();
-    return NextResponse.json(stats);
+    return NextResponse.json(stats, { headers: getCacheHeaders('stats') });
   } catch (error) {
     console.error('統計API エラー:', error);
     return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });

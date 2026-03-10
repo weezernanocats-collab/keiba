@@ -58,11 +58,13 @@ export default function SyncStatusBanner() {
   }, []);
 
   useEffect(() => {
+    // 同期実行中は5秒、通常時は30秒でポーリング
+    const interval = syncInfo?.isRunning ? 5000 : 30000;
     const id = setInterval(() => {
       fetchSyncStatus();
       setNow(Date.now());
-    }, 5000);
-    // 初回取得はintervalに委ねる（すぐにfetchするため0ms後に呼ぶ）
+    }, interval);
+    // 初回取得
     const initId = setTimeout(() => {
       fetchSyncStatus();
     }, 0);
@@ -70,7 +72,7 @@ export default function SyncStatusBanner() {
       clearInterval(id);
       clearTimeout(initId);
     };
-  }, [fetchSyncStatus]);
+  }, [fetchSyncStatus, syncInfo?.isRunning]);
 
   // 完了メッセージを8秒後に消す
   useEffect(() => {

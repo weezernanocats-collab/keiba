@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getJockeyById, getJockeyRecentResults } from '@/lib/queries';
 import { dbGet } from '@/lib/database';
-import { seedAllData } from '@/lib/seed-data';
+import { getCacheHeaders } from '@/lib/api-helpers';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type JockeyData = Record<string, any>;
@@ -11,7 +11,6 @@ export async function GET(
   { params }: { params: Promise<{ jockeyId: string }> }
 ) {
   try {
-    await seedAllData();
     const { jockeyId } = await params;
     let jockey: JockeyData | null = (await getJockeyById(jockeyId)) ?? null;
 
@@ -61,7 +60,7 @@ export async function GET(
 
     const recentResults = await getJockeyRecentResults(jockeyId, 20);
 
-    return NextResponse.json({ jockey, recentResults });
+    return NextResponse.json({ jockey, recentResults }, { headers: getCacheHeaders('master') });
   } catch (error) {
     console.error('騎手詳細API エラー:', error);
     return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });

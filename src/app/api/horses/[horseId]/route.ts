@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getHorseById, getHorsePastPerformances } from '@/lib/queries';
 import { dbGet, dbAll } from '@/lib/database';
-import { seedAllData } from '@/lib/seed-data';
+import { getCacheHeaders } from '@/lib/api-helpers';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type HorseData = Record<string, any>;
@@ -39,7 +39,6 @@ export async function GET(
   { params }: { params: Promise<{ horseId: string }> }
 ) {
   try {
-    await seedAllData();
     const { horseId } = await params;
     let horse: HorseData | null = await getHorseById(horseId);
 
@@ -92,7 +91,7 @@ export async function GET(
       );
     }
 
-    return NextResponse.json({ horse, pastPerformances, raceEntries });
+    return NextResponse.json({ horse, pastPerformances, raceEntries }, { headers: getCacheHeaders('master') });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error('馬詳細API エラー:', msg, error);

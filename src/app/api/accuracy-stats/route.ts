@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbAll } from '@/lib/database';
 import { isBetHit } from '@/lib/bet-utils';
+import { getCacheHeaders } from '@/lib/api-helpers';
 
 /**
  * 的中率統計API
@@ -323,7 +324,7 @@ export async function GET(request: NextRequest) {
     cache.set(cacheKey, { data: responseData, expires: Date.now() + CACHE_TTL_MS });
 
     return NextResponse.json(responseData, {
-      headers: { 'Cache-Control': 'public, max-age=300, s-maxage=300' },
+      headers: getCacheHeaders('stats'),
     });
   } catch (error) {
     console.error('accuracy-stats エラー:', error);
@@ -331,19 +332,12 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/** レースのグレード + レース名から条件クラスを判定 */
+/** レースのグレード + レース名から条件クラスを判定（DB grade優先） */
 function classifyRace(grade: string | null, raceName: string): string {
-  if (grade === 'G1') return 'G1';
-  if (grade === 'G2') return 'G2';
-  if (grade === 'G3') return 'G3';
-  if (grade === 'リステッド') return 'リステッド';
-  if (grade === 'オープン') return 'オープン';
-  if (grade === '3勝クラス') return '3勝クラス';
-  if (grade === '2勝クラス') return '2勝クラス';
-  if (grade === '1勝クラス') return '1勝クラス';
-  if (grade === '未勝利') return '未勝利';
-  if (grade === '新馬') return '新馬';
-  // gradeカラムにない場合はレース名から推定
+  if (grade && ['G1', 'G2', 'G3', 'リステッド', 'オープン', '3勝クラス', '2勝クラス', '1勝クラス', '未勝利', '新馬'].includes(grade)) {
+    return grade;
+  }
+  // フォールバック: レース名から推定
   if (raceName.includes('新馬')) return '新馬';
   if (raceName.includes('未勝利')) return '未勝利';
   if (raceName.includes('1勝クラス') || raceName.includes('1勝')) return '1勝クラス';

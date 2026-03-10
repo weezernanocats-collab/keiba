@@ -3,7 +3,7 @@ import { getPredictionByRaceId, getRaceById, getHorseById, getHorsePastPerforman
 import { dbRun, dbAll } from '@/lib/database';
 import { generatePrediction } from '@/lib/prediction-engine';
 import { isBetHit } from '@/lib/bet-utils';
-import { seedAllData } from '@/lib/seed-data';
+import { getCacheHeaders } from '@/lib/api-helpers';
 import type { RaceEntry } from '@/types';
 
 /** 予想が壊れているか判定（horseId が全て欠落している場合） */
@@ -17,7 +17,6 @@ export async function GET(
   { params }: { params: Promise<{ raceId: string }> }
 ) {
   try {
-    await seedAllData();
     const { raceId } = await params;
 
     const race = await getRaceById(raceId);
@@ -189,7 +188,7 @@ export async function GET(
       }
     }
 
-    return NextResponse.json({ prediction: augmentedPrediction, race, verification });
+    return NextResponse.json({ prediction: augmentedPrediction, race, verification }, { headers: getCacheHeaders('prediction') });
   } catch (error) {
     console.error('予想API エラー:', error);
     return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });

@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRaceById } from '@/lib/queries';
-import { seedAllData } from '@/lib/seed-data';
+import { getCacheHeaders } from '@/lib/api-helpers';
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ raceId: string }> }
 ) {
   try {
-    await seedAllData();
     const { raceId } = await params;
     const race = await getRaceById(raceId);
 
@@ -15,7 +14,7 @@ export async function GET(
       return NextResponse.json({ error: 'レースが見つかりません' }, { status: 404 });
     }
 
-    return NextResponse.json({ race });
+    return NextResponse.json({ race }, { headers: getCacheHeaders('races') });
   } catch (error) {
     console.error('レース詳細API エラー:', error);
     return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });

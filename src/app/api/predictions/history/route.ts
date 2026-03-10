@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbAll } from '@/lib/database';
 import { isBetHit } from '@/lib/bet-utils';
+import { getCacheHeaders } from '@/lib/api-helpers';
 
 /**
  * 過去予想履歴API
@@ -23,24 +24,18 @@ export async function GET(request: NextRequest) {
     const conditions: string[] = ["r.status = '結果確定'"];
     const params: (string | number)[] = [];
 
-    // グレードフィルタ: G1/G2/G3はgradeカラム、他は名前ベースでSQL LIKE
+    // グレードフィルタ: DB gradeカラム優先、フォールバックで名前ベース
     if (gradeFilter) {
-      if (['G1', 'G2', 'G3'].includes(gradeFilter)) {
-        conditions.push('r.grade = ?');
-        params.push(gradeFilter);
-      } else if (gradeFilter === '新馬') {
-        conditions.push("r.name LIKE '%新馬%'");
-      } else if (gradeFilter === '未勝利') {
-        conditions.push("r.name LIKE '%未勝利%'");
-      } else if (gradeFilter === '1勝クラス') {
-        conditions.push("(r.name LIKE '%1勝クラス%' OR r.name LIKE '%1勝%')");
-      } else if (gradeFilter === '2勝クラス') {
-        conditions.push("(r.name LIKE '%2勝クラス%' OR r.name LIKE '%2勝%')");
-      } else if (gradeFilter === '3勝クラス') {
-        conditions.push("(r.name LIKE '%3勝クラス%' OR r.name LIKE '%3勝%')");
-      } else if (gradeFilter === 'オープン') {
-        conditions.push("(r.name LIKE '%オープン%' OR r.name LIKE '%ステークス%' OR r.name LIKE '%カップ%')");
-      }
+      conditions.push(`(r.grade = ? OR (r.grade IS NULL AND ${
+        gradeFilter === '新馬' ? "r.name LIKE '%新馬%'" :
+        gradeFilter === '未勝利' ? "r.name LIKE '%未勝利%'" :
+        gradeFilter === '1勝クラス' ? "(r.name LIKE '%1勝クラス%' OR r.name LIKE '%1勝%')" :
+        gradeFilter === '2勝クラス' ? "(r.name LIKE '%2勝クラス%' OR r.name LIKE '%2勝%')" :
+        gradeFilter === '3勝クラス' ? "(r.name LIKE '%3勝クラス%' OR r.name LIKE '%3勝%')" :
+        gradeFilter === 'オープン' ? "(r.name LIKE '%オープン%' OR r.name LIKE '%ステークス%' OR r.name LIKE '%カップ%')" :
+        '1=0'
+      }))`);
+      params.push(gradeFilter);
     }
 
     if (resultFilter === 'win') {
@@ -102,15 +97,15 @@ export async function GET(request: NextRequest) {
 
     // 各レースの実着順を一括取得（予想vs結果の対比用）
     const raceIds = rows.map(r => r.race_id);
-    const entryResultMap = new Map<string, Map<number, number>>();
+    const entryResultMap = new Map<string, Map<number, { position: number; horseName: string }>>();
     // 実オッズマップ: race_id -> bet_type -> horse_numbers_key -> { odds, minOdds }
     const realOddsMap = new Map<string, Map<string, Map<string, { odds: number; minOdds: number | null }>>>();
 
     if (raceIds.length > 0) {
       const ph = raceIds.map(() => '?').join(',');
       const [entries, oddsRows] = await Promise.all([
-        dbAll<{ race_id: string; horse_number: number; result_position: number }>(
-          `SELECT race_id, horse_number, result_position FROM race_entries
+        dbAll<{ race_id: string; horse_number: number; result_position: number; horse_name: string }>(
+          `SELECT race_id, horse_number, result_position, horse_name FROM race_entries
            WHERE race_id IN (${ph}) AND result_position IS NOT NULL`,
           raceIds,
         ),
@@ -126,7 +121,7 @@ export async function GET(request: NextRequest) {
       ]);
       for (const e of entries) {
         if (!entryResultMap.has(e.race_id)) entryResultMap.set(e.race_id, new Map());
-        entryResultMap.get(e.race_id)!.set(e.horse_number, e.result_position);
+        entryResultMap.get(e.race_id)!.set(e.horse_number, { position: e.result_position, horseName: e.horse_name });
       }
       for (const o of oddsRows) {
         if (!realOddsMap.has(o.race_id)) realOddsMap.set(o.race_id, new Map());
@@ -151,17 +146,23 @@ export async function GET(request: NextRequest) {
       } catch { /* skip */ }
 
       const posMap = entryResultMap.get(row.race_id) || new Map();
-      const top3 = [...posMap.entries()]
-        .sort((a, b) => a[1] - b[1])
-        .slice(0, 3)
-        .map(([num]) => num);
-      // 予想馬の実着順を付与
-      const pickResults = picks.slice(0, 6).map(p => ({
-        ...p,
-        actualPosition: posMap.get(p.horseNumber) ?? null,
-        hit: posMap.get(p.horseNumber) === 1,
-        placeHit: (posMap.get(p.horseNumber) ?? 99) <= 3,
+      const sortedEntries = [...posMap.entries()]
+        .sort((a, b) => a[1].position - b[1].position);
+      const top3 = sortedEntries.slice(0, 3).map(([num]) => num);
+      const actualTop3Detailed = sortedEntries.slice(0, 3).map(([num, info]) => ({
+        horseNumber: num,
+        horseName: info.horseName,
       }));
+      // 予想馬の実着順を付与
+      const pickResults = picks.slice(0, 6).map(p => {
+        const entry = posMap.get(p.horseNumber);
+        return {
+          ...p,
+          actualPosition: entry?.position ?? null,
+          hit: entry?.position === 1,
+          placeHit: (entry?.position ?? 99) <= 3,
+        };
+      });
 
       // 馬券の的中判定 + 収支計算
       const raceOdds = realOddsMap.get(row.race_id);
@@ -227,6 +228,7 @@ export async function GET(request: NextRequest) {
         betResults,
         betSummary: { totalInvestment, totalPayout, totalProfit },
         actualTop3: top3,
+        actualTop3Detailed,
       };
     });
 
@@ -238,7 +240,7 @@ export async function GET(request: NextRequest) {
         totalCount,
         totalPages: Math.ceil(totalCount / limit),
       },
-    });
+    }, { headers: getCacheHeaders('stats') });
   } catch (error) {
     console.error('predictions/history エラー:', error);
     return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });

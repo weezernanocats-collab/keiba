@@ -1,9 +1,17 @@
 'use client';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+
+const PROFILE_KEY = 'keiba-active-profile';
 
 export default function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [activeProfile, setActiveProfile] = useState<string | null>(null);
+
+  useEffect(() => {
+    const profile = localStorage.getItem(PROFILE_KEY);
+    setActiveProfile(profile);
+  }, []);
 
   const navItems = [
     { href: '/', label: 'トップ' },
@@ -36,6 +44,11 @@ export default function Header() {
                 {item.label}
               </Link>
             ))}
+            {activeProfile && (
+              <span className="ml-2 px-2 py-1 bg-white/15 rounded text-xs font-medium">
+                {activeProfile}
+              </span>
+            )}
           </nav>
 
           {/* モバイルメニューボタン */}
@@ -67,6 +80,11 @@ export default function Header() {
                 {item.label}
               </Link>
             ))}
+            {activeProfile && (
+              <div className="px-4 py-2 text-xs text-white/70">
+                プロフィール: {activeProfile}
+              </div>
+            )}
           </nav>
         )}
       </div>

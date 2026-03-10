@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-
 interface Bet {
   type: string;
   selections: number[];
@@ -16,6 +15,7 @@ interface Bet {
 interface MonteCarloSimulatorProps {
   bets: Bet[];
   winProbabilities?: Record<number, number>;
+  budget?: number;
 }
 
 interface SimResult {
@@ -24,9 +24,11 @@ interface SimResult {
   hitCount: number;
 }
 
+type FilterMode = 'all' | 'ev_plus';
+
 const NUM_SIMULATIONS = 10000;
 
-export default function MonteCarloSimulator({ bets, winProbabilities }: MonteCarloSimulatorProps) {
+export default function MonteCarloSimulator({ bets, winProbabilities, budget }: MonteCarloSimulatorProps) {
   const [results, setResults] = useState<{
     avgRoi: number;
     medianRoi: number;
@@ -36,10 +38,19 @@ export default function MonteCarloSimulator({ bets, winProbabilities }: MonteCar
     distribution: number[];
   } | null>(null);
   const [running, setRunning] = useState(false);
+  const [filterMode, setFilterMode] = useState<FilterMode>('all');
+
+  const filteredBets = filterMode === 'ev_plus'
+    ? bets.filter(b => (b.valueEdge ?? 0) > 0)
+    : bets;
+
+  const evPlusCount = bets.filter(b => (b.valueEdge ?? 0) > 0).length;
 
   const runSimulation = useCallback(() => {
-    if (!winProbabilities || bets.length === 0) return;
+    if (!winProbabilities || filteredBets.length === 0) return;
     setRunning(true);
+
+    const betsToSim = filteredBets;
 
     // 非同期で実行してUIブロックを回避
     setTimeout(() => {
@@ -51,7 +62,6 @@ export default function MonteCarloSimulator({ bets, winProbabilities }: MonteCar
         let hits = 0;
 
         // シミュレーション: ランダムに勝馬を決定（確率ベース）
-        // 勝馬をwinProbabilitiesに基づいて決定
         const horses = Object.entries(winProbabilities).map(([num, prob]) => ({
           number: parseInt(num),
           prob,
@@ -70,7 +80,7 @@ export default function MonteCarloSimulator({ bets, winProbabilities }: MonteCar
           }
         }
 
-        // 2着・3着もシミュレート（残りの馬から確率的に選択）
+        // 2着・3着もシミュレート
         const remaining = horses.filter(h => h.number !== winner);
         const rem1Prob = remaining.reduce((s, h) => s + h.prob, 0);
         const rand2 = Math.random() * rem1Prob;
@@ -99,8 +109,11 @@ export default function MonteCarloSimulator({ bets, winProbabilities }: MonteCar
 
         const top3 = new Set([winner, second, third]);
 
-        for (const bet of bets) {
-          const stake = 100;
+        for (const bet of betsToSim) {
+          // Kelly配分ベースの金額（budget指定時）
+          const stake = budget && bet.recommendedStake
+            ? Math.max(100, Math.round((budget * bet.recommendedStake) / 100) * 100)
+            : 100;
           totalInvest += stake;
           const odds = bet.odds || bet.expectedValue;
 
@@ -166,7 +179,7 @@ export default function MonteCarloSimulator({ bets, winProbabilities }: MonteCar
       });
       setRunning(false);
     }, 50);
-  }, [bets, winProbabilities]);
+  }, [filteredBets, winProbabilities, budget]);
 
   if (!winProbabilities || Object.keys(winProbabilities).length === 0) return null;
 
@@ -177,73 +190,99 @@ export default function MonteCarloSimulator({ bets, winProbabilities }: MonteCar
         推奨馬券を{NUM_SIMULATIONS.toLocaleString()}回シミュレートし、収益分布を推定します。
       </p>
 
-      <button
-        onClick={runSimulation}
-        disabled={running}
-        className="bg-primary text-white px-4 py-2 rounded-lg font-medium hover:bg-primary-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {running ? 'シミュレーション中...' : 'シミュレーション実行'}
-      </button>
+      {/* EV+フィルタ切替 */}
+      <div className="flex items-center gap-2 mb-4">
+        <span className="text-xs text-muted">対象:</span>
+        {(['all', 'ev_plus'] as const).map(mode => (
+          <button
+            key={mode}
+            onClick={() => { setFilterMode(mode); setResults(null); }}
+            className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
+              filterMode === mode
+                ? 'bg-primary text-white'
+                : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600'
+            }`}
+          >
+            {mode === 'all' ? '全馬券' : `EV+のみ(${evPlusCount})`}
+          </button>
+        ))}
+      </div>
 
-      {results && (
-        <div className="mt-4 space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <div className="bg-gray-50 dark:bg-gray-800/30 rounded-lg p-3 text-center">
-              <div className="text-xs text-muted">平均ROI</div>
-              <div className={`text-lg font-bold ${results.avgRoi >= 100 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                {results.avgRoi.toFixed(1)}%
-              </div>
-            </div>
-            <div className="bg-gray-50 dark:bg-gray-800/30 rounded-lg p-3 text-center">
-              <div className="text-xs text-muted">中央値ROI</div>
-              <div className={`text-lg font-bold ${results.medianRoi >= 100 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                {results.medianRoi.toFixed(1)}%
-              </div>
-            </div>
-            <div className="bg-gray-50 dark:bg-gray-800/30 rounded-lg p-3 text-center">
-              <div className="text-xs text-muted">利益確率</div>
-              <div className={`text-lg font-bold ${results.profitProb >= 50 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                {results.profitProb.toFixed(1)}%
-              </div>
-            </div>
-            <div className="bg-gray-50 dark:bg-gray-800/30 rounded-lg p-3 text-center">
-              <div className="text-xs text-muted">5%ile</div>
-              <div className="text-sm font-mono">{results.percentile5.toFixed(1)}%</div>
-            </div>
-            <div className="bg-gray-50 dark:bg-gray-800/30 rounded-lg p-3 text-center">
-              <div className="text-xs text-muted">95%ile</div>
-              <div className="text-sm font-mono">{results.percentile95.toFixed(1)}%</div>
-            </div>
-            <div className="bg-gray-50 dark:bg-gray-800/30 rounded-lg p-3 text-center">
-              <div className="text-xs text-muted">試行回数</div>
-              <div className="text-sm font-mono">{NUM_SIMULATIONS.toLocaleString()}</div>
-            </div>
-          </div>
-
-          {/* 簡易ヒストグラム */}
-          <div>
-            <h3 className="text-sm font-bold text-muted mb-2">ROI分布</h3>
-            <div className="flex items-end gap-1 h-20">
-              {results.distribution.map((count, i) => {
-                const maxCount = Math.max(...results.distribution);
-                const height = maxCount > 0 ? (count / maxCount) * 100 : 0;
-                return (
-                  <div
-                    key={i}
-                    className="flex-1 bg-primary/60 rounded-t"
-                    style={{ height: `${height}%` }}
-                    title={`${count}回`}
-                  />
-                );
-              })}
-            </div>
-            <div className="flex justify-between text-xs text-muted mt-1">
-              <span>低</span>
-              <span>ROI</span>
-              <span>高</span>
-            </div>
-          </div>
+      {filterMode === 'ev_plus' && filteredBets.length === 0 ? (
+        <div className="text-center py-4 text-muted text-sm">
+          EV+馬券がありません
         </div>
+      ) : (
+        <>
+          <button
+            onClick={runSimulation}
+            disabled={running}
+            className="bg-primary text-white px-4 py-2 rounded-lg font-medium hover:bg-primary-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {running ? 'シミュレーション中...' : 'シミュレーション実行'}
+          </button>
+
+          {results && (
+            <div className="mt-4 space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div className="bg-gray-50 dark:bg-gray-800/30 rounded-lg p-3 text-center">
+                  <div className="text-xs text-muted">平均ROI</div>
+                  <div className={`text-lg font-bold ${results.avgRoi >= 100 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {results.avgRoi.toFixed(1)}%
+                  </div>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-800/30 rounded-lg p-3 text-center">
+                  <div className="text-xs text-muted">中央値ROI</div>
+                  <div className={`text-lg font-bold ${results.medianRoi >= 100 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {results.medianRoi.toFixed(1)}%
+                  </div>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-800/30 rounded-lg p-3 text-center">
+                  <div className="text-xs text-muted">利益確率</div>
+                  <div className={`text-lg font-bold ${results.profitProb >= 50 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                    {results.profitProb.toFixed(1)}%
+                  </div>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-800/30 rounded-lg p-3 text-center">
+                  <div className="text-xs text-muted">5%ile</div>
+                  <div className="text-sm font-mono">{results.percentile5.toFixed(1)}%</div>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-800/30 rounded-lg p-3 text-center">
+                  <div className="text-xs text-muted">95%ile</div>
+                  <div className="text-sm font-mono">{results.percentile95.toFixed(1)}%</div>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-800/30 rounded-lg p-3 text-center">
+                  <div className="text-xs text-muted">試行回数</div>
+                  <div className="text-sm font-mono">{NUM_SIMULATIONS.toLocaleString()}</div>
+                </div>
+              </div>
+
+              {/* 簡易ヒストグラム */}
+              <div>
+                <h3 className="text-sm font-bold text-muted mb-2">ROI分布</h3>
+                <div className="flex items-end gap-1 h-20">
+                  {results.distribution.map((count, i) => {
+                    const maxCount = Math.max(...results.distribution);
+                    const height = maxCount > 0 ? (count / maxCount) * 100 : 0;
+                    return (
+                      <div
+                        key={i}
+                        className="flex-1 bg-primary/60 rounded-t"
+                        style={{ height: `${height}%` }}
+                        title={`${count}回`}
+                      />
+                    );
+                  })}
+                </div>
+                <div className="flex justify-between text-xs text-muted mt-1">
+                  <span>低</span>
+                  <span>ROI</span>
+                  <span>高</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
