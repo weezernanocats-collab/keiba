@@ -130,6 +130,15 @@ interface ScoreBucket {
   placeRate: number;
 }
 
+interface BetTypeStat {
+  type: string;
+  total: number;
+  hitRate: number;
+  roi: number;
+  avgOdds: number;
+  hitCount: number;
+}
+
 export default function PredictionDetailPage() {
   const params = useParams();
   const raceId = params.raceId as string;
@@ -137,6 +146,7 @@ export default function PredictionDetailPage() {
   const [race, setRace] = useState<RaceData | null>(null);
   const [verification, setVerification] = useState<Verification | null>(null);
   const [scoreBuckets, setScoreBuckets] = useState<ScoreBucket[]>([]);
+  const [betTypeStats, setBetTypeStats] = useState<BetTypeStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { toggleRace, isRaceFavorite } = useFavorites();
@@ -169,9 +179,10 @@ export default function PredictionDetailPage() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const [predRes, scoreRes] = await Promise.all([
+        const [predRes, scoreRes, statsRes] = await Promise.all([
           fetch(`/api/predictions/${raceId}`),
           fetch('/api/score-lookup'),
+          fetch('/api/accuracy-stats'),
         ]);
         const predData = await predRes.json();
         if (predData.error) {
@@ -183,6 +194,8 @@ export default function PredictionDetailPage() {
         }
         const scoreData = await scoreRes.json();
         setScoreBuckets(scoreData.buckets || []);
+        const statsData = await statsRes.json();
+        setBetTypeStats(statsData.betTypeStats || []);
       } catch (err) {
         console.error('エラー:', err);
         setError('データの取得に失敗しました');
@@ -213,6 +226,18 @@ export default function PredictionDetailPage() {
     );
   }
 
+  // 馬券ごとにオッズ×的中率>100のものをピックアップ
+  const betTypeStatsMap = new Map(betTypeStats.map(s => [s.type, s]));
+  const valueBets = prediction.recommendedBets
+    .map(bet => {
+      const stat = betTypeStatsMap.get(bet.type);
+      const odds = bet.odds || 0;
+      const hitRate = stat?.hitRate || 0;
+      const evScore = odds * hitRate; // > 100 なら期待値プラス
+      return { bet, stat, odds, hitRate, evScore };
+    })
+    .filter(v => v.odds > 0 && v.hitRate > 0 && v.evScore > 100);
+
   const sections = [
     ...(verification ? [{ id: 'verification', label: '答え合わせ' }] : []),
     { id: 'summary', label: 'サマリー' },
@@ -221,6 +246,7 @@ export default function PredictionDetailPage() {
     { id: 'analysis', label: 'レース分析' },
     ...(prediction?.analysis.bettingStrategy ? [{ id: 'strategy', label: '馬券戦略' }] : []),
     ...(prediction && prediction.recommendedBets.length > 0 ? [{ id: 'bets', label: '推奨馬券' }] : []),
+    ...(valueBets.length > 0 ? [{ id: 'value-pickup', label: '期待値+' }] : []),
     ...(prediction && prediction.recommendedBets.length > 0 && prediction.analysis.bettingStrategy ? [{ id: 'simulator', label: 'シミュレーション' }] : []),
   ];
 
@@ -749,6 +775,52 @@ export default function PredictionDetailPage() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* 期待値プラスの馬券ピックアップ */}
+      {valueBets.length > 0 && (
+        <div id="value-pickup" ref={setSectionRef('value-pickup')} className="bg-card-bg border-2 border-green-400 dark:border-green-600 rounded-xl p-6 scroll-mt-16">
+          <h2 className="text-lg font-bold mb-2">期待値プラスの馬券</h2>
+          <p className="text-xs text-muted mb-4">
+            各券種の過去の的中率とオッズの積が100を超える（期待値がプラスになる）推奨馬券をピックアップしています。
+          </p>
+          <div className="space-y-3">
+            {valueBets
+              .sort((a, b) => b.evScore - a.evScore)
+              .map((v, idx) => (
+              <div key={idx} className="bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="bg-green-600 text-white px-3 py-1 rounded text-sm font-bold">
+                      {v.bet.type}
+                    </span>
+                    <span className="text-xl font-bold">{v.bet.selections.join(' - ')}</span>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-lg font-bold text-green-600 dark:text-green-400">
+                      {Math.round(v.evScore)}
+                    </div>
+                    <div className="text-xs text-muted">オッズ×的中率</div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-3 text-sm">
+                  <span className="text-muted">
+                    オッズ: <span className="font-bold">{v.odds.toFixed(1)}倍</span>
+                  </span>
+                  <span className="text-muted">
+                    {v.bet.type}的中率: <span className="font-bold">{v.hitRate}%</span>
+                    <span className="text-xs ml-1">(過去{v.stat?.total || 0}件)</span>
+                  </span>
+                  {v.bet.expectedValue > 0 && (
+                    <span className="text-muted">
+                      EV: <span className="font-bold">{v.bet.expectedValue.toFixed(2)}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
