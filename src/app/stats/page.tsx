@@ -86,7 +86,7 @@ const GRADE_COLORS: Record<string, string> = {
 export default function StatsPage() {
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<string>('30');
-  const [periodLabel, setPeriodLabel] = useState<string>('全期間');
+  const [periodLabel, setPeriodLabel] = useState<string>('30日');
   const [summary, setSummary] = useState<Summary | null>(null);
   const [rolling, setRolling] = useState<RollingPoint[]>([]);
   const [rollingWindowSize, setRollingWindowSize] = useState(50);
