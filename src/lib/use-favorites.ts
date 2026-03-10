@@ -4,7 +4,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 
 const STORAGE_KEY = 'keiba-favorites';
 
@@ -30,11 +30,7 @@ function saveFavorites(favs: Favorites): void {
 }
 
 export function useFavorites() {
-  const [favorites, setFavorites] = useState<Favorites>({ races: [], horses: [] });
-
-  useEffect(() => {
-    setFavorites(loadFavorites());
-  }, []);
+  const [favorites, setFavorites] = useState<Favorites>(loadFavorites);
 
   const toggleRace = useCallback((raceId: string) => {
     setFavorites(prev => {

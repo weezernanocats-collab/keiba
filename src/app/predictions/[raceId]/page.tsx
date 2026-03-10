@@ -664,6 +664,16 @@ export default function PredictionDetailPage() {
             {prediction.recommendedBets.map((bet, idx) => {
               const isMain = bet.reasoning.startsWith('【主力】');
               const isValue = bet.reasoning.startsWith('【バリュー】');
+              // Match with verification betResults if available
+              const betResult = verification?.betResults.find(
+                br => br.type === bet.type && br.selections.join('-') === bet.selections.join('-')
+              );
+              // ROI: actual result if available, otherwise expected value based
+              const hasActualResult = betResult !== undefined;
+              const roi = hasActualResult
+                ? (betResult.investment > 0 ? Math.round(betResult.payout / betResult.investment * 100) : 0)
+                : Math.round(bet.expectedValue * 100);
+              const roiPositive = roi >= 100;
               return (
                 <div key={idx} className={`border rounded-xl p-4 ${
                   isMain
@@ -687,11 +697,31 @@ export default function PredictionDetailPage() {
                           バリュー
                         </span>
                       )}
+                      {hasActualResult && (
+                        betResult.hit ? (
+                          <span className="text-xs bg-green-200 dark:bg-green-800 text-green-800 dark:text-green-200 px-2 py-0.5 rounded font-bold">
+                            的中
+                          </span>
+                        ) : (
+                          <span className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded">
+                            不的中
+                          </span>
+                        )
+                      )}
                     </div>
-                    <span className="text-sm text-muted">
-                      EV: {bet.expectedValue.toFixed(2)}
-                      {bet.odds ? ` (${bet.odds.toFixed(1)}倍)` : ''}
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className={`text-sm font-bold ${
+                        roiPositive
+                          ? 'text-green-600 dark:text-green-400'
+                          : 'text-red-600 dark:text-red-400'
+                      }`}>
+                        ROI {roi}%
+                      </span>
+                      <span className="text-sm text-muted">
+                        {hasActualResult ? '' : 'EV: '}{bet.expectedValue.toFixed(2)}
+                        {(bet.odds || (hasActualResult && betResult.odds > 0)) ? ` (${(hasActualResult ? betResult.odds : bet.odds!).toFixed(1)}倍)` : ''}
+                      </span>
+                    </div>
                   </div>
                   <p className="text-xl font-bold mb-2">
                     {bet.selections.join(' - ')}
