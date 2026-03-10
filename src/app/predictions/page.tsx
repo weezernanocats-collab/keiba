@@ -3,6 +3,7 @@ import { Suspense, useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
+import ConfidenceBadge from '@/components/ConfidenceBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import FavoriteProfilePopover from '@/components/FavoriteProfilePopover';
 import { useFavorites } from '@/lib/use-favorites';
@@ -22,19 +23,6 @@ interface RaceRow {
   status: string;
   entryCount: number;
   confidence: number | null;
-}
-
-function ConfidenceBadge({ value }: { value: number | null }) {
-  if (value == null) return <span className="text-xs text-muted">---</span>;
-  const color =
-    value >= 70 ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
-    value >= 50 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
-    'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
-  return (
-    <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${color}`}>
-      {value}%
-    </span>
-  );
 }
 
 const TABS = [

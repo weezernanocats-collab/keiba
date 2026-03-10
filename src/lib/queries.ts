@@ -23,26 +23,36 @@ export async function seedRacecourses(racecourses: typeof RACECOURSES) {
 
 export async function getRacesByDate(date: string) {
   const rows = await dbAll<Record<string, unknown>>(`
-    SELECT r.*, COUNT(e.id) as entry_count
+    SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
+    LEFT JOIN predictions p ON r.id = p.race_id
     WHERE r.date = ?
     GROUP BY r.id
     ORDER BY r.racecourse_name, r.race_number
   `, [date]);
-  return rows.map(r => ({ ...mapRace(r), entryCount: (r.entry_count ?? 0) as number }));
+  return rows.map(r => ({
+    ...mapRace(r),
+    entryCount: (r.entry_count ?? 0) as number,
+    confidence: r.prediction_confidence != null ? Number(r.prediction_confidence) : null,
+  }));
 }
 
 export async function getRacesByDateRange(startDate: string, endDate: string) {
   const rows = await dbAll<Record<string, unknown>>(`
-    SELECT r.*, COUNT(e.id) as entry_count
+    SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
+    LEFT JOIN predictions p ON r.id = p.race_id
     WHERE r.date BETWEEN ? AND ?
     GROUP BY r.id
     ORDER BY r.date, r.racecourse_name, r.race_number
   `, [startDate, endDate]);
-  return rows.map(r => ({ ...mapRace(r), entryCount: (r.entry_count ?? 0) as number }));
+  return rows.map(r => ({
+    ...mapRace(r),
+    entryCount: (r.entry_count ?? 0) as number,
+    confidence: r.prediction_confidence != null ? Number(r.prediction_confidence) : null,
+  }));
 }
 
 export async function getRaceById(raceId: string) {
@@ -125,15 +135,20 @@ export async function getUpcomingRaces(limit: number = 50) {
 
 export async function getRecentResults(limit: number = 50) {
   const rows = await dbAll<Record<string, unknown>>(`
-    SELECT r.*, COUNT(e.id) as entry_count
+    SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
+    LEFT JOIN predictions p ON r.id = p.race_id
     WHERE r.status = '結果確定'
     GROUP BY r.id
     ORDER BY r.date DESC, r.racecourse_name DESC, r.race_number DESC
     LIMIT ?
   `, [limit]);
-  return rows.map(r => ({ ...mapRace(r), entryCount: (r.entry_count ?? 0) as number }));
+  return rows.map(r => ({
+    ...mapRace(r),
+    entryCount: (r.entry_count ?? 0) as number,
+    confidence: r.prediction_confidence != null ? Number(r.prediction_confidence) : null,
+  }));
 }
 
 export async function upsertRace(race: Partial<Race> & { id: string }) {

@@ -2,6 +2,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
+import ConfidenceBadge from '@/components/ConfidenceBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import FavoriteProfilePopover from '@/components/FavoriteProfilePopover';
 import { useFavorites } from '@/lib/use-favorites';
@@ -17,6 +18,7 @@ interface RaceRow {
   distance: number;
   status: string;
   entryCount: number;
+  confidence: number | null;
 }
 
 export default function RacesPage() {
@@ -154,6 +156,7 @@ export default function RacesPage() {
                       <th className="px-4 py-3 text-left font-medium">条件</th>
                       <th className="px-4 py-3 text-center font-medium">頭数</th>
                       <th className="px-4 py-3 text-center font-medium">状態</th>
+                      <th className="px-4 py-3 text-center font-medium">信頼度</th>
                       <th className="px-4 py-3 text-center font-medium">詳細</th>
                       <th className="px-2 py-3 text-center font-medium w-10"></th>
                     </tr>
@@ -180,6 +183,11 @@ export default function RacesPage() {
                           }`}>
                             {race.status}
                           </span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {race.confidence != null && race.confidence >= 50 ? (
+                            <ConfidenceBadge value={race.confidence} />
+                          ) : null}
                         </td>
                         <td className="px-4 py-3 text-center">
                           <Link

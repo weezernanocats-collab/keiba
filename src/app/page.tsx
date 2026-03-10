@@ -17,6 +17,35 @@ interface RaceRow {
   entryCount: number;
 }
 
+interface BetResult {
+  type: string;
+  selections: number[];
+  hit: boolean;
+  odds: number;
+  isEstimated: boolean;
+  investment: number;
+  payout: number;
+  profit: number;
+}
+
+interface HitRecord {
+  raceId: string;
+  raceName: string;
+  raceDate: string;
+  racecourseName: string;
+  raceNumber: number;
+  grade: string | null;
+  winHit: boolean;
+  placeHit: boolean;
+  roi: number;
+  betResults: BetResult[];
+  betSummary: {
+    totalInvestment: number;
+    totalPayout: number;
+    totalProfit: number;
+  };
+}
+
 interface Stats {
   totalHorses: number;
   totalJockeys: number;
@@ -28,23 +57,27 @@ interface Stats {
 export default function HomePage() {
   const [upcomingRaces, setUpcomingRaces] = useState<RaceRow[]>([]);
   const [recentResults, setRecentResults] = useState<RaceRow[]>([]);
+  const [recentHits, setRecentHits] = useState<HitRecord[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const [racesRes, resultsRes, statsRes] = await Promise.all([
+        const [racesRes, resultsRes, statsRes, hitsRes] = await Promise.all([
           fetch('/api/races?type=upcoming'),
           fetch('/api/races?type=results'),
           fetch('/api/stats'),
+          fetch('/api/predictions/history?result=win&limit=10'),
         ]);
         const racesData = await racesRes.json();
         const resultsData = await resultsRes.json();
         const statsData = await statsRes.json();
+        const hitsData = await hitsRes.json();
 
         setUpcomingRaces(racesData.races || []);
         setRecentResults(resultsData.races || []);
+        setRecentHits(hitsData.history || []);
         setStats(statsData);
       } catch (err) {
         console.error('データ取得エラー:', err);
@@ -164,8 +197,81 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* 最近の結果 */}
-      {recentResults.length > 0 && (
+      {/* 直近の的中 / 最近の結果 */}
+      {recentHits.length > 0 ? (
+        <section>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold">🎯 直近の的中</h2>
+            <Link href="/predictions/history?result=win" className="text-sm text-accent hover:underline">すべて見る →</Link>
+          </div>
+          <div className="bg-card-bg border border-card-border rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 dark:bg-gray-800/50">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium">日付</th>
+                    <th className="px-4 py-3 text-left font-medium">競馬場</th>
+                    <th className="px-4 py-3 text-left font-medium">レース名</th>
+                    <th className="px-4 py-3 text-left font-medium">的中</th>
+                    <th className="px-4 py-3 text-right font-medium">ROI</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-card-border">
+                  {recentHits.slice(0, 5).map((hit) => {
+                    const hitBets = hit.betResults.filter(b => b.hit);
+                    const roi = hit.betSummary.totalInvestment > 0
+                      ? Math.round((hit.betSummary.totalPayout / hit.betSummary.totalInvestment) * 100)
+                      : 0;
+
+                    return (
+                      <tr key={hit.raceId} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
+                        <td className="px-4 py-3 whitespace-nowrap">{hit.raceDate}</td>
+                        <td className="px-4 py-3 font-medium">{hit.racecourseName}</td>
+                        <td className="px-4 py-3">
+                          <Link href={`/predictions/${hit.raceId}`} className="text-accent hover:underline font-medium">
+                            {hit.raceNumber}R {hit.raceName}
+                          </Link>
+                          {' '}
+                          <GradeBadge grade={hit.grade} size="sm" />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {hit.winHit && (
+                              <span className="inline-block bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                                単勝的中!
+                              </span>
+                            )}
+                            {hit.placeHit && !hit.winHit && (
+                              <span className="inline-block bg-emerald-400 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                                複勝的中!
+                              </span>
+                            )}
+                            {hitBets
+                              .filter(b => b.type !== '単勝' && b.type !== '複勝')
+                              .map((b) => (
+                                <span
+                                  key={b.type}
+                                  className="inline-block bg-teal-500 text-white text-xs font-bold px-2 py-0.5 rounded-full"
+                                >
+                                  {b.type}的中!
+                                </span>
+                              ))}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className={`font-bold ${roi >= 100 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                            {roi}%
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      ) : recentResults.length > 0 ? (
         <section>
           <h2 className="text-xl font-bold mb-4">🏁 最近の結果</h2>
           <div className="bg-card-bg border border-card-border rounded-xl overflow-hidden">
@@ -199,7 +305,7 @@ export default function HomePage() {
             </div>
           </div>
         </section>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -1,10 +1,12 @@
 'use client';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 
 const PROFILE_KEY = 'keiba-active-profile';
 
 export default function Header() {
+  const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeProfile, setActiveProfile] = useState<string | null>(null);
 
@@ -35,15 +37,24 @@ export default function Header() {
 
           {/* デスクトップナビ */}
           <nav className="hidden md:flex items-center gap-1">
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="px-4 py-2 rounded-lg hover:bg-white/10 transition-colors text-sm font-medium"
-              >
-                {item.label}
-              </Link>
-            ))}
+            {navItems.map((item) => {
+              const isActive = item.href === '/'
+                ? pathname === '/'
+                : pathname.startsWith(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`px-4 py-2 rounded-lg transition-colors text-sm font-medium ${
+                    isActive
+                      ? 'bg-white/20 text-white'
+                      : 'hover:bg-white/10 text-white/75'
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
             {activeProfile && (
               <span className="ml-2 px-2 py-1 bg-white/15 rounded text-xs font-medium">
                 {activeProfile}
@@ -70,16 +81,23 @@ export default function Header() {
         {/* モバイルナビ */}
         {menuOpen && (
           <nav className="md:hidden pb-4 animate-fadeIn">
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="block px-4 py-3 rounded-lg hover:bg-white/10 transition-colors"
-                onClick={() => setMenuOpen(false)}
-              >
-                {item.label}
-              </Link>
-            ))}
+            {navItems.map((item) => {
+              const isActive = item.href === '/'
+                ? pathname === '/'
+                : pathname.startsWith(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`block px-4 py-3 rounded-lg transition-colors ${
+                    isActive ? 'bg-white/20 font-bold' : 'hover:bg-white/10 text-white/75'
+                  }`}
+                  onClick={() => setMenuOpen(false)}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
             {activeProfile && (
               <div className="px-4 py-2 text-xs text-white/70">
                 プロフィール: {activeProfile}

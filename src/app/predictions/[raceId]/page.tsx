@@ -329,6 +329,27 @@ export default function PredictionDetailPage() {
         <div id="verification" ref={setSectionRef('verification')} className="bg-card-bg border-2 border-amber-400 dark:border-amber-600 rounded-xl p-6 scroll-mt-16">
           <h2 className="text-lg font-bold mb-4">📋 答え合わせ</h2>
 
+          {/* 的中馬券ハイライトバナー */}
+          {verification.betResults.some(b => b.hit) && (
+            <div className="bg-gradient-to-r from-green-500 to-emerald-500 dark:from-green-600 dark:to-emerald-600 rounded-xl p-4 mb-4 text-white">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-2xl">🎯</span>
+                <div className="flex flex-wrap gap-2">
+                  {verification.betResults.filter(b => b.hit).map((bet, i) => (
+                    <span key={i} className="px-3 py-1.5 bg-white/20 backdrop-blur rounded-lg text-sm font-bold">
+                      {bet.type}的中! {bet.odds > 0 ? `${bet.odds.toFixed(1)}倍` : ''}
+                    </span>
+                  ))}
+                </div>
+                {verification.betSummary && verification.betSummary.totalPayout > verification.betSummary.totalInvestment && (
+                  <span className="ml-auto text-lg font-bold">
+                    +{(verification.betSummary.totalPayout - verification.betSummary.totalInvestment).toLocaleString()}円
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* 全体結果バッジ */}
           <div className="flex flex-wrap gap-3 mb-4">
             <span className={`px-4 py-2 rounded-lg text-sm font-bold ${
