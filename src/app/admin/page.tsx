@@ -649,6 +649,11 @@ function FixGradesPanel() {
     setError(null);
     try {
       const res = await fetch('/api/admin/fix-grades', { method: 'POST' });
+      if (!res.ok) {
+        const text = await res.text();
+        setError(`API エラー (${res.status}): ${text.slice(0, 200)}`);
+        return;
+      }
       const data = await res.json();
       if (data.error) {
         setError(data.error);
@@ -656,7 +661,7 @@ function FixGradesPanel() {
         setResult(data);
       }
     } catch (err) {
-      setError('グレード修正APIの呼び出しに失敗しました');
+      setError(`通信エラー: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }

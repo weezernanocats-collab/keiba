@@ -1,5 +1,17 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { dbAll, dbRun } from '@/lib/database';
+
+/** 現在のグレード分布を確認 */
+export async function GET() {
+  try {
+    const rows = await dbAll<{ grade: string | null; cnt: number }>(
+      `SELECT grade, COUNT(*) as cnt FROM races GROUP BY grade ORDER BY cnt DESC`
+    );
+    return NextResponse.json({ distribution: rows });
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 500 });
+  }
+}
 
 /**
  * 既存DBのレースグレードを再分類する。
@@ -8,7 +20,7 @@ import { dbAll, dbRun } from '@/lib/database';
  *
  * POST /api/admin/fix-grades
  */
-export async function POST() {
+export async function POST(_request: NextRequest) {
   try {
     // G1に分類されているが、レース名から明らかにG1でないものを検出
     const g1Races = await dbAll<{
