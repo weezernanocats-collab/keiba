@@ -207,11 +207,32 @@ async function scrapeRaceCard(raceId: string): Promise<RaceDetail | null> {
     const timeMatch = raceInfo.match(/(\d{1,2}:\d{2})/);
 
     const gradeText = $('span.RaceGrade, span.Icon_GradeType').text().trim();
-    const gradeClasses = $('span.Icon_GradeType').map((_, el) => $(el).attr('class') || '').get().join(' ');
+    const gradeClassList = $('span.Icon_GradeType').map((_, el) => $(el).attr('class') || '').get();
+    const allClasses = gradeClassList.flatMap((c: string) => c.split(/\s+/));
+    const hasGradeClass = (suffix: string) => allClasses.includes(`Icon_GradeType${suffix}`);
     let grade: string | null = null;
-    if (gradeText.includes('G1') || gradeText.includes('Ｇ１') || gradeClasses.includes('Icon_GradeType1')) grade = 'G1';
-    else if (gradeText.includes('G2') || gradeText.includes('Ｇ２') || gradeClasses.includes('Icon_GradeType2')) grade = 'G2';
-    else if (gradeText.includes('G3') || gradeText.includes('Ｇ３') || gradeClasses.includes('Icon_GradeType3')) grade = 'G3';
+    if (gradeText.includes('G1') || gradeText.includes('Ｇ１') || hasGradeClass('1')) grade = 'G1';
+    else if (gradeText.includes('G2') || gradeText.includes('Ｇ２') || hasGradeClass('2')) grade = 'G2';
+    else if (gradeText.includes('G3') || gradeText.includes('Ｇ３') || hasGradeClass('3')) grade = 'G3';
+    else if (hasGradeClass('5')) grade = 'リステッド';
+    else if (hasGradeClass('10')) grade = 'オープン';
+    else if (hasGradeClass('15')) grade = '3勝クラス';
+    else if (hasGradeClass('16')) grade = '2勝クラス';
+    else if (hasGradeClass('17')) grade = '1勝クラス';
+    else if (hasGradeClass('18')) grade = '未勝利';
+    else if (hasGradeClass('19')) grade = '新馬';
+
+    // RaceData02 からクラス情報を補完
+    if (!grade) {
+      const raceData02 = $('div.RaceData02, span.RaceData02').text().trim();
+      const raceTitleFull = raceName + ' ' + raceData02;
+      if (raceTitleFull.includes('新馬')) grade = '新馬';
+      else if (raceTitleFull.includes('未勝利')) grade = '未勝利';
+      else if (raceTitleFull.includes('1勝クラス')) grade = '1勝クラス';
+      else if (raceTitleFull.includes('2勝クラス')) grade = '2勝クラス';
+      else if (raceTitleFull.includes('3勝クラス')) grade = '3勝クラス';
+      else if (raceTitleFull.includes('オープン')) grade = 'オープン';
+    }
 
     const entries: EntryData[] = [];
     $('table.Shutuba_Table tbody tr').each((_, tr) => {
