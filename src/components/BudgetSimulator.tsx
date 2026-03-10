@@ -74,7 +74,7 @@ export default function BudgetSimulator({ bets, riskLevel }: BudgetSimulatorProp
       </div>
 
       {/* 配分モード + EV+フィルタ切替 */}
-      <div className="flex flex-wrap gap-3 mb-4">
+      <div className="flex flex-wrap gap-3 mb-3">
         <div className="flex items-center gap-1">
           <span className="text-xs text-muted mr-1">配分:</span>
           {(['full', 'kelly'] as const).map(mode => (
@@ -109,11 +109,18 @@ export default function BudgetSimulator({ bets, riskLevel }: BudgetSimulatorProp
         </div>
       </div>
 
-      {allocMode === 'full' && (
-        <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 mb-4">
-          フル配分: Kelly比率を維持しつつ予算100%を配分します。Kelly基準よりリスクが高くなります。
-        </div>
-      )}
+      <div className="text-xs text-muted bg-gray-50 dark:bg-gray-800/30 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 mb-4 space-y-1">
+        {allocMode === 'full' ? (
+          <p><span className="font-medium text-amber-600 dark:text-amber-400">フル配分:</span> Kelly比率を維持しつつ予算100%を使い切ります。Kelly基準より各馬券への配分が大きくなるため、リスクも高くなります。</p>
+        ) : (
+          <p><span className="font-medium text-blue-600 dark:text-blue-400">Kelly配分:</span> Kelly Criterion（最適賭け率）に基づく保守的な配分です。予算の一部のみ使用し、残りは温存します。</p>
+        )}
+        {filterMode === 'ev_plus' ? (
+          <p><span className="font-medium text-green-600 dark:text-green-400">EV+のみ:</span> 期待値がプラス（オッズ×的中確率 &gt; 1）の馬券だけに絞ります。理論上プラス収支が見込める馬券のみ表示されます。</p>
+        ) : (
+          <p><span className="font-medium">全馬券:</span> AI推奨の全馬券を表示します。EV+の馬券には <span className="px-1 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded text-[10px]">EV+</span> バッジが付きます。</p>
+        )}
+      </div>
 
       {filterMode === 'ev_plus' && filteredBets.length === 0 && (
         <div className="text-center py-6 text-muted">

@@ -191,7 +191,7 @@ export default function MonteCarloSimulator({ bets, winProbabilities, budget }: 
       </p>
 
       {/* EV+フィルタ切替 */}
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2 mb-3">
         <span className="text-xs text-muted">対象:</span>
         {(['all', 'ev_plus'] as const).map(mode => (
           <button
@@ -206,6 +206,14 @@ export default function MonteCarloSimulator({ bets, winProbabilities, budget }: 
             {mode === 'all' ? '全馬券' : `EV+のみ(${evPlusCount})`}
           </button>
         ))}
+      </div>
+
+      <div className="text-xs text-muted bg-gray-50 dark:bg-gray-800/30 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 mb-4">
+        {filterMode === 'ev_plus' ? (
+          <p><span className="font-medium text-green-600 dark:text-green-400">EV+のみ:</span> 期待値がプラス（オッズ×的中確率 &gt; 1）の馬券だけでシミュレートします。理論上プラス収支が見込める馬券に限定した収益分布が確認できます。</p>
+        ) : (
+          <p><span className="font-medium">全馬券:</span> AI推奨の全馬券を対象にシミュレートします。各馬の勝率に基づいてランダムに着順を決定し、{NUM_SIMULATIONS.toLocaleString()}回繰り返して収益分布を推定します。</p>
+        )}
       </div>
 
       {filterMode === 'ev_plus' && filteredBets.length === 0 ? (
