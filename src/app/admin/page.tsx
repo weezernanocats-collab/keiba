@@ -561,6 +561,9 @@ export default function AdminPage() {
       {/* ==================== 的中率ダッシュボード ==================== */}
       <AccuracyPanel headers={headers} triggerSync={triggerSync} />
 
+      {/* ==================== グレード修正 ==================== */}
+      <FixGradesPanel />
+
       {/* ==================== 上級者向け：個別操作 ==================== */}
       <AdvancedPanel
         syncDate={syncDate}
@@ -621,6 +624,82 @@ export default function AdminPage() {
                 ))}
               </div>
             </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==================== グレード修正パネル ====================
+
+function FixGradesPanel() {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{
+    totalG1Before: number;
+    fixed: number;
+    remainingG1: number;
+    nullGradeFixed: number;
+    details: { id: string; name: string; oldGrade: string; newGrade: string }[];
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleFix = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/admin/fix-grades', { method: 'POST' });
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setResult(data);
+      }
+    } catch (err) {
+      setError('グレード修正APIの呼び出しに失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-card-bg border border-card-border rounded-xl p-4">
+      <h3 className="font-bold text-lg mb-2">レースグレード修正</h3>
+      <p className="text-sm text-muted mb-3">
+        旧スクレイパーのバグにより、オープン/勝クラス/未勝利/新馬がG1に誤分類されている問題を修正します。
+        レース名をもとに正しいクラスに再分類します。
+      </p>
+      <button
+        onClick={handleFix}
+        disabled={loading}
+        className="px-4 py-2 text-sm bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50 transition-colors"
+      >
+        {loading ? '修正中...' : 'グレード再分類を実行'}
+      </button>
+
+      {error && (
+        <div className="mt-3 p-3 rounded-lg text-sm bg-red-900/30 text-red-300 border border-red-700/30">
+          {error}
+        </div>
+      )}
+
+      {result && (
+        <div className="mt-3 space-y-2">
+          <div className="p-3 rounded-lg text-sm bg-green-900/30 text-green-300 border border-green-700/30">
+            修正前G1: {result.totalG1Before}件 → 修正: {result.fixed}件 → 残りG1: {result.remainingG1}件
+            {result.nullGradeFixed > 0 && ` / NULL→クラス設定: ${result.nullGradeFixed}件`}
+          </div>
+          {result.details.length > 0 && (
+            <details className="text-sm">
+              <summary className="cursor-pointer text-muted hover:text-white">修正詳細 ({result.details.length}件)</summary>
+              <div className="mt-2 max-h-60 overflow-y-auto space-y-1">
+                {result.details.map(d => (
+                  <div key={d.id} className="text-xs py-1 border-b border-card-border">
+                    <span className="text-red-400">G1</span> → <span className="text-green-400">{d.newGrade}</span>: {d.name}
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
         </div>
       )}
