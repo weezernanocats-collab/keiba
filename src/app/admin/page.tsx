@@ -636,11 +636,11 @@ export default function AdminPage() {
 function FixGradesPanel() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{
-    totalG1Before: number;
-    fixed: number;
-    remainingG1: number;
+    g1Before: number;
+    g1After: number;
+    g1Fixed: number;
     nullGradeFixed: number;
-    details: { id: string; name: string; oldGrade: string; newGrade: string }[];
+    distribution: { grade: string | null; cnt: number }[];
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -691,20 +691,21 @@ function FixGradesPanel() {
       {result && (
         <div className="mt-3 space-y-2">
           <div className="p-3 rounded-lg text-sm bg-green-900/30 text-green-300 border border-green-700/30">
-            修正前G1: {result.totalG1Before}件 → 修正: {result.fixed}件 → 残りG1: {result.remainingG1}件
+            G1: {result.g1Before}件 → {result.g1After}件（{result.g1Fixed}件修正）
             {result.nullGradeFixed > 0 && ` / NULL→クラス設定: ${result.nullGradeFixed}件`}
           </div>
-          {result.details.length > 0 && (
-            <details className="text-sm">
-              <summary className="cursor-pointer text-muted hover:text-white">修正詳細 ({result.details.length}件)</summary>
-              <div className="mt-2 max-h-60 overflow-y-auto space-y-1">
-                {result.details.map(d => (
-                  <div key={d.id} className="text-xs py-1 border-b border-card-border">
-                    <span className="text-red-400">G1</span> → <span className="text-green-400">{d.newGrade}</span>: {d.name}
+          {result.distribution.length > 0 && (
+            <div className="text-sm">
+              <div className="text-muted mb-1">修正後のグレード分布:</div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1">
+                {result.distribution.map(d => (
+                  <div key={d.grade ?? 'null'} className="text-xs py-1 px-2 bg-gray-800 rounded flex justify-between">
+                    <span>{d.grade || '未分類'}</span>
+                    <span className="font-mono">{d.cnt}件</span>
                   </div>
                 ))}
               </div>
-            </details>
+            </div>
           )}
         </div>
       )}
