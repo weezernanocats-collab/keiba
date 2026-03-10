@@ -138,6 +138,7 @@ export default function BudgetSimulator({ bets, riskLevel }: BudgetSimulatorProp
                 <tr className="border-b dark:border-gray-700">
                   <th className="text-left py-2">券種</th>
                   <th className="text-left py-2">買い目</th>
+                  <th className="text-right py-2">Kelly比率</th>
                   <th className="text-right py-2">金額</th>
                   <th className="text-right py-2">オッズ</th>
                   <th className="text-right py-2">的中時回収</th>
@@ -146,6 +147,7 @@ export default function BudgetSimulator({ bets, riskLevel }: BudgetSimulatorProp
               <tbody>
                 {allocations.map((a, i) => {
                   const isEvPlus = (a.bet.valueEdge ?? 0) > 0;
+                  const isFloored = a.rawAmount < 100;
                   return (
                     <tr key={i} className="border-b dark:border-gray-800">
                       <td className="py-2">
@@ -164,7 +166,15 @@ export default function BudgetSimulator({ bets, riskLevel }: BudgetSimulatorProp
                         )}
                       </td>
                       <td className="py-2 font-mono">{a.bet.selections.join('-')}</td>
-                      <td className="py-2 text-right font-mono">{a.amount.toLocaleString()}円</td>
+                      <td className="py-2 text-right font-mono text-xs">
+                        {a.kellyPct.toFixed(1)}%
+                      </td>
+                      <td className="py-2 text-right font-mono">
+                        {a.amount.toLocaleString()}円
+                        {isFloored && allocMode === 'kelly' && (
+                          <div className="text-[10px] text-amber-500">*最低額</div>
+                        )}
+                      </td>
                       <td className="py-2 text-right font-mono">
                         {a.bet.odds ? `${a.bet.odds.toFixed(1)}倍` : '-'}
                       </td>
@@ -180,7 +190,7 @@ export default function BudgetSimulator({ bets, riskLevel }: BudgetSimulatorProp
               </tbody>
               <tfoot>
                 <tr className="font-bold">
-                  <td colSpan={2} className="py-2">合計</td>
+                  <td colSpan={3} className="py-2">合計</td>
                   <td className="py-2 text-right">{totalAllocated.toLocaleString()}円</td>
                   <td colSpan={2}>
                     {allocMode === 'kelly' && unallocated > 0 && (
@@ -192,6 +202,11 @@ export default function BudgetSimulator({ bets, riskLevel }: BudgetSimulatorProp
                 </tr>
               </tfoot>
             </table>
+            {allocMode === 'kelly' && allocations.some(a => a.rawAmount < 100) && (
+              <p className="text-[11px] text-amber-500 dark:text-amber-400 mt-1">
+                * Kelly推奨額が100円未満のため最低購入額（100円）に切り上げ。予算を上げるとKelly比率の差が金額に反映されます。
+              </p>
+            )}
           </div>
 
           {/* 回収シナリオ */}
@@ -228,6 +243,8 @@ interface Allocation {
   bet: Bet;
   category: '主力' | 'バリュー' | '押さえ';
   amount: number;
+  kellyPct: number;   // Kelly推奨比率 (%)
+  rawAmount: number;   // フロア適用前の金額
 }
 
 function getAllocations(bets: Bet[], riskLevel: string, budget: number, normalize: boolean): Allocation[] {
@@ -261,7 +278,7 @@ function getAllocations(bets: Bet[], riskLevel: string, budget: number, normaliz
       const fraction = stake * scale;
       const rawAmount = budget * fraction;
       const amount = Math.max(100, Math.round(rawAmount / 100) * 100);
-      return { bet, category, amount };
+      return { bet, category, amount, kellyPct: Math.round(fraction * 1000) / 10, rawAmount: Math.round(rawAmount) };
     });
   }
 
@@ -280,6 +297,7 @@ function getAllocations(bets: Bet[], riskLevel: string, budget: number, normaliz
     const categoryBudget = budget * (ratios[category] || 0.2);
     const rawAmount = categoryBudget / count;
     const amount = Math.max(100, Math.round(rawAmount / 100) * 100);
-    return { bet, category, amount };
+    const pct = budget > 0 ? Math.round(amount / budget * 1000) / 10 : 0;
+    return { bet, category, amount, kellyPct: pct, rawAmount: Math.round(rawAmount) };
   });
 }
