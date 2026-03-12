@@ -1,0 +1,31 @@
+name: 信頼度×馬券種別ROI分析
+
+on:
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Setup env
+        run: |
+          echo "TURSO_DATABASE_URL=\"${{ secrets.TURSO_DATABASE_URL }}\"" > .env.local
+          echo "TURSO_AUTH_TOKEN=\"${{ secrets.TURSO_AUTH_TOKEN }}\"" >> .env.local
+
+      - name: Run analysis
+        run: npx tsx -r tsconfig-paths/register scripts/analyze-confidence-roi.ts
+
+      - name: Write summary
+        if: always()
+        run: |
+          echo "## 信頼度×馬券種別ROI分析" >> $GITHUB_STEP_SUMMARY
+          echo "ワークフローログを確認してください。" >> $GITHUB_STEP_SUMMARY
