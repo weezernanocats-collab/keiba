@@ -28,6 +28,7 @@ interface ConfidenceStat {
   total: number;
   winRate: number;
   placeRate: number;
+  roi: number;
 }
 
 interface VenueStat {
@@ -375,23 +376,60 @@ export default function StatsPage() {
         </div>
       )}
 
-      {/* 信頼度別的中率 */}
+      {/* 信頼度別的中率・ROI */}
       {confidenceStats.length > 0 && (
         <div className="bg-card-bg border border-card-border rounded-xl p-6">
-          <h2 className="text-lg font-bold mb-4">信頼度別 的中率 ({periodLabel})</h2>
+          <h2 className="text-lg font-bold mb-4">信頼度別 的中率・ROI ({periodLabel})</h2>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={confidenceStats}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-              <XAxis dataKey="range" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} domain={[0, 100]} />
-              <Tooltip contentStyle={{ fontSize: 12 }} formatter={(value) => `${value}%`} />
-              <Legend formatter={(value) => value === 'winRate' ? '単勝' : '複勝'} />
+              <XAxis dataKey="range" tick={{ fontSize: 11 }} label={{ value: '信頼度 (%)', position: 'insideBottom', offset: -2, fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} domain={[0, 'auto']} />
+              <Tooltip contentStyle={{ fontSize: 12 }} formatter={(value, name) =>
+                [`${value}%`, name === 'winRate' ? '単勝' : name === 'placeRate' ? '複勝' : 'ROI']
+              } />
+              <Legend formatter={(value) => value === 'winRate' ? '単勝' : value === 'placeRate' ? '複勝' : 'ROI'} />
+              <ReferenceLine y={100} stroke="#888" strokeDasharray="3 3" />
               <Bar dataKey="winRate" fill="#e94560" radius={[4, 4, 0, 0]} />
               <Bar dataKey="placeRate" fill="#0066ff" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="roi" fill="#00b894" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
-          <div className="mt-2 text-xs text-muted text-center">
-            {confidenceStats.map(s => `${s.range}: ${s.total}件`).join(' | ')}
+          <div className="overflow-x-auto mt-4">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b dark:border-gray-700 text-left">
+                  <th className="py-2 pr-3 font-medium">信頼度</th>
+                  <th className="py-2 px-3 font-medium text-center">レース数</th>
+                  <th className="py-2 px-3 font-medium text-center">単勝的中率</th>
+                  <th className="py-2 px-3 font-medium text-center">複勝的中率</th>
+                  <th className="py-2 px-3 font-medium text-center">ROI</th>
+                </tr>
+              </thead>
+              <tbody>
+                {confidenceStats.map(cs => (
+                  <tr key={cs.range} className="border-b dark:border-gray-800">
+                    <td className="py-2 pr-3 font-medium">{cs.range}%</td>
+                    <td className="py-2 px-3 text-center">{cs.total}</td>
+                    <td className="py-2 px-3 text-center">
+                      <span className={cs.winRate >= 30 ? 'text-green-600 font-bold' : ''}>
+                        {cs.winRate}%
+                      </span>
+                    </td>
+                    <td className="py-2 px-3 text-center">
+                      <span className={cs.placeRate >= 60 ? 'text-green-600 font-bold' : ''}>
+                        {cs.placeRate}%
+                      </span>
+                    </td>
+                    <td className="py-2 px-3 text-center">
+                      <span className={`font-bold ${cs.roi >= 100 ? 'text-green-600' : 'text-red-500'}`}>
+                        {cs.roi}%
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

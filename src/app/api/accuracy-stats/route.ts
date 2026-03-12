@@ -123,7 +123,7 @@ export async function GET(request: NextRequest) {
     }
 
     // 信頼度バケット別
-    const confBuckets: Record<string, { total: number; win: number; place: number }> = {};
+    const confBuckets: Record<string, { total: number; win: number; place: number; invested: number; returned: number }> = {};
     for (const r of results) {
       const conf = r.predicted_confidence ?? 50;
       const bucketKey = conf < 30 ? '0-30'
@@ -134,10 +134,12 @@ export async function GET(request: NextRequest) {
         : conf < 80 ? '70-80'
         : '80-100';
 
-      if (!confBuckets[bucketKey]) confBuckets[bucketKey] = { total: 0, win: 0, place: 0 };
+      if (!confBuckets[bucketKey]) confBuckets[bucketKey] = { total: 0, win: 0, place: 0, invested: 0, returned: 0 };
       confBuckets[bucketKey].total++;
       if (r.win_hit) confBuckets[bucketKey].win++;
       if (r.place_hit) confBuckets[bucketKey].place++;
+      confBuckets[bucketKey].invested += r.bet_investment || 100;
+      confBuckets[bucketKey].returned += r.bet_return || 0;
     }
 
     const confidenceStats = Object.entries(confBuckets)
@@ -146,6 +148,7 @@ export async function GET(request: NextRequest) {
         total: val.total,
         winRate: val.total > 0 ? Math.round(val.win / val.total * 1000) / 10 : 0,
         placeRate: val.total > 0 ? Math.round(val.place / val.total * 1000) / 10 : 0,
+        roi: val.invested > 0 ? Math.round(val.returned / val.invested * 1000) / 10 : 0,
       }))
       .sort((a, b) => a.range.localeCompare(b.range));
 
