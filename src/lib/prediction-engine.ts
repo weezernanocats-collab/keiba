@@ -1354,7 +1354,8 @@ function interpolateStandardTime(table: Record<number, number>, distance: number
 
   for (let i = 0; i < distances.length - 1; i++) {
     if (distance >= distances[i] && distance <= distances[i + 1]) {
-      const ratio = (distance - distances[i]) / (distances[i + 1] - distances[i]);
+      const denom = distances[i + 1] - distances[i];
+      const ratio = denom > 0 ? (distance - distances[i]) / denom : 0;
       return table[distances[i]] + (table[distances[i + 1]] - table[distances[i]]) * ratio;
     }
   }
@@ -2151,8 +2152,9 @@ function estimateWinProbabilities(
     sumExp += e;
   }
 
+  const uniform = 1 / scoredHorses.length;
   for (let i = 0; i < scoredHorses.length; i++) {
-    probs.set(scoredHorses[i], exps[i] / sumExp);
+    probs.set(scoredHorses[i], sumExp > 0 ? exps[i] / sumExp : uniform);
   }
 
   return probs;

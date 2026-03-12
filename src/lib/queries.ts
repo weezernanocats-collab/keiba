@@ -723,7 +723,7 @@ export async function getJockeyStats(jockeyId: string, beforeDate?: string): Pro
     SELECT
       COUNT(*) as total,
       SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins,
-      SUM(CASE WHEN e.result_position <= 2 THEN 1 ELSE 0 END) as places
+      SUM(CASE WHEN e.result_position <= 3 THEN 1 ELSE 0 END) as places
     FROM race_entries e
     JOIN races r ON e.race_id = r.id
     WHERE e.jockey_id = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL${dateFilter}
@@ -776,7 +776,7 @@ export async function getTrainerStats(trainerName: string): Promise<TrainerStats
     SELECT
       COUNT(*) as total,
       SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins,
-      SUM(CASE WHEN e.result_position <= 2 THEN 1 ELSE 0 END) as places,
+      SUM(CASE WHEN e.result_position <= 3 THEN 1 ELSE 0 END) as places,
       SUM(CASE WHEN r.distance <= 1400 THEN 1 ELSE 0 END) as sprint_total,
       SUM(CASE WHEN r.distance <= 1400 AND e.result_position = 1 THEN 1 ELSE 0 END) as sprint_wins,
       SUM(CASE WHEN r.distance BETWEEN 1401 AND 1800 THEN 1 ELSE 0 END) as mile_total,

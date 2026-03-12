@@ -499,16 +499,17 @@ export async function calibrateWeights(): Promise<CalibrationResult | null> {
     'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
     'sireAptitude', 'trainerAbility', 'jockeyTrainerCombo',
     'seasonalPattern', 'handicapAdvantage', 'marketOdds',
+    'marginCompetitiveness', 'weatherAptitude',
   ];
 
   const currentWeights: Record<string, number> = {
-    recentForm: 0.16, courseAptitude: 0.06, distanceAptitude: 0.10,
+    recentForm: 0.15, courseAptitude: 0.06, distanceAptitude: 0.10,
     trackConditionAptitude: 0.04, jockeyAbility: 0.07, speedRating: 0.10,
     classPerformance: 0.04, runningStyle: 0.05, postPositionBias: 0.04,
     rotation: 0.04, lastThreeFurlongs: 0.07, consistency: 0.04,
     sireAptitude: 0.05, trainerAbility: 0.04, jockeyTrainerCombo: 0.02,
-    seasonalPattern: 0.02, handicapAdvantage: 0.02,
-    marketOdds: 0.03,
+    seasonalPattern: 0.02, handicapAdvantage: 0.01,
+    marketOdds: 0.03, marginCompetitiveness: 0.01, weatherAptitude: 0.02,
   };
 
   // 全対象レースの race_entries を一括取得（N+1クエリ回避）
@@ -727,6 +728,7 @@ export async function calibrateCategoryWeights(): Promise<CategoryCalibrationRes
     'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
     'sireAptitude', 'trainerAbility', 'jockeyTrainerCombo',
     'seasonalPattern', 'handicapAdvantage', 'marketOdds',
+    'marginCompetitiveness', 'weatherAptitude',
   ];
 
   // カテゴリ別にファクタースコアを収集

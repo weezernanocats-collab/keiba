@@ -457,9 +457,11 @@ function predictRawScore(model: XGBModel, features: number[]): number {
 }
 
 function softmax(scores: number[]): number[] {
+  if (scores.length === 0) return [];
   const maxScore = Math.max(...scores);
   const exps = scores.map(s => Math.exp(s - maxScore));
   const sumExp = exps.reduce((s, e) => s + e, 0);
+  if (sumExp === 0) return scores.map(() => 1 / scores.length);
   return exps.map(e => e / sumExp);
 }
 
