@@ -511,14 +511,21 @@ def main():
     # ==================== カテゴリ別モデル ====================
     print("\n=== カテゴリ別モデル学習 ===")
 
-    track_type_idx = feature_names.index('trackType_encoded')
-    distance_idx = feature_names.index('distance')
-
-    # 各サンプルのカテゴリを判定
-    sample_categories = np.array([
-        categorize_race(X[i, track_type_idx], X[i, distance_idx])
-        for i in range(len(rows))
-    ], dtype=object)
+    # カテゴリ判定: メタデータ優先、なければ特徴量から
+    if 'track_type_encoded' in rows[0]:
+        sample_categories = np.array([
+            categorize_race(r['track_type_encoded'], r['distance_val'])
+            for r in rows
+        ], dtype=object)
+        print("カテゴリ判定: メタデータ使用")
+    else:
+        track_type_idx = feature_names.index('trackType_encoded')
+        distance_idx = feature_names.index('distance')
+        sample_categories = np.array([
+            categorize_race(X[i, track_type_idx], X[i, distance_idx])
+            for i in range(len(rows))
+        ], dtype=object)
+        print("カテゴリ判定: 特徴量使用")
 
     category_metrics = {}
 

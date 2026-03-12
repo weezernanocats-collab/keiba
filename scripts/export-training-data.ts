@@ -26,21 +26,23 @@ const db = createClient({
   authToken: process.env.TURSO_AUTH_TOKEN!,
 });
 
-// 特徴量名の順序定義（v6.0）
+// 特徴量名の順序定義（v7.0 SHAP分析後クリーニング）
+// 除去済み: courseAptitude, classPerformance, jockeyTrainerCombo,
+//          historicalPostBias, trackType_encoded, weightChange, odds (raw)
 const FEATURE_NAMES = [
-  // 20ファクタースコア (historicalPostBias削除)
-  'recentForm', 'courseAptitude', 'distanceAptitude', 'trackConditionAptitude',
-  'jockeyAbility', 'speedRating', 'classPerformance', 'runningStyle',
+  // ファクタースコア (SHAP分析で有効確認済み)
+  'recentForm', 'distanceAptitude', 'trackConditionAptitude',
+  'jockeyAbility', 'speedRating', 'runningStyle',
   'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
-  'sireAptitude', 'trainerAbility', 'jockeyTrainerCombo',
+  'sireAptitude', 'trainerAbility',
   'seasonalPattern', 'handicapAdvantage',
   'marginCompetitiveness', 'weatherAptitude',
-  // コンテキスト特徴量（odds/oddsLogTransform 除外）
+  // コンテキスト特徴量
   'fieldSize', 'popularity', 'age', 'sex_encoded',
-  'handicapWeight', 'postPosition', 'grade_encoded', 'trackType_encoded',
-  'distance', 'trackCondition_encoded', 'popularityRatio',
+  'handicapWeight', 'postPosition', 'grade_encoded',
+  'distance', 'trackCondition_encoded', 'oddsLogTransform', 'popularityRatio',
   // 統計特徴量
-  'weather_encoded', 'weightChange',
+  'weather_encoded',
   'trainerWinRate', 'trainerPlaceRate',
   'sireTrackWinRate', 'jockeyDistanceWinRate', 'jockeyCourseWinRate',
   // v5.1: 馬体重トレンド
@@ -489,6 +491,7 @@ async function main() {
           case 'trackType_encoded': return TRACK_TYPE_ENCODE[pred.track_type] ?? 0;
           case 'distance': return pred.distance;
           case 'trackCondition_encoded': return TRACK_CONDITION_ENCODE[pred.track_condition ?? '良'] ?? 0;
+          case 'oddsLogTransform': return entry.odds && entry.odds > 0 ? Math.log(entry.odds) : Math.log(10);
           case 'popularityRatio': return fieldSize > 0 ? popularity / fieldSize : 0.5;
           case 'weather_encoded': return WEATHER_ENCODE[pred.weather ?? ''] ?? 0;
           case 'weightChange': return entry.result_weight_change ?? 0;

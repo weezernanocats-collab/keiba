@@ -1,26 +1,26 @@
 {
-  "xgb": 0.25,
-  "catboost": 0.75,
+  "xgb": 1.0,
+  "catboost": 0.0,
   "per_category": {
     "turf_sprint": {
-      "xgb": 0.25,
-      "catboost": 0.75
+      "xgb": 1.0,
+      "catboost": 0.0
     },
     "turf_mile": {
-      "xgb": 0.25,
-      "catboost": 0.75
+      "xgb": 1.0,
+      "catboost": 0.0
     },
     "turf_long": {
-      "xgb": 0.25,
-      "catboost": 0.75
+      "xgb": 1.0,
+      "catboost": 0.0
     },
     "dirt_short": {
-      "xgb": 0.25,
-      "catboost": 0.75
+      "xgb": 1.0,
+      "catboost": 0.0
     },
     "dirt_long": {
-      "xgb": 0.25,
-      "catboost": 0.75
+      "xgb": 1.0,
+      "catboost": 0.0
     }
   }
 }
