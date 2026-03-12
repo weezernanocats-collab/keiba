@@ -606,11 +606,13 @@ export async function getRaceLapTimes(raceId: string): Promise<{ lapTimes: numbe
  * 前半と後半のラップ合計を比較
  */
 export function classifyPaceType(lapTimes: number[]): string {
-  if (lapTimes.length < 4) return 'ミドル';
+  // 最初の1ラップはスタート加速区間のため除外（常に遅い → 前半が遅く見えるバイアスを排除）
+  const laps = lapTimes.length > 4 ? lapTimes.slice(1) : lapTimes;
+  if (laps.length < 4) return 'ミドル';
 
-  const halfIdx = Math.floor(lapTimes.length / 2);
-  const firstHalf = lapTimes.slice(0, halfIdx);
-  const secondHalf = lapTimes.slice(halfIdx);
+  const halfIdx = Math.floor(laps.length / 2);
+  const firstHalf = laps.slice(0, halfIdx);
+  const secondHalf = laps.slice(halfIdx);
 
   const firstAvg = firstHalf.reduce((s, v) => s + v, 0) / firstHalf.length;
   const secondAvg = secondHalf.reduce((s, v) => s + v, 0) / secondHalf.length;
@@ -618,8 +620,8 @@ export function classifyPaceType(lapTimes: number[]): string {
   const diff = secondAvg - firstAvg;
   // 前半が速い (後半遅い) = ハイペース
   // 後半が速い (前半遅い) = スローペース
-  if (diff > 0.4) return 'ハイ';
-  if (diff < -0.4) return 'スロー';
+  if (diff > 0.3) return 'ハイ';
+  if (diff < -0.3) return 'スロー';
   return 'ミドル';
 }
 

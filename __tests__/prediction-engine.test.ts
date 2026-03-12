@@ -635,6 +635,8 @@ describe('calculateConfidence', () => {
       dynamicStdTime: null,
       jockeyFormMap: new Map(),
       paceProfile: null,
+      courseDistPaceAvg: 0.5,
+      horsePaceMap: new Map(),
     };
 
     const conf = calculateConfidence(horses, ctxRich);

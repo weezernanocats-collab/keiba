@@ -122,6 +122,10 @@ interface ContextualFeatures {
   trainerDistCatWinRate?: number | undefined;
   trainerCondWinRate?: number | undefined;
   trainerGradeWinRate?: number | undefined;
+  // v7.0: ラップタイム基盤特徴量
+  horsePacePreference?: number | undefined;
+  horseHaiPaceRate?: number | undefined;
+  courseDistPaceAvg?: number | undefined;
 }
 
 /**
@@ -174,6 +178,15 @@ export function buildMLFeatures(
     fieldSizeXpost: ctx.fieldSize * (ctx.postPosition / ctx.fieldSize),
     rotationXform: ((factorScores.rotation ?? 50) / 100) * ((factorScores.recentForm ?? 50) / 100),
     conditionXsire: condEncoded * ((factorScores.sireAptitude ?? 50) / 100),
+    // v7.0: ラップタイム基盤特徴量
+    horsePacePreference: ctx.horsePacePreference ?? 0.5,
+    horseHaiPaceRate: ctx.horseHaiPaceRate ?? 0.0,
+    courseDistPaceAvg: ctx.courseDistPaceAvg ?? 0.5,
+    paceStyleMatch: (() => {
+      const runStyleNorm = (factorScores.runningStyle ?? 50) / 100;
+      const cdpa = ctx.courseDistPaceAvg ?? 0.5;
+      return runStyleNorm * cdpa + (1 - runStyleNorm) * (1 - cdpa);
+    })(),
   };
 }
 

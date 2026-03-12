@@ -89,6 +89,9 @@ export interface RaceHistoricalContext {
   dynamicStdTime: DynamicStandardTime | null;
   jockeyFormMap: Map<string, JockeyRecentForm>;
   paceProfile: HistoricalPaceProfile | null;
+  // v7.0: ラップタイム基盤
+  courseDistPaceAvg: number;
+  horsePaceMap: Map<string, { preference: number; haiRate: number }>;
 }
 
 // ==================== メイン関数 ====================
@@ -112,6 +115,8 @@ export async function buildRaceContext(
     horses.filter(h => h.jockeyId && h.trainerName).map(h => `${h.jockeyId}__${h.trainerName}`)
   )];
 
+  const uniqueHorseIds = [...new Set(horses.map(h => h.horseId).filter(Boolean))];
+
   // 独立したクエリを全て並列実行
   const [
     courseDistStats,
@@ -123,6 +128,8 @@ export async function buildRaceContext(
     dynamicStdTime,
     jockeyFormResults,
     paceProfile,
+    coursePaceRows,
+    horsePaceRows,
   ] = await Promise.all([
     getCourseDistanceStats(racecourseName, trackType, distance, raceDate),
     Promise.all(uniqueSires.map(async s => [s, await getSireStats(s, raceDate)] as const)),
@@ -136,6 +143,10 @@ export async function buildRaceContext(
     getDynamicStandardTimes(racecourseName, trackType, distance, '良', raceDate),
     Promise.all(uniqueJockeys.map(async jid => [jid, await getJockeyRecentForm(jid, raceDate)] as const)),
     getPaceProfile(racecourseName, trackType, distance, raceDate),
+    // v7.0: コース×距離のペース分布
+    getCoursePaceAvg(racecourseName, distance, raceDate),
+    // v7.0: 各馬の過去レースペース履歴
+    getHorsePaceHistory(uniqueHorseIds, raceDate),
   ]);
 
   const sireStatsMap = new Map<string, SireStats>();
@@ -156,7 +167,7 @@ export async function buildRaceContext(
   const jockeyFormMap = new Map<string, JockeyRecentForm>();
   for (const [jid, form] of jockeyFormResults) { if (form) jockeyFormMap.set(jid, form); }
 
-  return { courseDistStats, sireStatsMap, jockeyTrainerMap, trainerStatsMap, seasonalMap, secondStartMap, dynamicStdTime, jockeyFormMap, paceProfile };
+  return { courseDistStats, sireStatsMap, jockeyTrainerMap, trainerStatsMap, seasonalMap, secondStartMap, dynamicStdTime, jockeyFormMap, paceProfile, courseDistPaceAvg: coursePaceRows, horsePaceMap: horsePaceRows };
 }
 
 // ==================== 個別統計関数 ====================
@@ -852,4 +863,86 @@ export async function getJockeyRecentForm(jockeyId: string, raceDate?: string): 
     careerWinRate,
     trend,
   };
+}
+
+// ==================== v7.0: ラップタイム基盤 ====================
+
+const PACE_ENCODE: Record<string, number> = { 'ハイ': 1.0, 'ミドル': 0.5, 'スロー': 0.0 };
+
+/**
+ * コース×距離帯の平均ペースタイプ (0=スロー ~ 1=ハイ)
+ */
+async function getCoursePaceAvg(
+  racecourseName: string,
+  distance: number,
+  raceDate?: string,
+): Promise<number> {
+  const tolerance = 200;
+  const dateFilter = raceDate ? ' AND date < ?' : '';
+  const args = [racecourseName, distance - tolerance, distance + tolerance, ...(raceDate ? [raceDate] : [])];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: any[] = await dbAll(`
+    SELECT pace_type, COUNT(*) as cnt
+    FROM races
+    WHERE racecourse_name = ?
+      AND distance BETWEEN ? AND ?
+      AND pace_type IS NOT NULL${dateFilter}
+    GROUP BY pace_type
+  `, args);
+
+  if (rows.length === 0) return 0.5;
+
+  let total = 0;
+  let sum = 0;
+  for (const r of rows) {
+    const cnt = Number(r.cnt);
+    const val = PACE_ENCODE[r.pace_type as string] ?? 0.5;
+    total += cnt;
+    sum += val * cnt;
+  }
+
+  return total > 0 ? sum / total : 0.5;
+}
+
+/**
+ * 各馬の過去レースにおけるペース履歴 → preference + ハイペース率
+ */
+async function getHorsePaceHistory(
+  horseIds: string[],
+  raceDate?: string,
+): Promise<Map<string, { preference: number; haiRate: number }>> {
+  const result = new Map<string, { preference: number; haiRate: number }>();
+  if (horseIds.length === 0) return result;
+
+  const dateFilter = raceDate ? ' AND r.date < ?' : '';
+  const placeholders = horseIds.map(() => '?').join(',');
+  const args = [...horseIds, ...(raceDate ? [raceDate] : [])];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: any[] = await dbAll(`
+    SELECT pp.horse_id, r.pace_type
+    FROM past_performances pp
+    JOIN races r ON r.id = pp.race_id
+    WHERE pp.horse_id IN (${placeholders})
+      AND r.pace_type IS NOT NULL${dateFilter}
+  `, args);
+
+  // 馬別に集計
+  const byHorse = new Map<string, string[]>();
+  for (const r of rows) {
+    const hid = r.horse_id as string;
+    const arr = byHorse.get(hid) || [];
+    arr.push(r.pace_type as string);
+    byHorse.set(hid, arr);
+  }
+
+  for (const [hid, paces] of byHorse) {
+    const sum = paces.reduce((s, p) => s + (PACE_ENCODE[p] ?? 0.5), 0);
+    const preference = sum / paces.length;
+    const haiRate = paces.filter(p => p === 'ハイ').length / paces.length;
+    result.set(hid, { preference, haiRate });
+  }
+
+  return result;
 }

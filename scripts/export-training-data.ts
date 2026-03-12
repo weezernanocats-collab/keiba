@@ -65,6 +65,11 @@ const FEATURE_NAMES = [
   'fieldSizeXpost',           // 頭数×枠順
   'rotationXform',            // ローテーション×直近成績
   'conditionXsire',           // 馬場状態×血統適性
+  // v7.0: ラップタイム基盤特徴量
+  'horsePacePreference',      // 馬のペース適性 (ハイ=1, ミドル=0.5, スロー=0)
+  'horseHaiPaceRate',         // ハイペース経験率
+  'courseDistPaceAvg',        // コース×距離の典型ペース
+  'paceStyleMatch',           // 脚質×ペース相性 (追込×ハイ=高, 逃げ×スロー=高)
 ];
 
 const SEX_ENCODE: Record<string, number> = { '牡': 0, '牝': 1, 'セ': 2 };
@@ -132,6 +137,7 @@ interface EntryRow {
 
 interface PastPerfRow {
   horse_id: string;
+  race_id: string | null;
   date: string;
   position: number;
   jockey_name: string | null;
@@ -166,18 +172,37 @@ async function main() {
   console.log(`予測データ: ${predResult.rows.length}件`);
   console.log(`出走データ: ${entryResult.rows.length}件`);
 
-  // 過去成績データ取得（騎手乗替、コーナー、着差、休養日数用）
-  const ppResult = await db.execute(`
-    SELECT horse_id, date, position, jockey_name, margin, corner_positions
-    FROM past_performances
-    ORDER BY horse_id, date DESC
-  `);
+  // 過去成績データ取得（騎手乗替、コーナー、着差、休養日数、ペース特徴量用）
+  const [ppResult, racePaceResult, horseResult] = await Promise.all([
+    db.execute(`
+      SELECT horse_id, race_id, date, position, jockey_name, margin, corner_positions
+      FROM past_performances
+      ORDER BY horse_id, date DESC
+    `),
+    // ラップタイム基盤: レースのペースタイプ取得（v7.0）
+    db.execute(`
+      SELECT id, pace_type, racecourse_name, distance
+      FROM races
+      WHERE pace_type IS NOT NULL
+    `),
+    db.execute(
+      `SELECT id, father_name FROM horses WHERE father_name IS NOT NULL`
+    ),
+  ]);
   console.log(`過去成績: ${ppResult.rows.length}件`);
+  console.log(`ペースタイプ付きレース: ${racePaceResult.rows.length}件`);
 
-  // 馬の父名マップ
-  const horseResult = await db.execute(
-    `SELECT id, father_name FROM horses WHERE father_name IS NOT NULL`
-  );
+  // ペースタイプマップ: race_id → 数値 (ハイ=1.0, ミドル=0.5, スロー=0.0)
+  const PACE_ENCODE: Record<string, number> = { 'ハイ': 1.0, 'ミドル': 0.5, 'スロー': 0.0 };
+  const racePaceMap = new Map<string, number>();
+  // コース×距離バケットの累積ペースデータ
+  const coursePaceAccum = new Map<string, { total: number; sum: number }>();
+  for (const row of racePaceResult.rows) {
+    const raceId = row.id as string;
+    const paceType = row.pace_type as string;
+    racePaceMap.set(raceId, PACE_ENCODE[paceType] ?? 0.5);
+  }
+
   const horseFatherMap = new Map<string, string>();
   for (const row of horseResult.rows) {
     horseFatherMap.set(row.id as string, row.father_name as string);
@@ -239,6 +264,8 @@ async function main() {
   const jockeyDistSnap = new Map<string, Map<string, number>>();
   const jockeyCourseSnap = new Map<string, Map<string, number>>();
   const sireTrackSnap = new Map<string, Map<string, number>>();
+  // v7.0: コース×距離ペース累積スナップショット
+  const coursePaceSnap = new Map<string, Map<string, number>>();
 
   // 日付順にスナップショットを構築
   const processedDates = new Set<string>();
@@ -288,6 +315,13 @@ async function main() {
       if (s.total >= 10) stSnap.set(key, s.wins / s.total);
     }
     sireTrackSnap.set(pred.date, stSnap);
+
+    // v7.0: コース×距離ペーススナップショット
+    const cpSnap = new Map<string, number>();
+    for (const [key, s] of coursePaceAccum) {
+      if (s.total >= 5) cpSnap.set(key, s.sum / s.total);
+    }
+    coursePaceSnap.set(pred.date, cpSnap);
 
     // この日付のレース結果で累積統計を更新
     for (const p of predictions.filter(pp => pp.date === pred.date)) {
@@ -360,6 +394,19 @@ async function main() {
           }
         }
       }
+
+      // v7.0: コース×距離ペース累積更新（1レースにつき1回）
+      const racePaceVal = racePaceMap.get(p.race_id);
+      if (racePaceVal !== undefined) {
+        const course = raceCourseMap.get(p.race_id) ?? '';
+        const dist = raceDistMap.get(p.race_id) ?? 0;
+        const distBucket = Math.round(dist / 200) * 200;
+        const cpKey = `${course}__${distBucket}`;
+        const cp = coursePaceAccum.get(cpKey) || { total: 0, sum: 0 };
+        cp.total++;
+        cp.sum += racePaceVal;
+        coursePaceAccum.set(cpKey, cp);
+      }
     }
   }
 
@@ -399,6 +446,7 @@ async function main() {
     const jdStats = jockeyDistSnap.get(pred.date) || new Map();
     const jcStats = jockeyCourseSnap.get(pred.date) || new Map();
     const stStats = sireTrackSnap.get(pred.date) || new Map();
+    const cpStats = coursePaceSnap.get(pred.date) || new Map();
 
     // meetDay extraction from raceId
     const meetDay = pred.race_id.length >= 10 ? parseInt(pred.race_id.substring(8, 10)) || 1 : 1;
@@ -471,6 +519,28 @@ async function main() {
       const trainerGradeWR = (entry.trainer_name && isGrade)
         ? (tgStats.get(`${entry.trainer_name}__grade`) ?? 0.08) : 0.08;
 
+      // === v7.0 ラップタイム基盤特徴量 ===
+      // 馬の過去レースのペース傾向
+      let horsePacePreference = 0.5; // デフォルト: ミドル
+      let horseHaiPaceRate = 0.0;
+      const perfRaceIds = horsePerfs
+        .filter(pp => pp.race_id)
+        .map(pp => ({ raceId: pp.race_id!, pace: racePaceMap.get(pp.race_id!) }))
+        .filter(x => x.pace !== undefined);
+      if (perfRaceIds.length > 0) {
+        horsePacePreference = perfRaceIds.reduce((s, x) => s + x.pace!, 0) / perfRaceIds.length;
+        horseHaiPaceRate = perfRaceIds.filter(x => x.pace! >= 0.9).length / perfRaceIds.length;
+      }
+
+      // コース×距離の典型ペース
+      const cpKey = `${pred.racecourse_name}__${distBucket}`;
+      const courseDistPaceAvg = cpStats.get(cpKey) ?? 0.5;
+
+      // 脚質×ペース相性
+      // 追込馬(runningStyle高)はハイペースで有利、逃げ馬(低)はスローで有利
+      const runStyleNorm = (scores.runningStyle ?? 50) / 100;
+      const paceStyleMatch = runStyleNorm * courseDistPaceAvg + (1 - runStyleNorm) * (1 - courseDistPaceAvg);
+
       // 交互作用特徴量
       const weightXspeed = (entry.handicap_weight ?? 54) * ((scores.speedRating ?? 50) / 100);
       const ageXdistance = (entry.age ?? 3) * (pred.distance / 1000);
@@ -518,6 +588,11 @@ async function main() {
           case 'fieldSizeXpost': return fieldSizeXpost;
           case 'rotationXform': return rotationXform;
           case 'conditionXsire': return conditionXsire;
+          // v7.0 ラップタイム基盤
+          case 'horsePacePreference': return horsePacePreference;
+          case 'horseHaiPaceRate': return horseHaiPaceRate;
+          case 'courseDistPaceAvg': return courseDistPaceAvg;
+          case 'paceStyleMatch': return paceStyleMatch;
           default: return scores[name] ?? 50;
         }
       });
@@ -530,6 +605,8 @@ async function main() {
         label_place: entry.result_position <= 3 ? 1 : 0,
         position: entry.result_position,
         odds: entry.odds ?? null,
+        track_type_encoded: TRACK_TYPE_ENCODE[pred.track_type] ?? 0,
+        distance_val: pred.distance,
       });
     }
   }

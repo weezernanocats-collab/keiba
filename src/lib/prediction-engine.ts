@@ -449,6 +449,10 @@ export async function generatePrediction(
           trainerDistCatWinRate: input?.trainerDistCatWinRate,
           trainerCondWinRate: input?.trainerCondWinRate,
           trainerGradeWinRate: input?.trainerGradeWinRate,
+          // v7.0: ラップタイム基盤特徴量
+          horsePacePreference: ctx.horsePaceMap.get(sh.entry.horseId)?.preference,
+          horseHaiPaceRate: ctx.horsePaceMap.get(sh.entry.horseId)?.haiRate,
+          courseDistPaceAvg: ctx.courseDistPaceAvg,
         },
       ),
     };
