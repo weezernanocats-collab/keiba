@@ -721,6 +721,11 @@ export default function PredictionDetailPage() {
                 ? (betResult.investment > 0 ? Math.round(betResult.payout / betResult.investment * 100) : 0)
                 : Math.round(bet.expectedValue * 100);
               const roiPositive = roi >= 100;
+              // 的中率・期待値の算出
+              const betStat = betTypeStatsMap.get(bet.type);
+              const betHitRate = betStat?.hitRate || 0;
+              const betOdds = bet.odds || (hasActualResult && betResult.odds > 0 ? betResult.odds : 0);
+              const evScore = betOdds > 0 && betHitRate > 0 ? betOdds * betHitRate : 0;
               return (
                 <div key={idx} className={`border rounded-xl p-4 ${
                   isMain
@@ -770,9 +775,28 @@ export default function PredictionDetailPage() {
                       </span>
                     </div>
                   </div>
-                  <p className="text-xl font-bold mb-2">
-                    {bet.selections.join(' - ')}
-                  </p>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xl font-bold">
+                      {bet.selections.join(' - ')}
+                    </p>
+                    <div className="flex items-center gap-3">
+                      {betHitRate > 0 && (
+                        <span className="text-sm text-muted">
+                          的中率 <span className="font-bold text-foreground">{betHitRate.toFixed(1)}%</span>
+                          <span className="text-xs ml-0.5">({betStat?.total || 0}件)</span>
+                        </span>
+                      )}
+                      {evScore > 0 && (
+                        <span className={`text-sm font-bold ${
+                          evScore >= 100
+                            ? 'text-green-600 dark:text-green-400'
+                            : 'text-red-600 dark:text-red-400'
+                        }`}>
+                          期待値 {Math.round(evScore)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                   <p className="text-sm text-muted">
                     {bet.reasoning.replace(/^【(主力|バリュー|押さえ)】/, '')}
                   </p>
