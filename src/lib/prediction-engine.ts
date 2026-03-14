@@ -117,6 +117,31 @@ const DEFAULT_WEIGHTS: Record<string, number> = {
 // WEIGHTS はキャリブレーション結果で上書き可能
 let WEIGHTS: Record<string, number> = { ...DEFAULT_WEIGHTS };
 
+// v7.2: カテゴリ別ブレンドパラメータ（グリッドサーチ最適化済み）
+// ML_BLEND: ML vs 伝統スコアの比率, MARKET_BLEND: モデル vs 市場オッズ, TEMPERATURE: softmax温度
+interface CategoryBlendParams {
+  mlBlend: number;
+  marketBlend: number;
+  temperature: number;
+}
+
+const CATEGORY_BLEND_PARAMS: Record<string, CategoryBlendParams> = {
+  turf_sprint:  { mlBlend: 0.95, marketBlend: 0.10, temperature: 7 },
+  turf_mile:    { mlBlend: 0.95, marketBlend: 0.30, temperature: 8 },
+  turf_long:    { mlBlend: 0.85, marketBlend: 0.50, temperature: 4 },
+  dirt_sprint:  { mlBlend: 1.00, marketBlend: 0.05, temperature: 12 },
+  dirt_long:    { mlBlend: 0.95, marketBlend: 0.10, temperature: 8 },
+};
+
+const DEFAULT_BLEND_PARAMS: CategoryBlendParams = {
+  mlBlend: 0.90, marketBlend: 0.50, temperature: 12,
+};
+
+function getCategoryBlendParams(trackType: string, distance: number): CategoryBlendParams {
+  const cat = categorizeRace(trackType as TrackType, distance);
+  return CATEGORY_BLEND_PARAMS[cat] ?? DEFAULT_BLEND_PARAMS;
+}
+
 /**
  * キャリブレーション済み重みを適用する。
  * 合計が1.0に正規化されていることを検証する。
@@ -448,21 +473,28 @@ export async function generatePrediction(
 
   const mlPredictions = await callMLPredict(mlInputs, { trackType, distance });
 
+  // v7.2: カテゴリ別ブレンドパラメータ取得
+  const blendParams = getCategoryBlendParams(trackType, distance);
+  const envMlBlend = process.env.ML_BLEND_WEIGHT;
+  const envMarketBlend = process.env.MARKET_BLEND_WEIGHT;
+  const mlBlendWeight = envMlBlend ? parseFloat(envMlBlend) : blendParams.mlBlend;
+  const marketBlendWeight = envMarketBlend ? parseFloat(envMarketBlend) : blendParams.marketBlend;
+  const softmaxTemp = blendParams.temperature;
+
   if (mlPredictions) {
-    const ML_BLEND_WEIGHT = parseFloat(process.env.ML_BLEND_WEIGHT || '0.65');
     for (const sh of scoredHorses) {
       const ml = mlPredictions[sh.entry.horseNumber];
       if (ml) {
-        sh.totalScore = sh.totalScore * (1 - ML_BLEND_WEIGHT) + ml.winProb * 100 * ML_BLEND_WEIGHT;
+        sh.totalScore = sh.totalScore * (1 - mlBlendWeight) + ml.winProb * 100 * mlBlendWeight;
       }
     }
     scoredHorses.sort((a, b) => b.totalScore - a.totalScore);
   }
   // --- ML推論ここまで ---
 
-  // --- 市場オッズブレンド (v6.1) ---
-  // softmaxでモデル確率を算出
-  const modelWinProbs = estimateWinProbabilities(scoredHorses);
+  // --- 市場オッズブレンド (v7.2: カテゴリ別温度) ---
+  // softmaxでモデル確率を算出（カテゴリ別温度）
+  const modelWinProbs = estimateWinProbabilities(scoredHorses, softmaxTemp);
   // 馬番→確率のMapに変換
   const modelProbsByNumber = new Map<number, number>();
   for (const [sh, prob] of modelWinProbs) {
@@ -478,8 +510,7 @@ export async function generatePrediction(
   let valueHorseNumbers: number[];
 
   if (marketProbsByNumber.size > 0) {
-    const MARKET_BLEND_WEIGHT = parseFloat(process.env.MARKET_BLEND_WEIGHT || '0.50');
-    blendedProbsByNumber = blendProbabilities(modelProbsByNumber, marketProbsByNumber, MARKET_BLEND_WEIGHT);
+    blendedProbsByNumber = blendProbabilities(modelProbsByNumber, marketProbsByNumber, marketBlendWeight);
     disagreements = computeDisagreement(modelProbsByNumber, marketProbsByNumber, blendedProbsByNumber, 0.03);
     valueHorseNumbers = findValueHorses(disagreements, 0.03);
 

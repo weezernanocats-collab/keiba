@@ -7,51 +7,51 @@
   "calibration": "isotonic_regression",
   "odds_weighted_gain": true,
   "global_val_metrics": {
-    "ndcg_1": 0.5057,
-    "ndcg_3": 0.5554,
-    "top1_accuracy": 0.331,
-    "top3_accuracy": 0.6721
+    "ndcg_1": 0.4998,
+    "ndcg_3": 0.5582,
+    "top1_accuracy": 0.3269,
+    "top3_accuracy": 0.6822
   },
   "global_test_metrics": {
-    "brier_raw": 0.063543,
-    "brier_calibrated": 0.060083,
-    "ece_raw": 0.0122,
-    "ece_calibrated": 0.0194,
-    "ndcg_1": 0.4854,
-    "ndcg_3": 0.5384,
-    "top1_accuracy": 0.3053,
-    "top3_accuracy": 0.6335
+    "brier_raw": 0.063248,
+    "brier_calibrated": 0.059921,
+    "ece_raw": 0.0149,
+    "ece_calibrated": 0.0147,
+    "ndcg_1": 0.481,
+    "ndcg_3": 0.5367,
+    "top1_accuracy": 0.2954,
+    "top3_accuracy": 0.6422
   },
   "category_metrics": {
     "turf_sprint": {
-      "ndcg_1": 0.3649,
-      "ndcg_3": 0.4448,
+      "ndcg_1": 0.3491,
+      "ndcg_3": 0.4376,
       "top1_accuracy": 0.2316,
-      "top3_accuracy": 0.5579
+      "top3_accuracy": 0.5263
     },
     "turf_mile": {
-      "ndcg_1": 0.546,
-      "ndcg_3": 0.5959,
-      "top1_accuracy": 0.3436,
-      "top3_accuracy": 0.7117
+      "ndcg_1": 0.5644,
+      "ndcg_3": 0.5997,
+      "top1_accuracy": 0.3865,
+      "top3_accuracy": 0.7301
     },
     "turf_long": {
-      "ndcg_1": 0.5507,
-      "ndcg_3": 0.5916,
-      "top1_accuracy": 0.3696,
-      "top3_accuracy": 0.6884
+      "ndcg_1": 0.5197,
+      "ndcg_3": 0.566,
+      "top1_accuracy": 0.3551,
+      "top3_accuracy": 0.6594
     },
     "dirt_short": {
-      "ndcg_1": 0.473,
-      "ndcg_3": 0.5241,
-      "top1_accuracy": 0.3129,
-      "top3_accuracy": 0.6475
+      "ndcg_1": 0.47,
+      "ndcg_3": 0.5089,
+      "top1_accuracy": 0.3201,
+      "top3_accuracy": 0.6007
     },
     "dirt_long": {
-      "ndcg_1": 0.5203,
-      "ndcg_3": 0.5759,
-      "top1_accuracy": 0.3484,
-      "top3_accuracy": 0.7247
+      "ndcg_1": 0.5017,
+      "ndcg_3": 0.5652,
+      "top1_accuracy": 0.3345,
+      "top3_accuracy": 0.7178
     }
   },
   "categories_trained": [
@@ -63,41 +63,41 @@
   ],
   "catboost": {
     "global_val_metrics": {
-      "ndcg_1": 0.5103,
-      "ndcg_3": 0.5578,
-      "top1_accuracy": 0.334,
-      "top3_accuracy": 0.6751
+      "ndcg_1": 0.5076,
+      "ndcg_3": 0.5574,
+      "top1_accuracy": 0.335,
+      "top3_accuracy": 0.6772
     },
     "category_metrics": {
       "turf_sprint": {
-        "ndcg_1": 0.3404,
-        "ndcg_3": 0.4216,
+        "ndcg_1": 0.3333,
+        "ndcg_3": 0.423,
         "top1_accuracy": 0.1895,
         "top3_accuracy": 0.5158
       },
       "turf_mile": {
-        "ndcg_1": 0.544,
-        "ndcg_3": 0.5946,
-        "top1_accuracy": 0.3252,
+        "ndcg_1": 0.5378,
+        "ndcg_3": 0.5943,
+        "top1_accuracy": 0.319,
         "top3_accuracy": 0.7055
       },
       "turf_long": {
-        "ndcg_1": 0.5217,
-        "ndcg_3": 0.578,
-        "top1_accuracy": 0.3261,
-        "top3_accuracy": 0.6884
+        "ndcg_1": 0.5314,
+        "ndcg_3": 0.5751,
+        "top1_accuracy": 0.3478,
+        "top3_accuracy": 0.6739
       },
       "dirt_short": {
-        "ndcg_1": 0.4904,
-        "ndcg_3": 0.5194,
-        "top1_accuracy": 0.3237,
-        "top3_accuracy": 0.6223
+        "ndcg_1": 0.4916,
+        "ndcg_3": 0.5256,
+        "top1_accuracy": 0.3417,
+        "top3_accuracy": 0.6295
       },
       "dirt_long": {
-        "ndcg_1": 0.5296,
-        "ndcg_3": 0.5807,
-        "top1_accuracy": 0.3554,
-        "top3_accuracy": 0.7247
+        "ndcg_1": 0.5401,
+        "ndcg_3": 0.5783,
+        "top1_accuracy": 0.3624,
+        "top3_accuracy": 0.7178
       }
     },
     "categories_trained": [
@@ -108,28 +108,28 @@
       "dirt_long"
     ],
     "ensemble_weights": {
-      "xgb": 0.0,
-      "catboost": 1.0,
+      "xgb": 0.6,
+      "catboost": 0.4,
       "per_category": {
         "turf_sprint": {
-          "xgb": 0.0,
-          "catboost": 1.0
+          "xgb": 0.6,
+          "catboost": 0.4
         },
         "turf_mile": {
-          "xgb": 0.0,
-          "catboost": 1.0
+          "xgb": 0.6,
+          "catboost": 0.4
         },
         "turf_long": {
-          "xgb": 0.0,
-          "catboost": 1.0
+          "xgb": 0.6,
+          "catboost": 0.4
         },
         "dirt_short": {
-          "xgb": 0.0,
-          "catboost": 1.0
+          "xgb": 0.6,
+          "catboost": 0.4
         },
         "dirt_long": {
-          "xgb": 0.0,
-          "catboost": 1.0
+          "xgb": 0.6,
+          "catboost": 0.4
         }
       }
     }

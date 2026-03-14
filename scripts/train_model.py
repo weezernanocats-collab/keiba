@@ -247,13 +247,15 @@ def train_ranker_model(X_train, y_train, groups_train, X_eval, y_eval, groups_ev
                        sample_weight=None):
     """XGBRanker (LambdaMART) を学習"""
     model = xgb.XGBRanker(
-        n_estimators=400,
-        max_depth=5,
-        learning_rate=0.05,
+        n_estimators=600,
+        max_depth=6,
+        learning_rate=0.03,
         subsample=0.8,
         colsample_bytree=0.8,
+        min_child_weight=3,
+        gamma=0.1,
         eval_metric="ndcg",
-        early_stopping_rounds=30,
+        early_stopping_rounds=25,
         random_state=42,
         objective="rank:ndcg",
     )
