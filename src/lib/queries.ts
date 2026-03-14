@@ -661,33 +661,69 @@ export async function savePrediction(prediction: Prediction) {
 
 // ==================== 統計 ====================
 
-export async function getDashboardStats() {
-  const totalHorses = ((await dbGet<{ count: number }>('SELECT COUNT(*) as count FROM horses'))!).count;
-  const totalJockeys = ((await dbGet<{ count: number }>('SELECT COUNT(*) as count FROM jockeys'))!).count;
-  const totalRaces = ((await dbGet<{ count: number }>('SELECT COUNT(*) as count FROM races'))!).count;
-  const upcomingRaces = ((await dbGet<{ count: number }>("SELECT COUNT(*) as count FROM races WHERE date >= date('now') AND status IN ('予定', '出走確定')"))!).count;
-  const totalPredictions = ((await dbGet<{ count: number }>('SELECT COUNT(*) as count FROM predictions'))!).count;
+// ダッシュボード統計のインメモリキャッシュ（COUNT系クエリを毎回叩かない）
+interface DashboardStats {
+  totalHorses: number;
+  totalJockeys: number;
+  totalRaces: number;
+  upcomingRaces: number;
+  totalPredictions: number;
+  accuracy: {
+    totalEvaluated: number;
+    winHitRate: number;
+    placeHitRate: number;
+    top3Coverage: number;
+  } | null;
+}
+let dashboardCache: { data: DashboardStats; expires: number } | null = null;
+const DASHBOARD_CACHE_TTL = 5 * 60 * 1000; // 5分
 
-  // 的中率統計
-  const predResults = (await dbGet<{ c: number }>('SELECT COUNT(*) as c FROM prediction_results'))!;
-  const accuracyData = predResults.c > 0 ? await dbGet<{ total_evaluated: number; win_hit_rate: number; place_hit_rate: number; top3_coverage: number }>(`
+export async function getDashboardStats(): Promise<DashboardStats> {
+  if (dashboardCache && Date.now() < dashboardCache.expires) {
+    return dashboardCache.data;
+  }
+
+  // 6個のCOUNTクエリを2個のクエリに統合
+  const raceCounts = await dbGet<{
+    total_races: number;
+    upcoming_races: number;
+  }>(`SELECT
+    COUNT(*) as total_races,
+    SUM(CASE WHEN date >= date('now') AND status IN ('予定', '出走確定') THEN 1 ELSE 0 END) as upcoming_races
+    FROM races`);
+
+  const [totalHorses, totalJockeys, totalPredictions] = await Promise.all([
+    dbGet<{ count: number }>('SELECT COUNT(*) as count FROM horses'),
+    dbGet<{ count: number }>('SELECT COUNT(*) as count FROM jockeys'),
+    dbGet<{ count: number }>('SELECT COUNT(*) as count FROM predictions'),
+  ]);
+
+  // 的中率統計（1クエリでCOUNT+集計）
+  const accuracyData = await dbGet<{ total_evaluated: number; win_hit_rate: number; place_hit_rate: number; top3_coverage: number }>(`
     SELECT
       COUNT(*) as total_evaluated,
       ROUND(AVG(win_hit) * 100, 1) as win_hit_rate,
       ROUND(AVG(place_hit) * 100, 1) as place_hit_rate,
       ROUND(AVG(CAST(top3_picks_hit as REAL) / 3.0) * 100, 1) as top3_coverage
     FROM prediction_results
-  `) : null;
+  `);
 
-  return {
-    totalHorses, totalJockeys, totalRaces, upcomingRaces, totalPredictions,
-    accuracy: accuracyData ? {
+  const result = {
+    totalHorses: totalHorses!.count,
+    totalJockeys: totalJockeys!.count,
+    totalRaces: raceCounts!.total_races,
+    upcomingRaces: raceCounts!.upcoming_races,
+    totalPredictions: totalPredictions!.count,
+    accuracy: accuracyData && accuracyData.total_evaluated > 0 ? {
       totalEvaluated: accuracyData.total_evaluated,
       winHitRate: accuracyData.win_hit_rate,
       placeHitRate: accuracyData.place_hit_rate,
       top3Coverage: accuracyData.top3_coverage,
     } : null,
   };
+
+  dashboardCache = { data: result, expires: Date.now() + DASHBOARD_CACHE_TTL };
+  return result;
 }
 
 // ==================== 騎手勝率取得（予想エンジン用） ====================

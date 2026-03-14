@@ -14,7 +14,9 @@ export async function GET(
       return NextResponse.json({ error: 'レースが見つかりません' }, { status: 404 });
     }
 
-    return NextResponse.json({ race }, { headers: getCacheHeaders('races') });
+    // 結果確定済みはデータ不変 → 長めにキャッシュ / 未来レースはオッズ等更新があるので短め
+    const cachePreset = race.status === '結果確定' ? 'stats' : 'races';
+    return NextResponse.json({ race }, { headers: getCacheHeaders(cachePreset) });
   } catch (error) {
     console.error('レース詳細API エラー:', error);
     return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });

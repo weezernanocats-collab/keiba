@@ -257,7 +257,9 @@ export async function GET(
       }
     }
 
-    return NextResponse.json({ prediction: augmentedPrediction, race, verification }, { headers: getCacheHeaders('prediction') });
+    // 結果確定済みレースはデータ不変 → 長めにキャッシュ
+    const cachePreset = race.status === '結果確定' ? 'stats' : 'prediction';
+    return NextResponse.json({ prediction: augmentedPrediction, race, verification }, { headers: getCacheHeaders(cachePreset) });
   } catch (error) {
     console.error('予想API エラー:', error);
     return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });

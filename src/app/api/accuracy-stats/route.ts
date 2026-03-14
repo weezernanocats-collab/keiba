@@ -21,7 +21,7 @@ export const maxDuration = 30;
 
 // インメモリキャッシュ（Turso Read量を削減）
 const cache = new Map<string, { data: unknown; expires: number }>();
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5分
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30分（結果確定済みデータのみ使用、日中変動なし）
 
 export async function GET(request: NextRequest) {
   try {

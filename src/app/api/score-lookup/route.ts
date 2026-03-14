@@ -6,7 +6,7 @@ export const maxDuration = 30;
 
 // インメモリキャッシュ（重い集計を毎回実行しない）
 let cachedResult: { data: unknown; expires: number } | null = null;
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10分
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30分（結果確定済みデータのみ使用、日中変動なし）
 
 /**
  * スコア帯別の勝率を集計するAPI
