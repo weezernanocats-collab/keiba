@@ -352,7 +352,8 @@ export async function scrapeOdds(raceId: string): Promise<ScrapedOdds> {
   const place: { horseNumber: number; minOdds: number; maxOdds: number }[] = [];
 
   // netkeiba JSON API: type=1 で単勝・複勝を取得
-  const apiUrl = `${BASE_URL}/api/api_get_jra_odds.html?race_id=${raceId}&type=1`;
+  // action=init: 未発走レースの前売りオッズも取得可能にする
+  const apiUrl = `${BASE_URL}/api/api_get_jra_odds.html?race_id=${raceId}&type=1&action=init&compress=0`;
   const response = await fetch(apiUrl, {
     headers: { 'User-Agent': USER_AGENT },
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -372,7 +373,8 @@ export async function scrapeOdds(raceId: string): Promise<ScrapedOdds> {
     };
   };
 
-  if (data.status !== 'result' || !data.data?.odds) {
+  // status=result (確定後) or status=middle (前売り) どちらもオッズを取得
+  if (!data.data || typeof data.data !== 'object' || !data.data.odds) {
     return { raceId, win, place };
   }
 
