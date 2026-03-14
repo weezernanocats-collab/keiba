@@ -176,6 +176,7 @@ export interface RaceAnalysis {
   marketAnalysis?: Record<number, MarketAnalysisEntry>;
   valueHorses?: number[];
   overround?: number;
+  winProbabilities?: Record<number, number>;
 }
 
 export type RacePattern = '一強' | '二強' | '三つ巴' | '混戦' | '大混戦';

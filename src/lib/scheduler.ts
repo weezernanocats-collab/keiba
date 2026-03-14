@@ -402,13 +402,13 @@ async function executeMorningFetch(date: string): Promise<void> {
               getHorsePastPerformances(re.horseId, date, 100),
               getHorseById(re.horseId) as Promise<{ father_name?: string } | null>,
               getJockeyStats(re.jockeyId, date),
-              getTrainerStats(re.trainerName),
+              getTrainerStats(re.trainerName, date),
             ]);
             const fatherName = horseData?.father_name || '';
             const [sireTrackWR, jockeyDistWR, jockeyCourseWR] = await Promise.all([
-              getSireTrackWinRate(fatherName, detail.trackType),
-              getJockeyDistanceWinRate(re.jockeyId, detail.distance),
-              getJockeyCourseWinRate(re.jockeyId, detail.racecourseName),
+              getSireTrackWinRate(fatherName, detail.trackType, date),
+              getJockeyDistanceWinRate(re.jockeyId, detail.distance, date),
+              getJockeyCourseWinRate(re.jockeyId, detail.racecourseName, date),
             ]);
             const distCat = detail.distance <= 1400 ? 'sprint' : detail.distance <= 1800 ? 'mile' : 'long';
             const isHeavy = detail.trackCondition === '重' || detail.trackCondition === '不良';
@@ -501,13 +501,13 @@ async function executeAfternoonPredictions(date: string): Promise<void> {
               getHorsePastPerformances(re.horseId, date, 100),
               getHorseById(re.horseId) as Promise<{ father_name?: string } | null>,
               getJockeyStats(re.jockeyId, date),
-              getTrainerStats(re.trainerName),
+              getTrainerStats(re.trainerName, date),
             ]);
             const fatherName = horseData?.father_name || '';
             const [sireTrackWR, jockeyDistWR, jockeyCourseWR] = await Promise.all([
-              getSireTrackWinRate(fatherName, race.track_type),
-              getJockeyDistanceWinRate(re.jockeyId, race.distance),
-              getJockeyCourseWinRate(re.jockeyId, race.racecourse_name),
+              getSireTrackWinRate(fatherName, race.track_type, date),
+              getJockeyDistanceWinRate(re.jockeyId, race.distance, date),
+              getJockeyCourseWinRate(re.jockeyId, race.racecourse_name, date),
             ]);
             const distCat2 = race.distance <= 1400 ? 'sprint' : race.distance <= 1800 ? 'mile' : 'long';
             const isHeavy2 = race.track_condition === '重' || race.track_condition === '不良';

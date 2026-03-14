@@ -73,7 +73,7 @@ interface XGBModel {
 // ==================== Feature construction ====================
 
 const SEX_ENCODE: Record<string, number> = { '牡': 0, '牝': 1, 'セ': 2 };
-const TRACK_TYPE_ENCODE: Record<string, number> = { '芝': 0, 'ダート': 1, '障害': 2 };
+const TRACK_TYPE_ENCODE: Record<string, number> = { '芝': 0, 'ダート': 1, 'ダ': 1, '障害': 2 };
 const TRACK_CONDITION_ENCODE: Record<string, number> = { '良': 0, '稍重': 1, '重': 2, '不良': 3 };
 const WEATHER_ENCODE: Record<string, number> = { '晴': 0, '曇': 1, '小雨': 2, '雨': 3, '小雪': 4, '雪': 5 };
 const GRADE_ENCODE: Record<string, number> = {
@@ -86,7 +86,7 @@ const GRADE_ENCODE: Record<string, number> = {
 const CATEGORY_DEFS: Record<string, [number, number, number]> = {
   'turf_sprint': [0, 0, 1400],
   'turf_mile': [0, 1401, 1800],
-  'turf_long': [0, 1901, 99999],
+  'turf_long': [0, 1801, 99999],
   'dirt_short': [1, 0, 1600],
   'dirt_long': [1, 1601, 99999],
 };

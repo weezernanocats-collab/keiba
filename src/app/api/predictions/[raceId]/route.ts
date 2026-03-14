@@ -105,21 +105,49 @@ export async function GET(
       }
     }
 
+    // モデル勝率を取得（EV再計算用）
+    const winProbs: Record<number, number> = prediction.analysis?.winProbabilities || {};
+
     const augmentedBets = prediction.recommendedBets.map((bet) => {
-      if (bet.odds && bet.odds > 0) return bet;
       const sel0 = bet.selections?.[0];
       if (!sel0) return bet;
 
-      let liveOdds = 0;
-      if (bet.type === '単勝') {
-        liveOdds = liveOddsMap.get(`単勝-${sel0}`) || entryOddsMap.get(sel0) || 0;
-      } else if (bet.type === '複勝') {
-        liveOdds = liveOddsMap.get(`複勝-${sel0}`) || 0;
-      } else {
-        // 馬連・ワイド等は単勝オッズで近似値を表示
-        liveOdds = entryOddsMap.get(sel0) || liveOddsMap.get(`単勝-${sel0}`) || 0;
+      // オッズ補完: DB最新値を使用（前売りオッズ含む）
+      let odds = (bet.odds && bet.odds > 0) ? bet.odds : 0;
+      if (odds <= 0) {
+        if (bet.type === '単勝') {
+          odds = liveOddsMap.get(`単勝-${sel0}`) || entryOddsMap.get(sel0) || 0;
+        } else if (bet.type === '複勝') {
+          odds = liveOddsMap.get(`複勝-${sel0}`) || 0;
+        } else {
+          odds = entryOddsMap.get(sel0) || liveOddsMap.get(`単勝-${sel0}`) || 0;
+        }
       }
-      return liveOdds > 0 ? { ...bet, odds: liveOdds } : bet;
+
+      // EV再計算: モデル推定勝率 × オッズ
+      let expectedValue = bet.expectedValue;
+      if (odds > 0 && sel0) {
+        const prob = winProbs[sel0] || 0;
+        if (prob > 0) {
+          if (bet.type === '単勝') {
+            expectedValue = Math.round(prob * odds * 100) / 100;
+          } else if (bet.type === '複勝') {
+            // 複勝確率 ≈ 勝率 × 3（簡易近似）
+            const placeProb = Math.min(prob * 3, 0.95);
+            expectedValue = Math.round(placeProb * odds * 100) / 100;
+          } else {
+            // 馬連・ワイド等: 組み合わせの推定確率 × オッズ
+            const sel1 = bet.selections?.[1];
+            const prob2 = sel1 ? (winProbs[sel1] || 0) : 0;
+            const comboProb = prob + prob2 > 0 ? prob * prob2 * (bet.type === 'ワイド' ? 30 : 15) : 0;
+            expectedValue = odds > 0 && comboProb > 0
+              ? Math.round(Math.min(comboProb, 0.5) * odds * 100) / 100
+              : bet.expectedValue;
+          }
+        }
+      }
+
+      return { ...bet, odds: odds > 0 ? odds : bet.odds, expectedValue };
     });
 
     const augmentedPrediction = {

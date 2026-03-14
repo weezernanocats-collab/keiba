@@ -45,13 +45,13 @@ async function processRace(race: {
         getHorsePastPerformances(re.horseId, race.date, 100),
         getHorseById(re.horseId) as Promise<{ father_name?: string } | null>,
         getJockeyStats(re.jockeyId, race.date),
-        getTrainerStats(re.trainerName),
+        getTrainerStats(re.trainerName, race.date),
       ]);
       const fatherName = horseData?.father_name || '';
       const [sireTrackWR, jockeyDistWR, jockeyCourseWR] = await Promise.all([
-        getSireTrackWinRate(fatherName, race.track_type),
-        getJockeyDistanceWinRate(re.jockeyId, race.distance),
-        getJockeyCourseWinRate(re.jockeyId, race.racecourse_name),
+        getSireTrackWinRate(fatherName, race.track_type, race.date),
+        getJockeyDistanceWinRate(re.jockeyId, race.distance, race.date),
+        getJockeyCourseWinRate(re.jockeyId, race.racecourse_name, race.date),
       ]);
       return {
         entry: re,

@@ -314,7 +314,9 @@ function UpcomingRaces() {
                                       const stat = betTypeStatsMap.get(bet.type);
                                       const hitRate = stat?.hitRate || 0;
                                       const odds = bet.odds || 0;
-                                      const evScore = odds > 0 && hitRate > 0 ? odds * hitRate : 0;
+                                      // EV表示: APIが再計算したexpectedValue（モデル勝率×オッズ）を優先
+                                      const ev = bet.expectedValue || 0;
+                                      const evPct = ev > 0 ? Math.round(ev * 100) : 0; // 1.2 → 120%
                                       const isMain = bet.reasoning.startsWith('\u3010\u4E3B\u529B\u3011');
                                       const isValue = bet.reasoning.startsWith('\u3010\u30D0\u30EA\u30E5\u30FC\u3011');
                                       return (
@@ -333,12 +335,10 @@ function UpcomingRaces() {
                                             {odds > 0 ? `${odds.toFixed(1)}倍` : '-'}
                                           </td>
                                           <td className="py-1.5 px-2 text-right">
-                                            {evScore > 0 ? (
-                                              <span className={`font-bold ${evScore >= 100 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                                                {Math.round(evScore)}
+                                            {evPct > 0 ? (
+                                              <span className={`font-bold ${evPct >= 100 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                                                {evPct}%
                                               </span>
-                                            ) : bet.expectedValue > 0 ? (
-                                              <span className="text-muted">{bet.expectedValue.toFixed(2)}</span>
                                             ) : '-'}
                                           </td>
                                           <td className="py-1.5 px-2 text-right">

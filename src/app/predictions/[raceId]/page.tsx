@@ -226,17 +226,18 @@ export default function PredictionDetailPage() {
     );
   }
 
-  // 馬券ごとにオッズ×的中率>100のものをピックアップ
+  // EV > 100%（期待値プラス）の馬券をピックアップ
   const betTypeStatsMap = new Map(betTypeStats.map(s => [s.type, s]));
   const valueBets = prediction.recommendedBets
     .map(bet => {
       const stat = betTypeStatsMap.get(bet.type);
       const odds = bet.odds || 0;
       const hitRate = stat?.hitRate || 0;
-      const evScore = odds * hitRate; // > 100 なら期待値プラス
-      return { bet, stat, odds, hitRate, evScore };
+      const ev = bet.expectedValue || 0;
+      const evPct = Math.round(ev * 100); // 1.2 → 120%
+      return { bet, stat, odds, hitRate, evScore: evPct };
     })
-    .filter(v => v.odds > 0 && v.hitRate > 0 && v.evScore > 100);
+    .filter(v => v.evScore > 100);
 
   const sections = [
     ...(verification ? [{ id: 'verification', label: '答え合わせ' }] : []),
@@ -725,7 +726,7 @@ export default function PredictionDetailPage() {
               const betStat = betTypeStatsMap.get(bet.type);
               const betHitRate = betStat?.hitRate || 0;
               const betOdds = bet.odds || (hasActualResult && betResult.odds > 0 ? betResult.odds : 0);
-              const evScore = betOdds > 0 && betHitRate > 0 ? betOdds * betHitRate : 0;
+              const evPct = Math.round((bet.expectedValue || 0) * 100); // 1.2 → 120%
               return (
                 <div key={idx} className={`border rounded-xl p-4 ${
                   isMain
@@ -786,13 +787,13 @@ export default function PredictionDetailPage() {
                           <span className="text-xs ml-0.5">({betStat?.total || 0}件)</span>
                         </span>
                       )}
-                      {evScore > 0 && (
+                      {evPct > 0 && (
                         <span className={`text-sm font-bold ${
-                          evScore >= 100
+                          evPct >= 100
                             ? 'text-green-600 dark:text-green-400'
                             : 'text-red-600 dark:text-red-400'
                         }`}>
-                          期待値 {Math.round(evScore)}
+                          期待値 {evPct}%
                         </span>
                       )}
                     </div>
@@ -845,9 +846,9 @@ export default function PredictionDetailPage() {
                   </div>
                   <div className="text-right">
                     <div className="text-lg font-bold text-green-600 dark:text-green-400">
-                      {Math.round(v.evScore)}
+                      {v.evScore}%
                     </div>
-                    <div className="text-xs text-muted">オッズ×的中率</div>
+                    <div className="text-xs text-muted">期待値</div>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-3 text-sm">

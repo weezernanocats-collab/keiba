@@ -350,7 +350,7 @@ export async function generatePrediction(
 
   // 各馬をスコアリング
   const scoredHorses = horses.map(h =>
-    scoreHorse(h, trackType, distance, cond, racecourseName, grade, horses.length, ctx, month, avgHandicapWeight, oddsMap, categoryWeights, weather)
+    scoreHorse(h, trackType, distance, cond, racecourseName, grade, horses.length, ctx, month, avgHandicapWeight, oddsMap, categoryWeights, weather, date)
   );
 
   // 展開予想から脚質ボーナスを付与（強化版: コンテキスト依存）
@@ -490,7 +490,8 @@ export async function generatePrediction(
   let valueHorseNumbers: number[];
 
   if (marketProbsByNumber.size > 0) {
-    blendedProbsByNumber = blendProbabilities(modelProbsByNumber, marketProbsByNumber, 0.65);
+    const MARKET_BLEND_WEIGHT = parseFloat(process.env.MARKET_BLEND_WEIGHT || '0.50');
+    blendedProbsByNumber = blendProbabilities(modelProbsByNumber, marketProbsByNumber, MARKET_BLEND_WEIGHT);
     disagreements = computeDisagreement(modelProbsByNumber, marketProbsByNumber, blendedProbsByNumber, 0.03);
     valueHorseNumbers = findValueHorses(disagreements, 0.03);
 
@@ -620,6 +621,7 @@ function scoreHorse(
   oddsMap: Map<number, number>,
   categoryWeights: Record<string, number>,
   currentWeather?: string,
+  raceDate?: string,
 ): ScoredHorse {
   const { entry, pastPerformances: pp, jockeyWinRate, jockeyPlaceRate, fatherName } = input;
   const reasons: string[] = [];
@@ -689,7 +691,7 @@ function scoreHorse(
   else if (scores.postPositionBias <= 30) reasons.push('外枠で不利');
 
   // 10. ローテーション (0-100)
-  scores.rotation = calcRotation(pp);
+  scores.rotation = calcRotation(pp, raceDate);
   if (scores.rotation >= 75) reasons.push('理想的なローテーション');
   else if (scores.rotation <= 30) reasons.push('間隔が空きすぎorタイトすぎ');
 
@@ -794,7 +796,8 @@ function scoreHorse(
     const lastDate = pp[0]?.date;
     const prevDate = pp[1]?.date;
     if (lastDate && prevDate) {
-      const daysSinceLast = Math.floor((Date.now() - new Date(lastDate).getTime()) / (1000 * 60 * 60 * 24));
+      const refTime = raceDate ? new Date(raceDate).getTime() : Date.now();
+      const daysSinceLast = Math.floor((refTime - new Date(lastDate).getTime()) / (1000 * 60 * 60 * 24));
       const daysBetweenLastTwo = Math.floor((new Date(lastDate).getTime() - new Date(prevDate).getTime()) / (1000 * 60 * 60 * 24));
       const isSecondStart = daysBetweenLastTwo >= 60 && daysSinceLast <= 42;
       const bonus = calcSecondStartScore(secondStartBonus, daysSinceLast, isSecondStart);
@@ -1462,15 +1465,15 @@ function calcPostPositionBiasV5(
   return calcPostPositionBias(post, fieldSize, distance, trackType, racecourseName);
 }
 
-function calcRotation(pp: PastPerformance[]): number {
+function calcRotation(pp: PastPerformance[], raceDate?: string): number {
   if (pp.length === 0) return 50;
 
   const lastDate = pp[0].date;
   if (!lastDate) return 50;
 
   const lastRaceDate = new Date(lastDate);
-  const today = new Date();
-  const daysSinceLast = Math.floor((today.getTime() - lastRaceDate.getTime()) / (1000 * 60 * 60 * 24));
+  const referenceDate = raceDate ? new Date(raceDate) : new Date();
+  const daysSinceLast = Math.floor((referenceDate.getTime() - lastRaceDate.getTime()) / (1000 * 60 * 60 * 24));
 
   if (daysSinceLast < 10) return 25;
   if (daysSinceLast < 14) return 45;

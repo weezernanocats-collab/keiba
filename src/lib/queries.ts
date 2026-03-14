@@ -754,7 +754,7 @@ export interface TrainerStatsResult {
   gradeWinRate: number;
 }
 
-export async function getTrainerStats(trainerName: string): Promise<TrainerStatsResult> {
+export async function getTrainerStats(trainerName: string, beforeDate?: string): Promise<TrainerStatsResult> {
   const DEF_W = 0.08;
   const DEF_P = 0.20;
   const defaults: TrainerStatsResult = {
@@ -764,6 +764,10 @@ export async function getTrainerStats(trainerName: string): Promise<TrainerStats
   };
 
   if (!trainerName) return defaults;
+
+  const dateFilter = beforeDate ? ' AND r.date < ?' : '';
+  const args: (string | number)[] = [trainerName];
+  if (beforeDate) args.push(beforeDate);
 
   const stats = await dbGet<{
     total: number; wins: number; places: number;
@@ -789,8 +793,8 @@ export async function getTrainerStats(trainerName: string): Promise<TrainerStats
       SUM(CASE WHEN r.grade IN ('G3', 'G2', 'G1') AND e.result_position = 1 THEN 1 ELSE 0 END) as grade_wins
     FROM race_entries e
     JOIN races r ON e.race_id = r.id
-    WHERE e.trainer_name = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL
-  `, [trainerName]);
+    WHERE e.trainer_name = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL${dateFilter}
+  `, args);
 
   if (!stats || stats.total < 10) return defaults;
 
@@ -812,16 +816,20 @@ export async function getTrainerStats(trainerName: string): Promise<TrainerStats
 /**
  * 種牡馬×馬場タイプの勝率を取得
  */
-export async function getSireTrackWinRate(fatherName: string, trackType: string): Promise<number> {
+export async function getSireTrackWinRate(fatherName: string, trackType: string, beforeDate?: string): Promise<number> {
   if (!fatherName) return 0.07;
+
+  const dateFilter = beforeDate ? ' AND pp.date < ?' : '';
+  const args: (string | number)[] = [fatherName, trackType];
+  if (beforeDate) args.push(beforeDate);
 
   const stats = await dbGet<{ total: number; wins: number }>(`
     SELECT COUNT(*) as total,
            SUM(CASE WHEN pp.position = 1 THEN 1 ELSE 0 END) as wins
     FROM past_performances pp
     JOIN horses h ON pp.horse_id = h.id
-    WHERE h.father_name = ? AND pp.track_type = ? AND pp.position IS NOT NULL
-  `, [fatherName, trackType]);
+    WHERE h.father_name = ? AND pp.track_type = ? AND pp.position IS NOT NULL${dateFilter}
+  `, args);
 
   if (stats && stats.total >= 10) {
     return stats.wins / stats.total;
@@ -832,8 +840,12 @@ export async function getSireTrackWinRate(fatherName: string, trackType: string)
 /**
  * 騎手×距離帯の勝率を取得
  */
-export async function getJockeyDistanceWinRate(jockeyId: string, distance: number): Promise<number> {
+export async function getJockeyDistanceWinRate(jockeyId: string, distance: number, beforeDate?: string): Promise<number> {
   if (!jockeyId) return 0.08;
+
+  const dateFilter = beforeDate ? ' AND r.date < ?' : '';
+  const args: (string | number)[] = [jockeyId, distance];
+  if (beforeDate) args.push(beforeDate);
 
   // 距離帯: ±200m
   const stats = await dbGet<{ total: number; wins: number }>(`
@@ -842,8 +854,8 @@ export async function getJockeyDistanceWinRate(jockeyId: string, distance: numbe
     FROM race_entries e
     JOIN races r ON e.race_id = r.id
     WHERE e.jockey_id = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL
-      AND ABS(r.distance - ?) <= 200
-  `, [jockeyId, distance]);
+      AND ABS(r.distance - ?) <= 200${dateFilter}
+  `, args);
 
   if (stats && stats.total >= 10) {
     return stats.wins / stats.total;
@@ -854,16 +866,20 @@ export async function getJockeyDistanceWinRate(jockeyId: string, distance: numbe
 /**
  * 騎手×コースの勝率を取得
  */
-export async function getJockeyCourseWinRate(jockeyId: string, racecourseName: string): Promise<number> {
+export async function getJockeyCourseWinRate(jockeyId: string, racecourseName: string, beforeDate?: string): Promise<number> {
   if (!jockeyId) return 0.08;
+
+  const dateFilter = beforeDate ? ' AND r.date < ?' : '';
+  const args: (string | number)[] = [jockeyId, racecourseName];
+  if (beforeDate) args.push(beforeDate);
 
   const stats = await dbGet<{ total: number; wins: number }>(`
     SELECT COUNT(*) as total,
            SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins
     FROM race_entries e
     JOIN races r ON e.race_id = r.id
-    WHERE e.jockey_id = ? AND r.racecourse_name = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL
-  `, [jockeyId, racecourseName]);
+    WHERE e.jockey_id = ? AND r.racecourse_name = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL${dateFilter}
+  `, args);
 
   if (stats && stats.total >= 10) {
     return stats.wins / stats.total;
