@@ -24,6 +24,7 @@ interface RaceRow {
 export default function RacesPage() {
   const [races, setRaces] = useState<RaceRow[]>([]);
   const [filter, setFilter] = useState<'upcoming' | 'results'>('upcoming');
+  const [dateFilter, setDateFilter] = useState<string>('');
   const [courseFilter, setCourseFilter] = useState<string>('all');
   const [trackFilter, setTrackFilter] = useState<string>('all');
   const [gradeFilter, setGradeFilter] = useState<string>('all');
@@ -34,7 +35,9 @@ export default function RacesPage() {
     async function fetchRaces() {
       setLoading(true);
       try {
-        const res = await fetch(`/api/races?type=${filter}`);
+        const params = new URLSearchParams({ type: filter });
+        if (dateFilter) params.set('date', dateFilter);
+        const res = await fetch(`/api/races?${params}`);
         const data = await res.json();
         setRaces(data.races || []);
       } catch (err) {
@@ -44,7 +47,7 @@ export default function RacesPage() {
       }
     }
     fetchRaces();
-  }, [filter]);
+  }, [filter, dateFilter]);
 
   const courses = [...new Set(races.map(r => r.racecourseName))];
 
@@ -88,6 +91,13 @@ export default function RacesPage() {
           </button>
         </div>
 
+        <input
+          type="date"
+          className="px-3 py-2 text-sm border border-card-border rounded-lg bg-card-bg"
+          value={dateFilter}
+          onChange={e => setDateFilter(e.target.value)}
+        />
+
         <select
           className="px-3 py-2 text-sm border border-card-border rounded-lg bg-card-bg"
           value={courseFilter}
@@ -122,10 +132,10 @@ export default function RacesPage() {
           <option value="G3">G3</option>
         </select>
 
-        {(courseFilter !== 'all' || trackFilter !== 'all' || gradeFilter !== 'all') && (
+        {(dateFilter || courseFilter !== 'all' || trackFilter !== 'all' || gradeFilter !== 'all') && (
           <button
             className="px-3 py-2 text-xs text-red-400 hover:text-red-300 transition-colors"
-            onClick={() => { setCourseFilter('all'); setTrackFilter('all'); setGradeFilter('all'); }}
+            onClick={() => { setDateFilter(''); setCourseFilter('all'); setTrackFilter('all'); setGradeFilter('all'); }}
           >
             フィルタをリセット
           </button>

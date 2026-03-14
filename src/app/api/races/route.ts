@@ -13,11 +13,21 @@ export async function GET(request: NextRequest) {
     const headers = getCacheHeaders('races');
 
     if (type === 'upcoming') {
+      if (date) {
+        const allRaces = await getRacesByDate(date);
+        const races = allRaces.filter(r => r.status === '予定' || r.status === '出走確定');
+        return NextResponse.json({ races }, { headers });
+      }
       const races = await getUpcomingRaces(50);
       return NextResponse.json({ races }, { headers });
     }
 
     if (type === 'results') {
+      if (date) {
+        const allRaces = await getRacesByDate(date);
+        const races = allRaces.filter(r => r.status === '結果確定');
+        return NextResponse.json({ races }, { headers });
+      }
       const races = await getRecentResults(50);
       return NextResponse.json({ races }, { headers });
     }
