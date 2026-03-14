@@ -3,6 +3,8 @@ import { dbAll } from '@/lib/database';
 import { isBetHit } from '@/lib/bet-utils';
 import { getCacheHeaders } from '@/lib/api-helpers';
 
+export const maxDuration = 30;
+
 /**
  * 的中率統計API
  * クエリパラメータ: ?days=30 | 60 | 180 | all (デフォルト: all)

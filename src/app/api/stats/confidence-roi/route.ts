@@ -3,6 +3,8 @@ import { dbAll } from '@/lib/database';
 import { isBetHit } from '@/lib/bet-utils';
 import { getCacheHeaders } from '@/lib/api-helpers';
 
+export const maxDuration = 30;
+
 /**
  * 信頼度×馬券種別クロスROI分析API
  * GET /api/stats/confidence-roi

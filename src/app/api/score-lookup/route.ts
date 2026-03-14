@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbAll } from '@/lib/database';
+import { getCacheHeaders } from '@/lib/api-helpers';
+
+export const maxDuration = 30;
+
+// インメモリキャッシュ（重い集計を毎回実行しない）
+let cachedResult: { data: unknown; expires: number } | null = null;
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10分
 
 /**
  * スコア帯別の勝率を集計するAPI
@@ -8,48 +15,47 @@ import { dbAll } from '@/lib/database';
  */
 export async function GET(_request: NextRequest) {
   try {
-    // 結果確定済みレースの予想と結果を取得
+    // キャッシュヒット時は即座に返す
+    if (cachedResult && Date.now() < cachedResult.expires) {
+      return NextResponse.json(cachedResult.data, { headers: getCacheHeaders('stats') });
+    }
+
+    // 1クエリでpredictions + race_entriesをJOINして取得
     const rows = await dbAll<{
       race_id: string;
       picks_json: string;
-    }>(
-      `SELECT p.race_id, p.picks_json
-       FROM predictions p
-       JOIN races r ON r.id = p.race_id
-       WHERE r.status = '結果確定'
-       ORDER BY r.date DESC
-       LIMIT 2000`,
-      [],
-    );
-
-    // 各レースの結果を取得
-    const resultRows = await dbAll<{
-      race_id: string;
       horse_number: number;
       result_position: number;
     }>(
-      `SELECT re.race_id, re.horse_number, re.result_position
-       FROM race_entries re
-       JOIN races r ON r.id = re.race_id
-       WHERE r.status = '結果確定' AND re.result_position IS NOT NULL AND re.result_position > 0`,
+      `SELECT p.race_id, p.picks_json, re.horse_number, re.result_position
+       FROM predictions p
+       JOIN races r ON r.id = p.race_id
+       JOIN race_entries re ON re.race_id = p.race_id
+       WHERE r.status = '結果確定'
+         AND re.result_position IS NOT NULL AND re.result_position > 0
+       ORDER BY r.date DESC`,
       [],
     );
 
-    // レースごとの結果マップ
+    // レースごとの結果マップを構築
     const resultMap = new Map<string, Map<number, number>>();
-    for (const row of resultRows) {
+    const racePicksMap = new Map<string, string>();
+    for (const row of rows) {
       if (!resultMap.has(row.race_id)) {
         resultMap.set(row.race_id, new Map());
       }
       resultMap.get(row.race_id)!.set(row.horse_number, row.result_position);
+      if (!racePicksMap.has(row.race_id)) {
+        racePicksMap.set(row.race_id, row.picks_json);
+      }
     }
 
-    // スコアバケット集計（5点刻み: 30-35, 35-40, ..., 75-80, 80+）
+    // スコアバケット集計（5点刻み）
     const buckets: Record<string, { total: number; win: number; place: number }> = {};
 
-    for (const row of rows) {
-      const picks = JSON.parse(row.picks_json || '[]') as { horseNumber: number; score: number }[];
-      const results = resultMap.get(row.race_id);
+    for (const [raceId, picksJson] of racePicksMap) {
+      const picks = JSON.parse(picksJson || '[]') as { horseNumber: number; score: number }[];
+      const results = resultMap.get(raceId);
       if (!results) continue;
 
       for (const pick of picks) {
@@ -76,10 +82,15 @@ export async function GET(_request: NextRequest) {
         winRate: val.total > 0 ? Math.round((val.win / val.total) * 1000) / 10 : 0,
         placeRate: val.total > 0 ? Math.round((val.place / val.total) * 1000) / 10 : 0,
       }))
-      .filter(b => b.total >= 5)  // サンプル5件以上のみ
+      .filter(b => b.total >= 5)
       .sort((a, b) => a.scoreLow - b.scoreLow);
 
-    return NextResponse.json({ buckets: result });
+    const responseData = { buckets: result };
+
+    // キャッシュに保存
+    cachedResult = { data: responseData, expires: Date.now() + CACHE_TTL_MS };
+
+    return NextResponse.json(responseData, { headers: getCacheHeaders('stats') });
   } catch (error) {
     console.error('score-lookup エラー:', error);
     return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });

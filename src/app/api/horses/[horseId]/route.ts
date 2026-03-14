@@ -3,6 +3,8 @@ import { getHorseById, getHorsePastPerformances } from '@/lib/queries';
 import { dbGet, dbAll } from '@/lib/database';
 import { getCacheHeaders } from '@/lib/api-helpers';
 
+export const maxDuration = 15;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type HorseData = Record<string, any>;
 

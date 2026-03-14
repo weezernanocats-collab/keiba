@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getDashboardStats } from '@/lib/queries';
 import { getCacheHeaders } from '@/lib/api-helpers';
 
+export const maxDuration = 15;
+
 export async function GET() {
   try {
     const stats = await getDashboardStats();

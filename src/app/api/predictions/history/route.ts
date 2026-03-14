@@ -3,6 +3,8 @@ import { dbAll } from '@/lib/database';
 import { isBetHit } from '@/lib/bet-utils';
 import { getCacheHeaders } from '@/lib/api-helpers';
 
+export const maxDuration = 30;
+
 /**
  * 過去予想履歴API
  * 予想と結果を一緒に返す

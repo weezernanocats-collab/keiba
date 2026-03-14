@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbAll } from '@/lib/database';
 import { getCacheHeaders } from '@/lib/api-helpers';
 
+export const maxDuration = 15;
+
 /**
  * 的中率推移グラフ用API
  * クエリパラメータ: ?period=weekly | monthly (デフォルト: weekly)

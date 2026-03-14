@@ -3,6 +3,8 @@ import { dbAll } from '@/lib/database';
 import { isBetHit } from '@/lib/bet-utils';
 import { getCacheHeaders } from '@/lib/api-helpers';
 
+export const maxDuration = 30;
+
 /**
  * 馬券種別の収支サマリーAPI
  * GET /api/stats/bet-types

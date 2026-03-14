@@ -6,6 +6,8 @@ import { isBetHit } from '@/lib/bet-utils';
 import { getCacheHeaders } from '@/lib/api-helpers';
 import type { RaceEntry } from '@/types';
 
+export const maxDuration = 30;
+
 /** 予想が壊れているか判定（horseId が全て欠落している場合） */
 function isBrokenPrediction(topPicks: { horseId?: string; horseName?: string }[]): boolean {
   if (!topPicks || topPicks.length === 0) return true;

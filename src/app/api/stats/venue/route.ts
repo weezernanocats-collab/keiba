@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { dbAll } from '@/lib/database';
 import { getCacheHeaders } from '@/lib/api-helpers';
 
+export const maxDuration = 15;
+
 /**
  * 競馬場別・トラック別の的中傾向API
  *
