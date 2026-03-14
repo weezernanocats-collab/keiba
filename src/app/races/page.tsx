@@ -195,7 +195,7 @@ export default function RacesPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {race.confidence != null && race.confidence >= 50 ? (
+                          {race.confidence != null ? (
                             <ConfidenceBadge value={race.confidence} />
                           ) : null}
                         </td>
