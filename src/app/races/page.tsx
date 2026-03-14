@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
 import ConfidenceBadge from '@/components/ConfidenceBadge';
@@ -29,25 +29,37 @@ export default function RacesPage() {
   const [trackFilter, setTrackFilter] = useState<string>('all');
   const [gradeFilter, setGradeFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const { isRaceFavoriteInProfile, toggleRaceForProfile } = useFavorites();
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchRaces = useCallback(async (showSpinner = false) => {
+    if (showSpinner) setLoading(true);
+    try {
+      const params = new URLSearchParams({ type: filter });
+      if (dateFilter) params.set('date', dateFilter);
+      const res = await fetch(`/api/races?${params}`);
+      const data = await res.json();
+      setRaces(data.races || []);
+      setLastUpdated(new Date());
+    } catch (err) {
+      console.error('レース取得エラー:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [filter, dateFilter]);
 
   useEffect(() => {
-    async function fetchRaces() {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams({ type: filter });
-        if (dateFilter) params.set('date', dateFilter);
-        const res = await fetch(`/api/races?${params}`);
-        const data = await res.json();
-        setRaces(data.races || []);
-      } catch (err) {
-        console.error('レース取得エラー:', err);
-      } finally {
-        setLoading(false);
-      }
+    fetchRaces(true);
+
+    // 「今後のレース」タブの場合、60秒ごとに自動更新
+    if (filter === 'upcoming') {
+      intervalRef.current = setInterval(() => fetchRaces(false), 60_000);
     }
-    fetchRaces();
-  }, [filter, dateFilter]);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [filter, dateFilter, fetchRaces]);
 
   const courses = [...new Set(races.map(r => r.racecourseName))];
 
@@ -141,8 +153,20 @@ export default function RacesPage() {
           </button>
         )}
 
-        <span className="text-sm text-muted ml-auto">
+        <span className="text-sm text-muted ml-auto flex items-center gap-2">
           {filteredRaces.length}件
+          {lastUpdated && (
+            <span className="text-xs text-gray-500">
+              ({lastUpdated.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}更新)
+            </span>
+          )}
+          <button
+            onClick={() => fetchRaces(true)}
+            className="text-xs text-accent hover:underline"
+            title="手動更新"
+          >
+            更新
+          </button>
         </span>
       </div>
 

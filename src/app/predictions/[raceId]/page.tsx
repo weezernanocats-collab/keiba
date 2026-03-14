@@ -212,7 +212,15 @@ export default function PredictionDetailPage() {
     return (
       <div className="text-center py-12 space-y-4">
         <p className="text-lg text-muted">{error}</p>
-        <Link href="/predictions" className="text-accent hover:underline">&larr; 予想一覧に戻る</Link>
+        <div className="flex items-center justify-center gap-4">
+          <button
+            onClick={() => { setError(null); setLoading(true); window.location.reload(); }}
+            className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-light transition-colors text-sm"
+          >
+            もう一度試す
+          </button>
+          <Link href="/predictions" className="text-accent hover:underline text-sm">&larr; 予想一覧に戻る</Link>
+        </div>
       </div>
     );
   }
@@ -584,7 +592,7 @@ export default function PredictionDetailPage() {
       </div>
 
       {/* モデル vs 市場オッズ */}
-      {prediction.analysis.marketAnalysis && prediction.analysis.valueHorses && prediction.analysis.overround && (
+      {prediction.analysis.marketAnalysis && prediction.analysis.valueHorses && prediction.analysis.overround ? (
         <div id="market" ref={setSectionRef('market')} className="scroll-mt-16">
         <ModelVsMarket
           marketAnalysis={prediction.analysis.marketAnalysis}
@@ -594,6 +602,16 @@ export default function PredictionDetailPage() {
             prediction.topPicks.map(p => [p.horseNumber, p.horseName])
           )}
         />
+        </div>
+      ) : race.status !== '結果確定' && (
+        <div id="market" ref={setSectionRef('market')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-16">
+          <h2 className="text-lg font-bold mb-2">モデル vs 市場オッズ</h2>
+          <p className="text-sm text-muted">
+            市場オッズがまだ取得されていません。オッズ取得後にモデル勝率との比較が表示されます。
+          </p>
+          <Link href={`/races/${race.id}`} className="text-accent hover:underline text-sm mt-2 inline-block">
+            出馬表ページでオッズを確認 &rarr;
+          </Link>
         </div>
       )}
 
