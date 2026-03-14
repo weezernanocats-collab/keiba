@@ -304,6 +304,7 @@ function UpcomingRaces() {
                                       <th className="py-1 pr-2">券種</th>
                                       <th className="py-1 px-2">買い目</th>
                                       <th className="py-1 px-2 text-right">オッズ</th>
+                                      <th className="py-1 px-2 text-right">予想ROI</th>
                                       <th className="py-1 px-2 text-right">期待値</th>
                                       <th className="py-1 px-2 text-right">的中率</th>
                                       <th className="py-1 px-2 text-right">Kelly</th>
@@ -315,7 +316,10 @@ function UpcomingRaces() {
                                       const hitRate = stat?.hitRate || 0; // システム実績的中率 (例: 30.0%)
                                       const odds = bet.odds || 0;
                                       // 期待値 = 的中率 × オッズ（100が損益分岐点）
+                                      // 期待値 = 的中率 × オッズ（100が損益分岐点）
                                       const evScore = odds > 0 && hitRate > 0 ? Math.round(odds * hitRate) : 0;
+                                      // 予想ROI = モデル推定勝率 × オッズ × 100
+                                      const predRoi = bet.expectedValue > 0 ? Math.round(bet.expectedValue * 100) : 0;
                                       const isMain = bet.reasoning.startsWith('\u3010\u4E3B\u529B\u3011');
                                       const isValue = bet.reasoning.startsWith('\u3010\u30D0\u30EA\u30E5\u30FC\u3011');
                                       return (
@@ -332,6 +336,13 @@ function UpcomingRaces() {
                                           <td className="py-1.5 px-2 font-mono font-bold">{bet.selections.join('-')}</td>
                                           <td className="py-1.5 px-2 text-right font-mono">
                                             {odds > 0 ? `${odds.toFixed(1)}倍` : '-'}
+                                          </td>
+                                          <td className="py-1.5 px-2 text-right">
+                                            {predRoi > 0 ? (
+                                              <span className={`font-bold ${predRoi >= 100 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                                                {predRoi}%
+                                              </span>
+                                            ) : '-'}
                                           </td>
                                           <td className="py-1.5 px-2 text-right">
                                             {evScore > 0 ? (

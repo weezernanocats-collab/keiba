@@ -763,19 +763,18 @@ export default function PredictionDetailPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-3">
-                      {hasActualResult ? (
-                        <span className={`text-sm font-bold ${
-                          roiPositive
-                            ? 'text-green-600 dark:text-green-400'
-                            : 'text-red-600 dark:text-red-400'
-                        }`}>
-                          ROI {roi}%
-                        </span>
-                      ) : betOdds > 0 ? (
+                      <span className={`text-sm font-bold ${
+                        roiPositive
+                          ? 'text-green-600 dark:text-green-400'
+                          : 'text-red-600 dark:text-red-400'
+                      }`}>
+                        {hasActualResult ? '' : '予想'}ROI {roi}%
+                      </span>
+                      {betOdds > 0 && (
                         <span className="text-sm text-muted">
                           {betOdds.toFixed(1)}倍
                         </span>
-                      ) : null}
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center justify-between mb-2">
