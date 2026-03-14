@@ -84,9 +84,48 @@ export async function GET(
       };
     });
 
+    // 推奨馬券のオッズをDBの最新値で補完（予想生成時にオッズ未取得の場合）
+    const liveOddsRows = await dbAll<{
+      bet_type: string; horse_number1: number;
+      odds: number; min_odds: number | null;
+    }>(
+      `SELECT bet_type, horse_number1, odds, min_odds
+       FROM odds WHERE race_id = ? AND bet_type IN ('単勝', '複勝')`,
+      [raceId],
+    );
+    const liveOddsMap = new Map<string, number>();
+    for (const o of liveOddsRows) {
+      liveOddsMap.set(`${o.bet_type}-${o.horse_number1}`, o.odds);
+    }
+    // race_entries のオッズも取得（単勝オッズのフォールバック）
+    const entryOddsMap = new Map<number, number>();
+    for (const entry of race.entries) {
+      if (entry.odds && entry.odds > 0) {
+        entryOddsMap.set(entry.horseNumber, entry.odds);
+      }
+    }
+
+    const augmentedBets = prediction.recommendedBets.map((bet) => {
+      if (bet.odds && bet.odds > 0) return bet;
+      const sel0 = bet.selections?.[0];
+      if (!sel0) return bet;
+
+      let liveOdds = 0;
+      if (bet.type === '単勝') {
+        liveOdds = liveOddsMap.get(`単勝-${sel0}`) || entryOddsMap.get(sel0) || 0;
+      } else if (bet.type === '複勝') {
+        liveOdds = liveOddsMap.get(`複勝-${sel0}`) || 0;
+      } else {
+        // 馬連・ワイド等は単勝オッズで近似値を表示
+        liveOdds = entryOddsMap.get(sel0) || liveOddsMap.get(`単勝-${sel0}`) || 0;
+      }
+      return liveOdds > 0 ? { ...bet, odds: liveOdds } : bet;
+    });
+
     const augmentedPrediction = {
       ...prediction,
       topPicks: augmentedPicks,
+      recommendedBets: augmentedBets,
     };
 
     // 結果確定済みの場合は答え合わせデータを追加
