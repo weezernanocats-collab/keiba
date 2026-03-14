@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useEffect, useState, useMemo } from 'react';
+import { Suspense, useEffect, useState, useMemo, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
@@ -23,6 +23,40 @@ interface RaceRow {
   status: string;
   entryCount: number;
   confidence: number | null;
+}
+
+interface PredBet {
+  type: string;
+  selections: number[];
+  reasoning: string;
+  expectedValue: number;
+  odds?: number;
+  kellyFraction?: number;
+  valueEdge?: number;
+  recommendedStake?: number;
+}
+
+interface PredPick {
+  rank: number;
+  horseNumber: number;
+  horseName: string;
+  score: number;
+  runningStyle?: string;
+}
+
+interface PredCache {
+  topPicks: PredPick[];
+  recommendedBets: PredBet[];
+  confidence: number;
+}
+
+interface BetTypeStat {
+  type: string;
+  total: number;
+  hitRate: number;
+  roi: number;
+  avgOdds: number;
+  hitCount: number;
 }
 
 const TABS = [
@@ -92,17 +126,28 @@ function PredictionsPageInner() {
   );
 }
 
+const rankLabels = ['\u25CE', '\u25CB', '\u25B2', '\u25B3', '\u00D7', '\u2606'];
+
 function UpcomingRaces() {
   const [races, setRaces] = useState<RaceRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [predCache, setPredCache] = useState<Map<string, PredCache>>(new Map());
+  const [loadingPred, setLoadingPred] = useState<string | null>(null);
+  const [betTypeStats, setBetTypeStats] = useState<BetTypeStat[]>([]);
   const { isRaceFavoriteInProfile, toggleRaceForProfile } = useFavorites();
 
   useEffect(() => {
     async function fetchRaces() {
       try {
-        const res = await fetch('/api/races?type=upcoming');
-        const data = await res.json();
-        setRaces(data.races || []);
+        const [racesRes, statsRes] = await Promise.all([
+          fetch('/api/races?type=upcoming'),
+          fetch('/api/accuracy-stats'),
+        ]);
+        const racesData = await racesRes.json();
+        setRaces(racesData.races || []);
+        const statsData = await statsRes.json();
+        setBetTypeStats(statsData.betTypeStats || []);
       } catch (err) {
         console.error('Error:', err);
       } finally {
@@ -111,6 +156,41 @@ function UpcomingRaces() {
     }
     fetchRaces();
   }, []);
+
+  const betTypeStatsMap = useMemo(
+    () => new Map(betTypeStats.map(s => [s.type, s])),
+    [betTypeStats],
+  );
+
+  const handleExpand = useCallback(async (raceId: string) => {
+    if (expandedId === raceId) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(raceId);
+    if (predCache.has(raceId)) return;
+
+    setLoadingPred(raceId);
+    try {
+      const res = await fetch(`/api/predictions/${raceId}`);
+      const data = await res.json();
+      if (data.prediction) {
+        setPredCache(prev => {
+          const next = new Map(prev);
+          next.set(raceId, {
+            topPicks: data.prediction.topPicks || [],
+            recommendedBets: data.prediction.recommendedBets || [],
+            confidence: data.prediction.confidence || 0,
+          });
+          return next;
+        });
+      }
+    } catch (err) {
+      console.error('予想取得エラー:', err);
+    } finally {
+      setLoadingPred(null);
+    }
+  }, [expandedId, predCache]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, RaceRow[]>();
@@ -136,91 +216,184 @@ function UpcomingRaces() {
   return (
     <div className="space-y-6">
       <p className="text-muted text-sm">
-        過去の成績データを多角的に分析し、各レースの予想を提供します。
+        過去の成績データを多角的に分析し、各レースの予想を提供します。タップで推奨馬券を表示します。
       </p>
       {[...grouped.entries()].map(([date, dateRaces]) => (
         <div key={date}>
           <h2 className="text-lg font-bold mb-2 border-b border-card-border pb-1">{date}</h2>
-          {/* デスクトップ: テーブル */}
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-muted border-b border-card-border">
-                  <th className="py-2 px-2 font-medium">R</th>
-                  <th className="py-2 px-2 font-medium">レース名</th>
-                  <th className="py-2 px-2 font-medium">場所</th>
-                  <th className="py-2 px-2 font-medium">条件</th>
-                  <th className="py-2 px-2 font-medium text-center">頭数</th>
-                  <th className="py-2 px-2 font-medium text-center">信頼度</th>
-                  <th className="py-2 px-1 font-medium w-10"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {dateRaces.map(race => (
-                  <tr key={race.id} className="border-b border-card-border/50 hover:bg-card-bg/80 transition-colors">
-                    <td className="py-2 px-2 text-muted">{race.raceNumber}</td>
-                    <td className="py-2 px-2">
-                      <Link
-                        href={`/predictions/${race.id}`}
-                        className="font-medium hover:text-accent transition-colors inline-flex items-center gap-2"
-                      >
-                        {race.name}
-                        <GradeBadge grade={race.grade} size="sm" />
-                      </Link>
-                    </td>
-                    <td className="py-2 px-2 text-muted">{race.racecourseName}</td>
-                    <td className="py-2 px-2 text-muted">
-                      {race.trackType}{race.distance}m
-                      {race.trackCondition ? ` / ${race.trackCondition}` : ''}
-                    </td>
-                    <td className="py-2 px-2 text-center">{race.entryCount}</td>
-                    <td className="py-2 px-2 text-center">
-                      <ConfidenceBadge value={race.confidence} />
-                    </td>
-                    <td className="py-2 px-1 text-center">
-                      <FavoriteProfilePopover
-                        checkFavorite={(p) => isRaceFavoriteInProfile(race.id, p)}
-                        onToggle={(p) => toggleRaceForProfile(race.id, p)}
-                        size="sm"
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {/* モバイル: コンパクトリスト */}
-          <div className="md:hidden space-y-1">
-            {dateRaces.map(race => (
-              <div
-                key={race.id}
-                className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-card-bg/80 transition-colors border-b border-card-border/30"
-              >
-                <Link
-                  href={`/predictions/${race.id}`}
-                  className="flex items-center gap-2 min-w-0 flex-1"
+          <div className="space-y-2">
+            {dateRaces.map(race => {
+              const isExpanded = expandedId === race.id;
+              const pred = predCache.get(race.id);
+              const isLoadingThis = loadingPred === race.id;
+
+              return (
+                <div
+                  key={race.id}
+                  className="bg-card-bg border border-card-border rounded-xl overflow-hidden"
                 >
-                  <span className="text-xs text-muted w-6 shrink-0">{race.raceNumber}R</span>
-                  <div className="min-w-0">
-                    <div className="font-medium text-sm truncate flex items-center gap-1">
-                      {race.name}
-                      <GradeBadge grade={race.grade} size="sm" />
+                  {/* ヘッダー部分（クリックで展開） */}
+                  <button
+                    onClick={() => handleExpand(race.id)}
+                    className="w-full text-left p-3 md:p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-xs text-muted shrink-0">{race.raceNumber}R</span>
+                        <GradeBadge grade={race.grade} size="sm" />
+                        <span className="font-medium truncate">{race.name}</span>
+                        <span className="text-xs text-muted shrink-0 hidden sm:inline">
+                          {race.racecourseName} {race.trackType}{race.distance}m
+                          {race.trackCondition ? ` / ${race.trackCondition}` : ''}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0 ml-2">
+                        <span className="text-xs text-muted hidden sm:inline">{race.entryCount}頭</span>
+                        <ConfidenceBadge value={race.confidence} />
+                        <FavoriteProfilePopover
+                          checkFavorite={(p) => isRaceFavoriteInProfile(race.id, p)}
+                          onToggle={(p) => toggleRaceForProfile(race.id, p)}
+                          size="sm"
+                        />
+                        <span className="text-muted text-sm">{isExpanded ? '\u25B2' : '\u25BC'}</span>
+                      </div>
                     </div>
-                    <div className="text-xs text-muted">
+                    {/* モバイル補助行 */}
+                    <div className="sm:hidden text-xs text-muted mt-1">
                       {race.racecourseName} {race.trackType}{race.distance}m {race.entryCount}頭
                     </div>
-                  </div>
-                </Link>
-                <div className="flex items-center gap-2 shrink-0">
-                  <ConfidenceBadge value={race.confidence} />
-                  <FavoriteProfilePopover
-                    checkFavorite={(p) => isRaceFavoriteInProfile(race.id, p)}
-                    onToggle={(p) => toggleRaceForProfile(race.id, p)}
-                    size="sm"
-                  />
+                  </button>
+
+                  {/* 展開時の詳細 */}
+                  {isExpanded && (
+                    <div className="border-t border-card-border p-4 space-y-4">
+                      {isLoadingThis ? (
+                        <div className="text-center py-4 text-muted text-sm">読み込み中...</div>
+                      ) : pred ? (
+                        <>
+                          {/* 予想印サマリー */}
+                          {pred.topPicks.length > 0 && (
+                            <div>
+                              <h3 className="text-sm font-bold text-muted mb-2">AI予想印</h3>
+                              <div className="flex flex-wrap gap-2">
+                                {pred.topPicks.slice(0, 6).map((pick, idx) => (
+                                  <div
+                                    key={pick.horseNumber}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-gray-50 dark:bg-gray-800/30 border-gray-200 dark:border-gray-700"
+                                  >
+                                    <span className="font-bold text-sm">{rankLabels[idx] || '\u2606'}</span>
+                                    <span className="font-mono text-xs">{pick.horseNumber}</span>
+                                    <span className="text-sm truncate max-w-[8rem]">{pick.horseName}</span>
+                                    {pick.runningStyle && (
+                                      <span className="text-xs text-muted">({pick.runningStyle})</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 推奨馬券 */}
+                          {pred.recommendedBets.length > 0 && (
+                            <div>
+                              <h3 className="text-sm font-bold text-muted mb-2">推奨馬券</h3>
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                  <thead>
+                                    <tr className="border-b dark:border-gray-700 text-left text-xs text-muted">
+                                      <th className="py-1 pr-2">券種</th>
+                                      <th className="py-1 px-2">買い目</th>
+                                      <th className="py-1 px-2 text-right">オッズ</th>
+                                      <th className="py-1 px-2 text-right">期待値</th>
+                                      <th className="py-1 px-2 text-right">的中率</th>
+                                      <th className="py-1 px-2 text-right">Kelly</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {pred.recommendedBets.map((bet, idx) => {
+                                      const stat = betTypeStatsMap.get(bet.type);
+                                      const hitRate = stat?.hitRate || 0;
+                                      const odds = bet.odds || 0;
+                                      const evScore = odds > 0 && hitRate > 0 ? odds * hitRate : 0;
+                                      const isMain = bet.reasoning.startsWith('\u3010\u4E3B\u529B\u3011');
+                                      const isValue = bet.reasoning.startsWith('\u3010\u30D0\u30EA\u30E5\u30FC\u3011');
+                                      return (
+                                        <tr key={idx} className="border-b dark:border-gray-800">
+                                          <td className="py-1.5 pr-2">
+                                            <span className="font-medium">{bet.type}</span>
+                                            {isMain && (
+                                              <span className="ml-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-1 rounded">主力</span>
+                                            )}
+                                            {isValue && (
+                                              <span className="ml-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1 rounded">妙味</span>
+                                            )}
+                                          </td>
+                                          <td className="py-1.5 px-2 font-mono font-bold">{bet.selections.join('-')}</td>
+                                          <td className="py-1.5 px-2 text-right font-mono">
+                                            {odds > 0 ? `${odds.toFixed(1)}倍` : '-'}
+                                          </td>
+                                          <td className="py-1.5 px-2 text-right">
+                                            {evScore > 0 ? (
+                                              <span className={`font-bold ${evScore >= 100 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                                                {Math.round(evScore)}
+                                              </span>
+                                            ) : bet.expectedValue > 0 ? (
+                                              <span className="text-muted">{bet.expectedValue.toFixed(2)}</span>
+                                            ) : '-'}
+                                          </td>
+                                          <td className="py-1.5 px-2 text-right">
+                                            {hitRate > 0 ? (
+                                              <span className="text-muted">
+                                                {hitRate.toFixed(1)}%
+                                                <span className="text-xs ml-0.5">({stat?.total || 0})</span>
+                                              </span>
+                                            ) : '-'}
+                                          </td>
+                                          <td className="py-1.5 px-2 text-right">
+                                            {bet.kellyFraction != null && bet.kellyFraction > 0 ? (
+                                              <div>
+                                                <span className="font-mono text-purple-600 dark:text-purple-400">
+                                                  {(bet.kellyFraction * 100).toFixed(1)}%
+                                                </span>
+                                                {bet.valueEdge != null && bet.valueEdge > 0 && (
+                                                  <div className="text-xs text-green-600 dark:text-green-400">
+                                                    +{(bet.valueEdge * 100).toFixed(0)}%
+                                                  </div>
+                                                )}
+                                              </div>
+                                            ) : '-'}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
+
+                          {pred.recommendedBets.length === 0 && (
+                            <div className="text-center py-2 text-muted text-sm">推奨馬券なし</div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="text-center py-4 text-muted text-sm">予想データがありません</div>
+                      )}
+
+                      {/* 詳細リンク */}
+                      <div className="text-right">
+                        <Link
+                          href={`/predictions/${race.id}`}
+                          className="text-sm text-accent hover:underline"
+                        >
+                          詳細を見る &rarr;
+                        </Link>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       ))}
