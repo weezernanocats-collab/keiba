@@ -226,16 +226,15 @@ export default function PredictionDetailPage() {
     );
   }
 
-  // EV > 100%（期待値プラス）の馬券をピックアップ
+  // 期待値 > 100（的中率×オッズが損益分岐を超える）の馬券をピックアップ
   const betTypeStatsMap = new Map(betTypeStats.map(s => [s.type, s]));
   const valueBets = prediction.recommendedBets
     .map(bet => {
       const stat = betTypeStatsMap.get(bet.type);
       const odds = bet.odds || 0;
       const hitRate = stat?.hitRate || 0;
-      const ev = bet.expectedValue || 0;
-      const evPct = Math.round(ev * 100); // 1.2 → 120%
-      return { bet, stat, odds, hitRate, evScore: evPct };
+      const evScore = odds > 0 && hitRate > 0 ? Math.round(odds * hitRate) : 0;
+      return { bet, stat, odds, hitRate, evScore };
     })
     .filter(v => v.evScore > 100);
 
@@ -726,7 +725,8 @@ export default function PredictionDetailPage() {
               const betStat = betTypeStatsMap.get(bet.type);
               const betHitRate = betStat?.hitRate || 0;
               const betOdds = bet.odds || (hasActualResult && betResult.odds > 0 ? betResult.odds : 0);
-              const evPct = Math.round((bet.expectedValue || 0) * 100); // 1.2 → 120%
+              // 期待値 = 的中率(システム実績) × オッズ（100が損益分岐点）
+              const evScore = betOdds > 0 && betHitRate > 0 ? Math.round(betOdds * betHitRate) : 0;
               return (
                 <div key={idx} className={`border rounded-xl p-4 ${
                   isMain
@@ -763,17 +763,19 @@ export default function PredictionDetailPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className={`text-sm font-bold ${
-                        roiPositive
-                          ? 'text-green-600 dark:text-green-400'
-                          : 'text-red-600 dark:text-red-400'
-                      }`}>
-                        ROI {roi}%
-                      </span>
-                      <span className="text-sm text-muted">
-                        {hasActualResult ? '' : 'EV: '}{bet.expectedValue.toFixed(2)}
-                        {(bet.odds || (hasActualResult && betResult.odds > 0)) ? ` (${(hasActualResult ? betResult.odds : bet.odds!).toFixed(1)}倍)` : ''}
-                      </span>
+                      {hasActualResult ? (
+                        <span className={`text-sm font-bold ${
+                          roiPositive
+                            ? 'text-green-600 dark:text-green-400'
+                            : 'text-red-600 dark:text-red-400'
+                        }`}>
+                          ROI {roi}%
+                        </span>
+                      ) : betOdds > 0 ? (
+                        <span className="text-sm text-muted">
+                          {betOdds.toFixed(1)}倍
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex items-center justify-between mb-2">
@@ -787,13 +789,13 @@ export default function PredictionDetailPage() {
                           <span className="text-xs ml-0.5">({betStat?.total || 0}件)</span>
                         </span>
                       )}
-                      {evPct > 0 && (
+                      {evScore > 0 && (
                         <span className={`text-sm font-bold ${
-                          evPct >= 100
+                          evScore >= 100
                             ? 'text-green-600 dark:text-green-400'
                             : 'text-red-600 dark:text-red-400'
                         }`}>
-                          期待値 {evPct}%
+                          期待値 {evScore}
                         </span>
                       )}
                     </div>
