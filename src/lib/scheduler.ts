@@ -551,6 +551,87 @@ async function executeAfternoonPredictions(date: string): Promise<void> {
   }
 }
 
+/**
+ * 予想未生成レースの補完（不足分のみ、既存予想は削除しない）
+ * 朝の bulk_chunked パイプラインが途中で切れた場合の安全網
+ */
+export async function executeMissingPredictions(date: string): Promise<{ generated: number; total: number }> {
+  const missing = await dbAll<{
+    id: string; name: string; track_type: string; distance: number;
+    track_condition: string; racecourse_name: string; grade: string; weather: string;
+  }>(
+    `SELECT r.id, r.name, r.track_type, r.distance, r.track_condition,
+            r.racecourse_name, r.grade, r.weather
+     FROM races r
+     LEFT JOIN predictions p ON r.id = p.race_id
+     WHERE p.id IS NULL AND r.date = ?
+       AND r.status IN ('出走確定', '結果確定')
+       AND (SELECT COUNT(*) FROM race_entries re WHERE re.race_id = r.id) >= 2
+     ORDER BY r.id`,
+    [date]
+  );
+
+  if (missing.length === 0) {
+    return { generated: 0, total: 0 };
+  }
+
+  await ensureCalibrationLoaded();
+
+  let generated = 0;
+  for (const race of missing) {
+    try {
+      const raceData = await getRaceById(race.id);
+      if (!raceData?.entries?.length || raceData.entries.length < 2) continue;
+
+      const horseInputs = await Promise.all(
+        (raceData.entries as import('@/types').RaceEntry[]).map(async (re) => {
+          const [pastPerfs, horseData, jockeyStats, trainerStats] = await Promise.all([
+            getHorsePastPerformances(re.horseId, date, 100),
+            getHorseById(re.horseId) as Promise<{ father_name?: string } | null>,
+            getJockeyStats(re.jockeyId, date),
+            getTrainerStats(re.trainerName, date),
+          ]);
+          const fatherName = horseData?.father_name || '';
+          const [sireTrackWR, jockeyDistWR, jockeyCourseWR] = await Promise.all([
+            getSireTrackWinRate(fatherName, race.track_type, date),
+            getJockeyDistanceWinRate(re.jockeyId, race.distance, date),
+            getJockeyCourseWinRate(re.jockeyId, race.racecourse_name, date),
+          ]);
+          const distCat = race.distance <= 1400 ? 'sprint' : race.distance <= 1800 ? 'mile' : 'long';
+          const isHeavy = race.track_condition === '重' || race.track_condition === '不良';
+          const isGrade = ['G3', 'G2', 'G1'].includes(race.grade || '');
+          return {
+            entry: re, pastPerformances: pastPerfs,
+            jockeyWinRate: jockeyStats.winRate, jockeyPlaceRate: jockeyStats.placeRate,
+            fatherName,
+            trainerWinRate: trainerStats.winRate, trainerPlaceRate: trainerStats.placeRate,
+            sireTrackWinRate: sireTrackWR,
+            jockeyDistanceWinRate: jockeyDistWR,
+            jockeyCourseWinRate: jockeyCourseWR,
+            trainerDistCatWinRate: distCat === 'sprint' ? trainerStats.sprintWinRate
+              : distCat === 'mile' ? trainerStats.mileWinRate : trainerStats.longWinRate,
+            trainerCondWinRate: isHeavy ? trainerStats.heavyWinRate : trainerStats.winRate,
+            trainerGradeWinRate: isGrade ? trainerStats.gradeWinRate : trainerStats.winRate,
+          };
+        })
+      );
+
+      const prediction = await generatePrediction(
+        race.id, race.name, date,
+        race.track_type as import('@/types').TrackType, race.distance,
+        race.track_condition as import('@/types').TrackCondition | undefined,
+        race.racecourse_name, race.grade, horseInputs,
+      );
+      await savePrediction(prediction);
+      generated++;
+    } catch (error) {
+      addLog('予想補完失敗', `${race.id}: ${errMsg(error)}`, false);
+    }
+  }
+
+  return { generated, total: missing.length };
+}
+
 async function executeOddsFetch(date: string): Promise<void> {
   if (await hasSchedulerRunToday('odds', date)) {
     addLog('オッズ取得スキップ', `${date} は既に実行済み`, true);

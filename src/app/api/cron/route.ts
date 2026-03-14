@@ -5,11 +5,12 @@
  * JST 時刻に基づいて朝ジョブ（bulk_chunked トリガー）または結果取得を実行。
  *
  * Hobby プラン対応:
- *   - 朝 (06:00 JST): /api/sync に bulk_chunked を POST してチェーン開始（軽量）
- *   - 夕方 (17:00 JST): 結果スクレイプ + 予想照合（60秒以内で完了）
+ *   - 朝 (09:00 JST): /api/sync に bulk_chunked を POST してチェーン開始
+ *   - 昼 (12:00 JST): 予想未生成レースの補完（朝のチェーンが途切れた場合の安全網）
+ *   - 夕方 (17:00 JST): 結果スクレイプ + 予想照合 + 予想補完
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { runCronJob } from '@/lib/scheduler';
+import { runCronJob, executeMissingPredictions } from '@/lib/scheduler';
 
 // Hobby: 60秒、Pro: 300秒 — Vercel が自動的にプランに応じて制限
 export const maxDuration = 60;
@@ -69,8 +70,35 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // 昼 (11:00-13:00 JST) → 予想未生成レースの補完
+    if (jstHour >= 11 && jstHour <= 13) {
+      const jstTime = new Date(now.getTime() + jstOffset * 60_000);
+      const todayStr = jstTime.toISOString().split('T')[0];
+
+      const { generated, total } = await executeMissingPredictions(todayStr);
+
+      return NextResponse.json({
+        ok: true,
+        timestamp: now.toISOString(),
+        executed: [total > 0
+          ? `midday: 予想補完 ${generated}/${total}件生成`
+          : 'midday: 全レース予想済み'],
+        skipped: [],
+      });
+    }
+
     // 夕方 (17:00 JST) 以降、または他の時間帯 → 従来のスケジューラーロジック
     const result = await runCronJob();
+
+    // 夕方cronでも予想未生成レースがあれば補完
+    if (jstHour >= 16 && jstHour <= 18) {
+      const jstTime = new Date(now.getTime() + jstOffset * 60_000);
+      const todayStr = jstTime.toISOString().split('T')[0];
+      const { generated, total } = await executeMissingPredictions(todayStr);
+      if (generated > 0) {
+        result.executed.push(`evening: 予想補完 ${generated}/${total}件生成`);
+      }
+    }
 
     return NextResponse.json({
       ok: true,
