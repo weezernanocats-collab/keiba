@@ -16,30 +16,25 @@ const VENUE_MULTIPLIERS: Record<string, Record<string, number>> = {
     runningStyle: 1.2,
     speedRating: 1.1,
     postPositionBias: 0.7,    // 外枠の不利が小さい
-    historicalPostBias: 0.7,
     distanceAptitude: 1.1,
   },
   '中山': {
     // 小回り、内枠有利、先行有利
     postPositionBias: 1.5,
-    historicalPostBias: 1.4,
     runningStyle: 1.3,        // 先行脚質が重要
     lastThreeFurlongs: 0.8,   // 直線短い
-    courseAptitude: 1.3,       // コース経験が大きい
     consistency: 1.1,
   },
   '阪神': {
     // 外回り/内回りで特性が異なるが平均的に適用
     speedRating: 1.2,
     lastThreeFurlongs: 1.2,
-    courseAptitude: 1.1,
     sireAptitude: 1.1,
     trackConditionAptitude: 1.1,
   },
   '京都': {
     // 3コーナーの坂、淀の坂が特徴
     runningStyle: 1.2,
-    courseAptitude: 1.2,
     consistency: 1.1,
     speedRating: 1.1,
     sireAptitude: 1.1,
@@ -55,10 +50,8 @@ const VENUE_MULTIPLIERS: Record<string, Record<string, number>> = {
     // 小回り平坦、前残り傾向
     runningStyle: 1.4,        // 逃げ先行が非常に有利
     postPositionBias: 1.3,    // 内枠有利
-    historicalPostBias: 1.3,
     lastThreeFurlongs: 0.7,   // 直線短い
     speedRating: 1.2,
-    courseAptitude: 1.2,
   },
   '新潟': {
     // 直線1000m、外回りは直線長い
@@ -80,7 +73,6 @@ const VENUE_MULTIPLIERS: Record<string, Record<string, number>> = {
     trackConditionAptitude: 1.3,
     sireAptitude: 1.2,
     runningStyle: 1.3,
-    courseAptitude: 1.2,
     postPositionBias: 1.2,
     speedRating: 0.9,
     weatherAptitude: 1.2,
@@ -88,7 +80,6 @@ const VENUE_MULTIPLIERS: Record<string, Record<string, number>> = {
   '福島': {
     // 小回り平坦、紛れが多い
     postPositionBias: 1.3,
-    historicalPostBias: 1.2,
     runningStyle: 1.2,
     consistency: 1.1,
     lastThreeFurlongs: 0.8,

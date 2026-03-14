@@ -17,15 +17,15 @@ for (const line of env.split('\n')) {
 
 import { dbAll, dbRun, closeDatabase } from '@/lib/database';
 
-// デフォルト重み（prediction-engine.ts と同一）
+// デフォルト重み（prediction-engine.ts v7.1 と同一）
 const WEIGHTS: Record<string, number> = {
-  recentForm: 0.15, courseAptitude: 0.06, distanceAptitude: 0.10,
-  trackConditionAptitude: 0.04, jockeyAbility: 0.07, speedRating: 0.10,
-  classPerformance: 0.04, runningStyle: 0.05, postPositionBias: 0.03,
-  rotation: 0.04, lastThreeFurlongs: 0.07, consistency: 0.04,
-  sireAptitude: 0.05, trainerAbility: 0.03, jockeyTrainerCombo: 0.02,
-  historicalPostBias: 0.03, seasonalPattern: 0.02, handicapAdvantage: 0.01,
-  marketOdds: 0.03, marginCompetitiveness: 0.01, weatherAptitude: 0.01,
+  recentForm: 0.17, distanceAptitude: 0.11,
+  trackConditionAptitude: 0.05, jockeyAbility: 0.08, speedRating: 0.11,
+  runningStyle: 0.06, postPositionBias: 0.05,
+  rotation: 0.04, lastThreeFurlongs: 0.08, consistency: 0.05,
+  sireAptitude: 0.06, trainerAbility: 0.05,
+  seasonalPattern: 0.02, handicapAdvantage: 0.01,
+  marketOdds: 0.03, marginCompetitiveness: 0.01, weatherAptitude: 0.02,
 };
 
 function computeTotalScore(factorScores: Record<string, number>): number {

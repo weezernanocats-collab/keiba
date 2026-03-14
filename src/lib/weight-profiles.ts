@@ -37,7 +37,6 @@ const CATEGORY_MULTIPLIERS: Record<RaceCategory, Record<string, number>> = {
   turf_sprint: {
     recentForm: 1.1,
     postPositionBias: 1.5,
-    historicalPostBias: 1.4,
     speedRating: 1.3,
     lastThreeFurlongs: 0.7,
     sireAptitude: 0.8,
@@ -55,7 +54,6 @@ const CATEGORY_MULTIPLIERS: Record<RaceCategory, Record<string, number>> = {
     runningStyle: 1.3,
     consistency: 1.2,
     postPositionBias: 0.6,
-    historicalPostBias: 0.7,
     speedRating: 0.9,
     distanceAptitude: 1.2,
     marginCompetitiveness: 0.9,
@@ -63,9 +61,7 @@ const CATEGORY_MULTIPLIERS: Record<RaceCategory, Record<string, number>> = {
   },
   dirt_sprint: {
     speedRating: 1.4,
-    classPerformance: 1.2,
     postPositionBias: 1.3,
-    historicalPostBias: 1.3,
     sireAptitude: 1.1,
     lastThreeFurlongs: 0.6,
     trackConditionAptitude: 1.2,
@@ -74,12 +70,10 @@ const CATEGORY_MULTIPLIERS: Record<RaceCategory, Record<string, number>> = {
   },
   dirt_long: {
     speedRating: 1.2,
-    classPerformance: 1.2,
     recentForm: 1.1,
     trackConditionAptitude: 1.3,
     distanceAptitude: 1.1,
     postPositionBias: 0.8,
-    historicalPostBias: 0.8,
     marginCompetitiveness: 1.0,
     weatherAptitude: 1.3,  // ダート長距離は天候の影響が最大
   },

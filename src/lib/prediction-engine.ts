@@ -1,7 +1,7 @@
 /**
  * AI予想エンジン v5.2
  *
- * 過去の成績データを19の観点から多角的に分析し、レースの予想を生成する。
+ * 過去の成績データを16の観点から多角的に分析し、レースの予想を生成する。
  * v4: ベイズ推定フォールバック + 動的ウェイト調整 + データ充実度ベース信頼度
  * v4.2: 調教師能力ファクター追加
  * v5.0: 5つの精度向上改善
@@ -11,29 +11,27 @@
  *   - グレード補正 + トレンド検出（直近成績の質を反映）
  *   - カテゴリ別ウェイトプロファイル（芝短/マイル/長/ダ短/ダ長）
  *
- * スコアリング要素と重み:
+ * スコアリング要素と重み (v7.1: SHAP分析で重要度0の3ファクター除去):
  *   === 個体分析 ===
  *   1.  直近成績        (17%) - 直近5走+グレード補正+トレンド検出
- *   2.  コース適性      (6%)  - 同競馬場での過去成績
- *   3.  距離適性        (11%) - 同距離帯での過去成績
- *   4.  馬場状態適性    (4%)  - 同馬場状態での成績
- *   5.  騎手能力        (7%)  - 騎手の勝率+直近30日フォーム
- *   6.  スピード指数    (10%) - 動的基準タイムベースの速度評価
- *   7.  クラス実績      (4%)  - 重賞など上位クラスでの成績
- *   8.  脚質適性        (5%)  - 展開との相性（逃げ/先行/差し/追込）
- *   9.  枠順分析        (3%)  - 実データベースの枠別勝率
- *   10. ローテーション  (4%)  - 前走からの間隔と叩き良化パターン
- *   11. 上がり3F        (7%)  - 末脚の切れ味評価
- *   12. 安定性          (4%)  - 着順のバラつきの少なさ
+ *   2.  距離適性        (11%) - 同距離帯での過去成績
+ *   3.  馬場状態適性    (5%)  - 同馬場状態での成績
+ *   4.  騎手能力        (8%)  - 騎手の勝率+直近30日フォーム
+ *   5.  スピード指数    (11%) - 動的基準タイムベースの速度評価
+ *   6.  脚質適性        (6%)  - 展開との相性（逃げ/先行/差し/追込）
+ *   7.  枠順分析        (5%)  - 実データベースの枠別勝率
+ *   8.  ローテーション  (4%)  - 前走からの間隔と叩き良化パターン
+ *   9.  上がり3F        (8%)  - 末脚の切れ味評価
+ *   10. 安定性          (5%)  - 着順のバラつきの少なさ
  *
  *   === 統計ベース分析 ===
- *   13. 血統適性        (5%)  - 種牡馬産駒の統計的なコース/距離/馬場適性
- *   14. 調教師能力      (4%)  - 調教師の勝率・トラック別成績・直近成績
- *   15. 騎手×調教師     (2%)  - コンビの過去成績統計
- *   16. 統計的枠順バイアス (3%) - 過去データから算出した枠別勝率
- *   17. 季節パターン    (2%)  - 馬ごとの季節別成績傾向
- *   18. 斤量アドバンテージ (2%) - 平均斤量との差分
- *   19. 市場オッズ      (3%)  - 単勝オッズの逆数正規化（低ウェイト）
+ *   11. 血統適性        (6%)  - 種牡馬産駒の統計的なコース/距離/馬場適性
+ *   12. 調教師能力      (5%)  - 調教師の勝率・トラック別成績・直近成績
+ *   13. 季節パターン    (2%)  - 馬ごとの季節別成績傾向
+ *   14. 斤量アドバンテージ (1%) - 平均斤量との差分
+ *   15. 市場オッズ      (3%)  - 単勝オッズの逆数正規化（低ウェイト）
+ *   16. 着差競争力      (1%)  - 僅差好走の頻度
+ *   17. 天候適性        (2%)  - 天候条件での成績
  */
 
 import type {
@@ -45,7 +43,6 @@ import type {
 import {
   buildRaceContext,
   calcSireAptitudeScore,
-  calcJockeyTrainerScore,
   calcTrainerAbilityScore,
   calcSeasonalScore,
   calcSecondStartScore,
@@ -92,32 +89,29 @@ import {
   findValueHorses,
 } from './market-blend';
 
-// デフォルト重み設定 (v5.2: v5.1ベース + 着差/天候を最小ウェイトで追加, 合計1.00)
-// 新ファクターの真価は未来レースの自動校正で測定する
+// デフォルト重み設定 (v7.1: SHAP重要度0の3ファクター除去 + 比例再配分, 合計1.00)
+// 除去: courseAptitude(0.06), classPerformance(0.04), jockeyTrainerCombo(0.02)
 const DEFAULT_WEIGHTS: Record<string, number> = {
   // 個体分析
-  recentForm: 0.15,
-  courseAptitude: 0.06,
-  distanceAptitude: 0.10,
-  trackConditionAptitude: 0.04,
-  jockeyAbility: 0.07,
-  speedRating: 0.10,
-  classPerformance: 0.04,
-  runningStyle: 0.05,
-  postPositionBias: 0.04,  // v6.0: historicalPostBias統合（0.03+0.03→0.04+再配分）
+  recentForm: 0.17,
+  distanceAptitude: 0.11,
+  trackConditionAptitude: 0.05,
+  jockeyAbility: 0.08,
+  speedRating: 0.11,
+  runningStyle: 0.06,
+  postPositionBias: 0.05,
   rotation: 0.04,
-  lastThreeFurlongs: 0.07,
-  consistency: 0.04,
+  lastThreeFurlongs: 0.08,
+  consistency: 0.05,
   // 統計ベース分析
-  sireAptitude: 0.05,
-  trainerAbility: 0.04,  // v6.0: +0.01（historicalPostBiasから再配分）
-  jockeyTrainerCombo: 0.02,
+  sireAptitude: 0.06,
+  trainerAbility: 0.05,
   seasonalPattern: 0.02,
   handicapAdvantage: 0.01,
   // 市場シグナル
   marketOdds: 0.03,
   marginCompetitiveness: 0.01,
-  weatherAptitude: 0.02,  // v6.0: +0.01（historicalPostBiasから再配分）
+  weatherAptitude: 0.02,
 };
 
 // WEIGHTS はキャリブレーション結果で上書き可能
@@ -174,12 +168,10 @@ interface DataReliability {
  */
 const POPULATION_PRIORS: Record<string, number> = {
   recentForm: 45,          // 平均的な馬は若干下位寄り
-  courseAptitude: 48,       // 未経験コースはやや不利
   distanceAptitude: 45,    // 距離未経験は不利寄り
   trackConditionAptitude: 48,
   jockeyAbility: 40,       // 騎手データなし → 平均以下
   speedRating: 45,         // タイムなし → やや不利
-  classPerformance: 42,    // 重賞未経験は不利
   runningStyle: 50,        // 脚質は中立
   postPositionBias: 50,    // 枠順は中立
   rotation: 50,            // ローテは中立
@@ -187,7 +179,6 @@ const POPULATION_PRIORS: Record<string, number> = {
   consistency: 45,         // 走数少 → 安定感不明は不利寄り
   sireAptitude: 50,        // 血統は中立prior
   trainerAbility: 45,      // 調教師不明は平均以下
-  jockeyTrainerCombo: 50,  // コンボは中立prior
   seasonalPattern: 50,     // 季節は中立
   handicapAdvantage: 50,   // 斤量は中立prior
   marketOdds: 50,          // オッズなし → 中立
@@ -203,12 +194,10 @@ function calcFactorReliability(factor: string, dataPoints: number): number {
   // 各ファクターで「十分」とみなすデータ点数
   const requiredPoints: Record<string, number> = {
     recentForm: 5,
-    courseAptitude: 3,
     distanceAptitude: 3,
     trackConditionAptitude: 2,
     jockeyAbility: 1,       // 騎手率は常に1 or 0
     speedRating: 3,
-    classPerformance: 2,
     runningStyle: 5,
     postPositionBias: 1,    // 常に利用可能
     rotation: 1,            // 前走があれば利用可能
@@ -216,7 +205,6 @@ function calcFactorReliability(factor: string, dataPoints: number): number {
     consistency: 5,
     sireAptitude: 10,
     trainerAbility: 20,
-    jockeyTrainerCombo: 5,
     seasonalPattern: 6,
     marketOdds: 1,
     marginCompetitiveness: 5,
@@ -649,12 +637,7 @@ function scoreHorse(
   else if (scores.recentForm >= 60) reasons.push('直近の調子は悪くない');
   else if (scores.recentForm <= 30) reasons.push('直近成績が低調');
 
-  // 2. コース適性 (0-100)
-  scores.courseAptitude = calcCourseAptitude(pp, racecourseName);
-  if (scores.courseAptitude >= 75) reasons.push(`${racecourseName}コースで好成績`);
-  else if (scores.courseAptitude <= 35) reasons.push(`${racecourseName}コースは未経験or苦手`);
-
-  // 3. 距離適性 (0-100)
+  // 2. 距離適性 (0-100)
   scores.distanceAptitude = calcDistanceAptitude(pp, distance);
   if (scores.distanceAptitude >= 75) reasons.push(`${distance}m前後がベスト距離`);
   else if (scores.distanceAptitude <= 35) reasons.push('距離適性に不安');
@@ -675,11 +658,7 @@ function scoreHorse(
   scores.speedRating = calcSpeedRatingV5(pp, trackType, distance, trackCondition, ctx.dynamicStdTime);
   if (scores.speedRating >= 75) reasons.push('高水準のスピード指数を記録');
 
-  // 7. クラス実績 (0-100)
-  scores.classPerformance = calcClassPerformance(pp, grade);
-  if (scores.classPerformance >= 75) reasons.push('重賞レベルで好走実績あり');
-
-  // 8. 脚質適性 (0-100)
+  // 6. 脚質適性 (0-100)
   scores.runningStyle = calcRunningStyleBase(runStyle, distance);
   if (runStyle === '逃げ' && distance <= 1400) reasons.push('逃げ馬で短距離向き');
   if (runStyle === '差し' && distance >= 1800) reasons.push('差し脚質で中長距離向き');
@@ -728,17 +707,7 @@ function scoreHorse(
     }
   }
 
-  // 15. 騎手×調教師コンボ (0-100)
-  const comboKey = `${entry.jockeyId}__${entry.trainerName}`;
-  const combo = ctx.jockeyTrainerMap.get(comboKey);
-  scores.jockeyTrainerCombo = calcJockeyTrainerScore(combo);
-  if (combo && combo.totalRaces >= 5 && scores.jockeyTrainerCombo >= 70) {
-    reasons.push(`${entry.jockeyName}×${entry.trainerName}コンビ好相性（勝率${Math.round(combo.winRate * 100)}%）`);
-  }
-
-  // 16. (統合済み: historicalPostBias → postPositionBias に統合)
-
-  // 17. 季節パターン (0-100)
+  // 13. 季節パターン (0-100)
   const seasonal = ctx.seasonalMap.get(entry.horseId);
   scores.seasonalPattern = calcSeasonalScore(seasonal, month);
   if (seasonal && scores.seasonalPattern >= 70) {
@@ -812,26 +781,20 @@ function scoreHorse(
 
   // 各ファクターのデータ充実度を計算
   const reliabilities: DataReliability[] = [];
-  const countCourse = pp.filter(p => p.racecourseName === racecourseName).length;
   const countDistWide = pp.filter(p => Math.abs(p.distance - distance) <= 400).length;
   const countTrackCond = pp.filter(p => p.trackType === trackType).length;
   const countSpeedRelevant = pp.filter(p => p.trackType === trackType && Math.abs(p.distance - distance) <= 200 && p.time).length;
-  const countGrade = pp.filter(p => p.raceName.includes('G1') || p.raceName.includes('G2') || p.raceName.includes('G3') || p.raceName.includes('ステークス')).length;
   const countL3F = pp.slice(0, 15).filter(p => p.lastThreeFurlongs && parseFloat(p.lastThreeFurlongs) > 0).length;
 
-  const jtComboKey = `${entry.jockeyId}__${entry.trainerName}`;
-  const comboData = ctx.jockeyTrainerMap.get(jtComboKey);
   const sireData = ctx.sireStatsMap.get(fatherName);
   const seasonalData = ctx.seasonalMap.get(entry.horseId);
 
   reliabilities.push(
     { factor: 'recentForm', reliability: calcFactorReliability('recentForm', pp.length), dataPoints: pp.length },
-    { factor: 'courseAptitude', reliability: calcFactorReliability('courseAptitude', countCourse), dataPoints: countCourse },
     { factor: 'distanceAptitude', reliability: calcFactorReliability('distanceAptitude', countDistWide), dataPoints: countDistWide },
     { factor: 'trackConditionAptitude', reliability: calcFactorReliability('trackConditionAptitude', countTrackCond), dataPoints: countTrackCond },
     { factor: 'jockeyAbility', reliability: jockeyWinRate > 0 ? 1.0 : 0.0, dataPoints: jockeyWinRate > 0 ? 1 : 0 },
     { factor: 'speedRating', reliability: calcFactorReliability('speedRating', countSpeedRelevant), dataPoints: countSpeedRelevant },
-    { factor: 'classPerformance', reliability: calcFactorReliability('classPerformance', countGrade), dataPoints: countGrade },
     { factor: 'runningStyle', reliability: calcFactorReliability('runningStyle', pp.length), dataPoints: pp.length },
     { factor: 'postPositionBias', reliability: 1.0, dataPoints: 1 },
     { factor: 'rotation', reliability: pp.length > 0 ? 1.0 : 0.0, dataPoints: pp.length > 0 ? 1 : 0 },
@@ -839,7 +802,6 @@ function scoreHorse(
     { factor: 'consistency', reliability: calcFactorReliability('consistency', pp.length), dataPoints: pp.length },
     { factor: 'sireAptitude', reliability: calcFactorReliability('sireAptitude', sireData?.totalRaces || 0), dataPoints: sireData?.totalRaces || 0 },
     { factor: 'trainerAbility', reliability: calcFactorReliability('trainerAbility', trainerStats?.totalRaces || 0), dataPoints: trainerStats?.totalRaces || 0 },
-    { factor: 'jockeyTrainerCombo', reliability: calcFactorReliability('jockeyTrainerCombo', comboData?.totalRaces || 0), dataPoints: comboData?.totalRaces || 0 },
     { factor: 'seasonalPattern', reliability: calcFactorReliability('seasonalPattern', seasonalData?.reduce((s, m) => s + m.races, 0) || 0), dataPoints: seasonalData?.reduce((s, m) => s + m.races, 0) || 0 },
     { factor: 'handicapAdvantage', reliability: 1.0, dataPoints: 1 },
     { factor: 'marketOdds', reliability: oddsMap.has(entry.horseNumber) ? 1.0 : 0.0, dataPoints: oddsMap.has(entry.horseNumber) ? 1 : 0 },
@@ -1136,20 +1098,6 @@ function countWinStreak(pp: PastPerformance[]): number {
   return streak;
 }
 
-function calcCourseAptitude(pp: PastPerformance[], racecourseName: string): number {
-  const courseRaces = pp.filter(p => p.racecourseName === racecourseName);
-  if (courseRaces.length === 0) return 50;
-
-  const avgRatio = courseRaces.reduce((sum, p) => {
-    return sum + p.position / (p.entries || 16);
-  }, 0) / courseRaces.length;
-
-  const wins = courseRaces.filter(p => p.position === 1).length;
-  const winBonus = wins > 0 ? Math.min(15, wins * 5) : 0;
-
-  return Math.min(100, ratioToScore(avgRatio) + winBonus);
-}
-
 function calcDistanceAptitude(pp: PastPerformance[], targetDistance: number): number {
   if (pp.length === 0) return 50;
 
@@ -1376,25 +1324,6 @@ function getConditionAdjustment(condition: TrackCondition | string, trackType: T
     if (condition === '稍重') return 1;
   }
   return 0;
-}
-
-function calcClassPerformance(pp: PastPerformance[], _grade: string | undefined): number {
-  if (pp.length === 0) return 50;
-
-  const gradeRaces = pp.filter(p =>
-    p.raceName.includes('G1') || p.raceName.includes('G2') || p.raceName.includes('G3') ||
-    p.raceName.includes('ステークス') || p.raceName.includes('賞') || p.raceName.includes('カップ')
-  );
-
-  if (gradeRaces.length === 0) return 45;
-
-  const topFinishes = gradeRaces.filter(p => p.position <= 3).length;
-  const ratio = topFinishes / gradeRaces.length;
-
-  if (ratio >= 0.5) return 90;
-  if (ratio >= 0.3) return 75;
-  if (ratio >= 0.15) return 60;
-  return 40;
 }
 
 function calcPostPositionBias(post: number, fieldSize: number, distance: number, trackType: TrackType, racecourseName: string): number {
@@ -2369,12 +2298,10 @@ export const _testExports = {
   adjustWeights,
   detectRunningStyle,
   calcRecentFormScore,
-  calcCourseAptitude,
   calcDistanceAptitude,
   calcTrackConditionAptitude,
   calcJockeyScore,
   calcSpeedRating,
-  calcClassPerformance,
   calcRunningStyleBase,
   calcPostPositionBias,
   calcRotation,

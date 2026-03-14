@@ -494,20 +494,20 @@ export async function calibrateWeights(): Promise<CalibrationResult | null> {
   if (rows.length < 5) return null;
 
   const factorNames = [
-    'recentForm', 'courseAptitude', 'distanceAptitude', 'trackConditionAptitude',
-    'jockeyAbility', 'speedRating', 'classPerformance', 'runningStyle',
+    'recentForm', 'distanceAptitude', 'trackConditionAptitude',
+    'jockeyAbility', 'speedRating', 'runningStyle',
     'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
-    'sireAptitude', 'trainerAbility', 'jockeyTrainerCombo',
+    'sireAptitude', 'trainerAbility',
     'seasonalPattern', 'handicapAdvantage', 'marketOdds',
     'marginCompetitiveness', 'weatherAptitude',
   ];
 
   const currentWeights: Record<string, number> = {
-    recentForm: 0.15, courseAptitude: 0.06, distanceAptitude: 0.10,
-    trackConditionAptitude: 0.04, jockeyAbility: 0.07, speedRating: 0.10,
-    classPerformance: 0.04, runningStyle: 0.05, postPositionBias: 0.04,
-    rotation: 0.04, lastThreeFurlongs: 0.07, consistency: 0.04,
-    sireAptitude: 0.05, trainerAbility: 0.04, jockeyTrainerCombo: 0.02,
+    recentForm: 0.17, distanceAptitude: 0.11,
+    trackConditionAptitude: 0.05, jockeyAbility: 0.08, speedRating: 0.11,
+    runningStyle: 0.06, postPositionBias: 0.05,
+    rotation: 0.04, lastThreeFurlongs: 0.08, consistency: 0.05,
+    sireAptitude: 0.06, trainerAbility: 0.05,
     seasonalPattern: 0.02, handicapAdvantage: 0.01,
     marketOdds: 0.03, marginCompetitiveness: 0.01, weatherAptitude: 0.02,
   };
@@ -723,10 +723,10 @@ export async function calibrateCategoryWeights(): Promise<CategoryCalibrationRes
   }
 
   const factorNames = [
-    'recentForm', 'courseAptitude', 'distanceAptitude', 'trackConditionAptitude',
-    'jockeyAbility', 'speedRating', 'classPerformance', 'runningStyle',
+    'recentForm', 'distanceAptitude', 'trackConditionAptitude',
+    'jockeyAbility', 'speedRating', 'runningStyle',
     'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
-    'sireAptitude', 'trainerAbility', 'jockeyTrainerCombo',
+    'sireAptitude', 'trainerAbility',
     'seasonalPattern', 'handicapAdvantage', 'marketOdds',
     'marginCompetitiveness', 'weatherAptitude',
   ];

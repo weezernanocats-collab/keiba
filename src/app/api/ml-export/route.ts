@@ -3,22 +3,37 @@ import { dbAll } from '@/lib/database';
 
 export const maxDuration = 60;
 
-// 特徴量名の順序定義（Python側と一致させる）
+// 特徴量名の順序定義（export-training-data.ts / feature_names.json と一致）
+// v7.1: SHAP重要度0のファクター除去 + odds統合
 const FEATURE_NAMES = [
-  // 16ファクタースコア
-  'recentForm', 'courseAptitude', 'distanceAptitude', 'trackConditionAptitude',
-  'jockeyAbility', 'speedRating', 'classPerformance', 'runningStyle',
+  // ファクタースコア (SHAP分析で有効確認済み)
+  'recentForm', 'distanceAptitude', 'trackConditionAptitude',
+  'jockeyAbility', 'speedRating', 'runningStyle',
   'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
-  'sireAptitude', 'trainerAbility', 'jockeyTrainerCombo', 'historicalPostBias', 'seasonalPattern',
-  'handicapAdvantage',
+  'sireAptitude', 'trainerAbility',
+  'seasonalPattern', 'handicapAdvantage',
+  'marginCompetitiveness', 'weatherAptitude',
   // コンテキスト特徴量
-  'fieldSize', 'odds', 'popularity', 'age', 'sex_encoded',
-  'handicapWeight', 'postPosition', 'grade_encoded', 'trackType_encoded',
+  'fieldSize', 'popularity', 'age', 'sex_encoded',
+  'handicapWeight', 'postPosition', 'grade_encoded',
   'distance', 'trackCondition_encoded', 'oddsLogTransform', 'popularityRatio',
-  // v4.2 新特徴量
-  'weather_encoded', 'weightChange',
+  // 統計特徴量
+  'weather_encoded',
   'trainerWinRate', 'trainerPlaceRate',
   'sireTrackWinRate', 'jockeyDistanceWinRate', 'jockeyCourseWinRate',
+  // v5.1: 馬体重トレンド
+  'weightStability', 'weightTrendSlope', 'weightOptimalDelta',
+  // v6.0: 新特徴量
+  'jockeySwitchQuality', 'cornerDelta',
+  'avgMarginWhenWinning', 'avgMarginWhenLosing',
+  'daysSinceLastRace',
+  // v6.1: 開催週 + 調教師パターン
+  'meetDay', 'trainerDistCatWinRate', 'trainerCondWinRate', 'trainerGradeWinRate',
+  // v6.0: 交互作用特徴量
+  'weightXspeed', 'ageXdistance', 'jockeyXform',
+  'fieldSizeXpost', 'rotationXform', 'conditionXsire',
+  // v7.0: ラップタイム基盤特徴量
+  'horsePacePreference', 'horseHaiPaceRate', 'courseDistPaceAvg', 'paceStyleMatch',
 ];
 
 const SEX_ENCODE: Record<string, number> = { '牡': 0, '牝': 1, 'セ': 2 };
@@ -291,7 +306,7 @@ export async function GET(request: NextRequest) {
           case 'trackType_encoded': return TRACK_TYPE_ENCODE[pred.track_type] ?? 0;
           case 'distance': return pred.distance;
           case 'trackCondition_encoded': return TRACK_CONDITION_ENCODE[pred.track_condition ?? '良'] ?? 0;
-          case 'oddsLogTransform': return Math.log1p(odds);
+          case 'oddsLogTransform': return odds > 0 ? Math.log(odds) : Math.log(10);
           case 'popularityRatio': return fieldSize > 0 ? popularity / fieldSize : 0.5;
           // v4.2 新特徴量
           case 'weather_encoded': return WEATHER_ENCODE[pred.weather ?? ''] ?? 0;

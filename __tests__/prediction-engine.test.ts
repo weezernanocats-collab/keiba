@@ -14,9 +14,9 @@ import {
 const {
   calcFactorReliability, bayesianScore, adjustWeights,
   detectRunningStyle,
-  calcRecentFormScore, calcCourseAptitude, calcDistanceAptitude,
+  calcRecentFormScore, calcDistanceAptitude,
   calcTrackConditionAptitude, calcJockeyScore, calcSpeedRating,
-  calcClassPerformance, calcRunningStyleBase, calcPostPositionBias,
+  calcRunningStyleBase, calcPostPositionBias,
   calcRotation, calcLastThreeFurlongs, calcConsistency,
   applyPaceBonus, calculateConfidence, generateBetRecommendations,
   positionToScore, ratioToScore, timeToSeconds,
@@ -254,36 +254,6 @@ describe('calcRecentFormScore', () => {
   });
 });
 
-describe('calcCourseAptitude', () => {
-  it('コース経験なしは50点', () => {
-    expect(calcCourseAptitude([], '東京')).toBe(50);
-  });
-
-  it('同コースで1着多いと高スコア', () => {
-    const pp = Array.from({ length: 5 }, () => makePP({
-      racecourseName: '東京', position: 1, entries: 16,
-    }));
-    const score = calcCourseAptitude(pp, '東京');
-    expect(score).toBeGreaterThanOrEqual(80);
-  });
-
-  it('同コースで下位だと低スコア', () => {
-    const pp = Array.from({ length: 5 }, () => makePP({
-      racecourseName: '東京', position: 14, entries: 16,
-    }));
-    const score = calcCourseAptitude(pp, '東京');
-    expect(score).toBeLessThanOrEqual(40);
-  });
-
-  it('別のコースの成績は含まない', () => {
-    const pp = Array.from({ length: 5 }, () => makePP({
-      racecourseName: '中山', position: 1, entries: 16,
-    }));
-    const score = calcCourseAptitude(pp, '東京');
-    expect(score).toBe(50);
-  });
-});
-
 describe('calcDistanceAptitude', () => {
   it('成績なしは50点', () => {
     expect(calcDistanceAptitude([], 1600)).toBe(50);
@@ -396,30 +366,6 @@ describe('calcSpeedRating', () => {
     const score = calcSpeedRating(pp, '芝', 1600);
     // 4つ目の遅いタイムは含まれない（上位3つ）
     expect(score).toBeGreaterThan(50);
-  });
-});
-
-describe('calcClassPerformance', () => {
-  it('成績なしは50点', () => {
-    expect(calcClassPerformance([], 'G1')).toBe(50);
-  });
-
-  it('グレードレースなしは45点', () => {
-    const pp = [makePP({ raceName: '一般レース' })];
-    expect(calcClassPerformance(pp, 'G1')).toBe(45);
-  });
-
-  it('G1で好走実績あれば高スコア', () => {
-    const pp = makeGradeRacePP();
-    const score = calcClassPerformance(pp, 'G1');
-    expect(score).toBeGreaterThanOrEqual(60);
-  });
-
-  it('G1で50%以上入賞なら90点', () => {
-    const pp = Array.from({ length: 4 }, () => makePP({
-      raceName: 'ダービー(G1)', position: 1, entries: 18,
-    }));
-    expect(calcClassPerformance(pp, 'G1')).toBe(90);
   });
 });
 
@@ -696,8 +642,8 @@ describe('WEIGHTS', () => {
     expect(total).toBeCloseTo(1.0, 2);
   });
 
-  it('20個のファクターがある', () => {
-    expect(Object.keys(WEIGHTS).length).toBe(20);
+  it('17個のファクターがある', () => {
+    expect(Object.keys(WEIGHTS).length).toBe(17);
   });
 });
 

@@ -433,13 +433,13 @@ describe('jockey stats', () => {
 
 describe('calibration weights', () => {
   it('saveCalibrationWeights + getActiveCalibrationWeights', async () => {
-    const weights = { recentForm: 0.20, courseAptitude: 0.08, distanceAptitude: 0.10 };
+    const weights = { recentForm: 0.20, distanceAptitude: 0.08, speedRating: 0.10 };
     await saveCalibrationWeights(weights, 50, true, 'テスト校正');
 
     const active = await getActiveCalibrationWeights();
     expect(active).toBeTruthy();
     expect(active!.recentForm).toBe(0.20);
-    expect(active!.courseAptitude).toBe(0.08);
+    expect(active!.distanceAptitude).toBe(0.08);
   });
 
   it('applied=false のものは取得されない', async () => {
