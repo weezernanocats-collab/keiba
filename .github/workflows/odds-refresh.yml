@@ -1,0 +1,58 @@
+name: Odds Refresh
+
+on:
+  schedule:
+    # レース開催時間帯に30分間隔で実行 (JST 09:30-16:30 = UTC 00:30-07:30)
+    - cron: '30 0 * * 6,0'   # 土日 09:30 JST
+    - cron: '0 1-7 * * 6,0'  # 土日 10:00-16:00 JST (毎時)
+    - cron: '30 1-7 * * 6,0' # 土日 10:30-16:30 JST (毎時半)
+  workflow_dispatch:
+    inputs:
+      date:
+        description: '対象日 (YYYY-MM-DD, 空欄で当日)'
+        required: false
+        type: string
+      include_tomorrow:
+        description: '明日分も取得する'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create .env.local
+        run: |
+          echo "TURSO_DATABASE_URL=\"${{ secrets.TURSO_DATABASE_URL }}\"" > .env.local
+          echo "TURSO_AUTH_TOKEN=\"${{ secrets.TURSO_AUTH_TOKEN }}\"" >> .env.local
+
+      - name: Refresh odds (today)
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            ARGS="--date ${{ github.event.inputs.date }}"
+          fi
+          npx tsx -r tsconfig-paths/register scripts/refresh-odds.ts $ARGS
+
+      - name: Refresh odds (tomorrow)
+        if: ${{ github.event.inputs.include_tomorrow == 'true' }}
+        run: npx tsx -r tsconfig-paths/register scripts/refresh-odds.ts --tomorrow
+
+      - name: Cleanup
+        if: always()
+        run: rm -f .env.local

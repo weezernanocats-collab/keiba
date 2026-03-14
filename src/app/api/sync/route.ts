@@ -38,7 +38,7 @@ export const maxDuration = 60;
 
 // ==================== Types ====================
 
-type SyncType = 'races' | 'race_detail' | 'odds' | 'results' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort' | 'bulk_chunked' | 'accuracy' | 'evaluate_all' | 'calibrate' | 'regenerate_predictions' | 'repair_bets_odds' | 'reeval_repaired' | 'debug_scrape';
+type SyncType = 'races' | 'race_detail' | 'odds' | 'odds_refresh' | 'results' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort' | 'bulk_chunked' | 'accuracy' | 'evaluate_all' | 'calibrate' | 'regenerate_predictions' | 'repair_bets_odds' | 'reeval_repaired' | 'debug_scrape';
 
 interface SyncRequest {
   type: SyncType;
@@ -153,7 +153,7 @@ export async function POST(request: NextRequest) {
   const { type, date, raceId, horseId } = body;
 
   // Validate type
-  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'bulk_chunked', 'accuracy', 'evaluate_all', 'calibrate', 'regenerate_predictions', 'repair_bets_odds', 'reeval_repaired', 'debug_scrape'];
+  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'odds_refresh', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'bulk_chunked', 'accuracy', 'evaluate_all', 'calibrate', 'regenerate_predictions', 'repair_bets_odds', 'reeval_repaired', 'debug_scrape'];
   if (!type || !validTypes.includes(type)) {
     return NextResponse.json(
       {
@@ -346,6 +346,55 @@ export async function POST(request: NextRequest) {
         ? `フル同期完了: ${targetDate}`
         : `フル同期開始: ${targetDate} (${updatedState.phaseLabel}を処理中、自動継続します)`,
       state: updatedState,
+    });
+  }
+
+  // オッズ一括更新（未発走レース対象、既存オッズも上書き）
+  if (type === 'odds_refresh') {
+    const jstOffset = 9 * 60;
+    const jstTime = new Date(Date.now() + jstOffset * 60_000);
+    const targetDate = date || jstTime.toISOString().split('T')[0];
+
+    const races = await dbAll<{ id: string; name: string }>(
+      `SELECT r.id, r.name FROM races r
+       WHERE r.date = ? AND r.status IN ('予定', '出走確定')
+       ORDER BY r.racecourse_name, r.race_number`,
+      [targetDate]
+    );
+
+    let totalWin = 0;
+    let totalPlace = 0;
+    let failCount = 0;
+
+    for (const race of races) {
+      try {
+        const odds = await scrapeOdds(race.id);
+        if (odds.win.length > 0) {
+          for (const w of odds.win) {
+            await upsertOdds(race.id, '単勝', [w.horseNumber], w.odds);
+            await dbRun(
+              'UPDATE race_entries SET odds = ? WHERE race_id = ? AND horse_number = ?',
+              [w.odds, race.id, w.horseNumber]
+            );
+            totalWin++;
+          }
+          for (const p of odds.place) {
+            await upsertOdds(race.id, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
+            totalPlace++;
+          }
+        }
+      } catch {
+        failCount++;
+      }
+    }
+
+    return NextResponse.json({
+      status: 'ok',
+      date: targetDate,
+      races: races.length,
+      totalWin,
+      totalPlace,
+      failCount,
     });
   }
 
