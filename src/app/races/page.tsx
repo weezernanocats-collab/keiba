@@ -64,31 +64,60 @@ export default function RacesPage() {
     };
   }, [filter, dateFilter, fetchRaces]);
 
-  const handleBulkOddsRefresh = useCallback(async (date: string) => {
+  const handleBulkOddsRefresh = useCallback(async (date: string, dateRaces: RaceRow[]) => {
+    const targetIds = dateRaces
+      .filter(r => r.status !== '結果確定')
+      .map(r => r.id);
+    if (targetIds.length === 0) return;
+
     setOddsRefreshing(date);
     setOddsResult(null);
+
+    const CHUNK_SIZE = 6;
+    let totalWin = 0;
+    let totalPlace = 0;
+    let failCount = 0;
+    let processed = 0;
+
     try {
-      const res = await fetch('/api/odds', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date }),
-      });
-      let data;
-      try {
-        data = await res.json();
-      } catch {
-        setOddsResult({ date, message: `サーバーエラー (HTTP ${res.status})` });
-        return;
-      }
-      if (res.ok) {
+      for (let i = 0; i < targetIds.length; i += CHUNK_SIZE) {
+        const chunk = targetIds.slice(i, i + CHUNK_SIZE);
         setOddsResult({
           date,
-          message: `${data.races}レースのオッズ更新完了（単勝${data.totalWin}件, 複勝${data.totalPlace}件${data.failCount > 0 ? `, 失敗${data.failCount}件` : ''}）`,
+          message: `更新中... (${processed}/${targetIds.length})`,
         });
-        fetchRaces(false);
-      } else {
-        setOddsResult({ date, message: data.error || `オッズ更新失敗 (HTTP ${res.status})` });
+
+        const res = await fetch('/api/odds', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ raceIds: chunk }),
+        });
+
+        let data;
+        try {
+          data = await res.json();
+        } catch {
+          failCount += chunk.length;
+          processed += chunk.length;
+          continue;
+        }
+
+        if (res.ok) {
+          totalWin += data.totalWin || 0;
+          totalPlace += data.totalPlace || 0;
+          failCount += data.failCount || 0;
+          processed += chunk.length;
+        } else {
+          failCount += chunk.length;
+          processed += chunk.length;
+        }
       }
+
+      setOddsResult({
+        date,
+        message: `${targetIds.length}レースのオッズ更新完了（単勝${totalWin}件, 複勝${totalPlace}件${failCount > 0 ? `, 失敗${failCount}件` : ''}）`,
+      });
+      fetchRaces(false);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setOddsResult({ date, message: `通信エラー: ${msg}` });
@@ -232,7 +261,7 @@ export default function RacesPage() {
               <span className="text-muted text-sm">{dateRaces.length}レース</span>
               {dateRaces.some(r => r.status !== '結果確定') && (
                 <button
-                  onClick={() => handleBulkOddsRefresh(date)}
+                  onClick={() => handleBulkOddsRefresh(date, dateRaces)}
                   disabled={oddsRefreshing !== null}
                   className="ml-2 px-3 py-1 text-xs font-medium rounded-lg border border-accent text-accent hover:bg-accent hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >

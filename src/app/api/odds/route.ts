@@ -27,15 +27,15 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const raceId = body.raceId as string | undefined;
-    const date = body.date as string | undefined;
+    const raceIds = body.raceIds as string[] | undefined;
 
-    // 日付指定 → 一括オッズ更新
-    if (date) {
-      return await handleBulkOddsRefresh(date);
+    // 複数レース一括更新（フロントからのチャンク）
+    if (raceIds && raceIds.length > 0) {
+      return await handleBatchOddsRefresh(raceIds);
     }
 
     if (!raceId) {
-      return NextResponse.json({ error: 'raceId または date が必要です' }, { status: 400 });
+      return NextResponse.json({ error: 'raceId または raceIds が必要です' }, { status: 400 });
     }
 
     let fetched = 0;
@@ -76,12 +76,9 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// ==================== 一括オッズ更新 ====================
+// ==================== 一括オッズ更新（チャンク対応） ====================
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-const BATCH_SIZE = 3; // 同時スクレイプ数（netkeiba負荷軽減）
-const BATCH_DELAY_MS = 300; // バッチ間の待機
 
 async function processOneRace(raceId: string) {
   const odds = await scrapeOdds(raceId);
@@ -104,24 +101,17 @@ async function processOneRace(raceId: string) {
   return { win, place };
 }
 
-async function handleBulkOddsRefresh(date: string) {
+// フロントから渡されたraceIds（最大8件）を3並列で処理
+async function handleBatchOddsRefresh(raceIds: string[]) {
   try {
-    const races = await dbAll<{ id: string; name: string }>(
-      `SELECT r.id, r.name FROM races r
-       WHERE r.date = ? AND r.status IN ('予定', '出走確定')
-       ORDER BY r.racecourse_name, r.race_number`,
-      [date]
-    );
-
     let totalWin = 0;
     let totalPlace = 0;
     let failCount = 0;
 
-    // 3レースずつ並列処理（36レース → 12バッチ × ~2s ≒ 24s）
-    for (let i = 0; i < races.length; i += BATCH_SIZE) {
-      const batch = races.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < raceIds.length; i += 3) {
+      const batch = raceIds.slice(i, i + 3);
       const results = await Promise.allSettled(
-        batch.map(race => processOneRace(race.id))
+        batch.map(id => processOneRace(id))
       );
       for (const r of results) {
         if (r.status === 'fulfilled') {
@@ -131,13 +121,12 @@ async function handleBulkOddsRefresh(date: string) {
           failCount++;
         }
       }
-      if (i + BATCH_SIZE < races.length) await sleep(BATCH_DELAY_MS);
+      if (i + 3 < raceIds.length) await sleep(300);
     }
 
     return NextResponse.json({
       status: 'ok',
-      date,
-      races: races.length,
+      races: raceIds.length,
       totalWin,
       totalPlace,
       failCount,
