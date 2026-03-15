@@ -30,6 +30,8 @@ export default function RacesPage() {
   const [gradeFilter, setGradeFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [oddsRefreshing, setOddsRefreshing] = useState<string | null>(null);
+  const [oddsResult, setOddsResult] = useState<{ date: string; message: string } | null>(null);
   const { isRaceFavoriteInProfile, toggleRaceForProfile } = useFavorites();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -60,6 +62,32 @@ export default function RacesPage() {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, [filter, dateFilter, fetchRaces]);
+
+  const handleBulkOddsRefresh = useCallback(async (date: string) => {
+    setOddsRefreshing(date);
+    setOddsResult(null);
+    try {
+      const res = await fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'odds_refresh', date }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setOddsResult({
+          date,
+          message: `${data.races}レースのオッズ更新完了（単勝${data.totalWin}件, 複勝${data.totalPlace}件${data.failCount > 0 ? `, 失敗${data.failCount}件` : ''}）`,
+        });
+        fetchRaces(false);
+      } else {
+        setOddsResult({ date, message: data.error || 'オッズ更新に失敗しました' });
+      }
+    } catch {
+      setOddsResult({ date, message: 'オッズ更新中にエラーが発生しました' });
+    } finally {
+      setOddsRefreshing(null);
+    }
+  }, [fetchRaces]);
 
   const courses = [...new Set(races.map(r => r.racecourseName))];
 
@@ -178,6 +206,20 @@ export default function RacesPage() {
             <h2 className="text-lg font-bold mb-3 flex items-center gap-2">
               <span className="bg-primary text-white px-3 py-1 rounded-lg text-sm">{date}</span>
               <span className="text-muted text-sm">{dateRaces.length}レース</span>
+              {dateRaces.some(r => r.status !== '結果確定') && (
+                <button
+                  onClick={() => handleBulkOddsRefresh(date)}
+                  disabled={oddsRefreshing !== null}
+                  className="ml-2 px-3 py-1 text-xs font-medium rounded-lg border border-accent text-accent hover:bg-accent hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {oddsRefreshing === date ? 'オッズ更新中...' : 'オッズ一括更新'}
+                </button>
+              )}
+              {oddsResult?.date === date && (
+                <span className={`text-xs ${oddsResult.message.includes('失敗') || oddsResult.message.includes('エラー') ? 'text-red-400' : 'text-green-400'}`}>
+                  {oddsResult.message}
+                </span>
+              )}
             </h2>
             <div className="bg-card-bg border border-card-border rounded-xl overflow-hidden">
               <div className="overflow-x-auto">
