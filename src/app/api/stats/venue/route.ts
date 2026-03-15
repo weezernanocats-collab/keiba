@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { dbAll } from '@/lib/database';
-import { getCacheHeaders } from '@/lib/api-helpers';
 
 export const maxDuration = 15;
+export const dynamic = 'force-dynamic';
 
 /**
  * 競馬場別・トラック別の的中傾向API
@@ -30,8 +30,14 @@ interface TrackStat {
   roi: number;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const daysParam = request.nextUrl.searchParams.get('days');
+    const days = daysParam && daysParam !== 'all' ? parseInt(daysParam, 10) : 0;
+    const dateFilter = days > 0
+      ? `AND r.date >= date('now', '-${days} days')`
+      : '';
+
     const [venues, tracks] = await Promise.all([
       dbAll<VenueStat>(
         `SELECT
@@ -42,9 +48,9 @@ export async function GET() {
           ROUND(AVG(CASE WHEN pr.bet_investment > 0 THEN pr.bet_return / pr.bet_investment ELSE 0 END) * 100, 1) AS roi
         FROM prediction_results pr
         JOIN races r ON pr.race_id = r.id
-        WHERE r.status = '結果確定'
+        WHERE r.status = '結果確定' ${dateFilter}
         GROUP BY r.racecourse_name
-        HAVING COUNT(*) >= 10
+        HAVING COUNT(*) >= 3
         ORDER BY total DESC`,
       ),
       dbAll<TrackStat>(
@@ -56,7 +62,7 @@ export async function GET() {
           ROUND(AVG(CASE WHEN pr.bet_investment > 0 THEN pr.bet_return / pr.bet_investment ELSE 0 END) * 100, 1) AS roi
         FROM prediction_results pr
         JOIN races r ON pr.race_id = r.id
-        WHERE r.status = '結果確定'
+        WHERE r.status = '結果確定' ${dateFilter}
         GROUP BY r.track_type
         ORDER BY total DESC`,
       ),
@@ -80,7 +86,7 @@ export async function GET() {
     };
 
     return NextResponse.json(responseData, {
-      headers: getCacheHeaders('stats'),
+      headers: { 'Cache-Control': 'private, max-age=60' },
     });
   } catch (error) {
     console.error('venue stats API エラー:', error);

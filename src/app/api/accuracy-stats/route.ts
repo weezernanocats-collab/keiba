@@ -4,6 +4,7 @@ import { isBetHit } from '@/lib/bet-utils';
 import { getCacheHeaders } from '@/lib/api-helpers';
 
 export const maxDuration = 30;
+export const dynamic = 'force-dynamic';
 
 /**
  * 的中率統計API
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest) {
     const cached = cache.get(cacheKey);
     if (cached && Date.now() < cached.expires) {
       return NextResponse.json(cached.data, {
-        headers: { 'Cache-Control': 'public, max-age=300, s-maxage=300' },
+        headers: { 'Cache-Control': 'private, max-age=60' },
       });
     }
 
@@ -329,7 +330,7 @@ export async function GET(request: NextRequest) {
     cache.set(cacheKey, { data: responseData, expires: Date.now() + CACHE_TTL_MS });
 
     return NextResponse.json(responseData, {
-      headers: getCacheHeaders('stats'),
+      headers: { 'Cache-Control': 'private, max-age=60' },
     });
   } catch (error) {
     console.error('accuracy-stats エラー:', error);

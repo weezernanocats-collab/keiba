@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { dbAll } from '@/lib/database';
 import { isBetHit } from '@/lib/bet-utils';
-import { getCacheHeaders } from '@/lib/api-helpers';
 
 export const maxDuration = 30;
+export const dynamic = 'force-dynamic';
 
 /**
  * 信頼度×馬券種別クロスROI分析API
@@ -58,7 +58,7 @@ export async function GET() {
     if (rows.length === 0) {
       return NextResponse.json(
         { matrix: [], summary: [], bestStrategies: [] },
-        { headers: getCacheHeaders('stats') },
+        { headers: { 'Cache-Control': 'private, max-age=60' } },
       );
     }
 
@@ -192,7 +192,7 @@ export async function GET() {
 
     return NextResponse.json(
       { matrix: matrixResponse, bestStrategies, profitableCombos, totalRaces: rows.length },
-      { headers: getCacheHeaders('stats') },
+      { headers: { 'Cache-Control': 'private, max-age=60' } },
     );
   } catch (error) {
     console.error('stats/confidence-roi エラー:', error);

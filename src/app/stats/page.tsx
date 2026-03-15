@@ -145,8 +145,8 @@ export default function StatsPage() {
         const [statsRes, trendRes, betPnlRes, venueRes] = await Promise.all([
           fetch(`/api/accuracy-stats${params}`),
           fetch(`/api/stats/trend?period=${trendPeriod}`),
-          fetch('/api/stats/bet-types'),
-          fetch('/api/stats/venue'),
+          fetch(`/api/stats/bet-types${params}`),
+          fetch(`/api/stats/venue${params}`),
         ]);
         const data = await statsRes.json();
         setSummary(data.summary);

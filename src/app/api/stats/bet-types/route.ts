@@ -1,9 +1,9 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { dbAll } from '@/lib/database';
 import { isBetHit } from '@/lib/bet-utils';
-import { getCacheHeaders } from '@/lib/api-helpers';
 
 export const maxDuration = 30;
+export const dynamic = 'force-dynamic';
 
 /**
  * 馬券種別の収支サマリーAPI
@@ -42,9 +42,15 @@ interface EntryRow {
 
 const BET_TYPE_ORDER = ['単勝', '複勝', '馬連', 'ワイド', '馬単', '三連複', '三連単'];
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    // 1. prediction_results + predictions を JOIN して結果確定済みの直近1000件を取得
+    const daysParam = request.nextUrl.searchParams.get('days');
+    const days = daysParam && daysParam !== 'all' ? parseInt(daysParam, 10) : 0;
+    const dateFilter = days > 0
+      ? `AND r.date >= date('now', '-${days} days')`
+      : '';
+
+    // 1. prediction_results + predictions を JOIN して結果確定済みレースを取得
     const predictions = await dbAll<PredictionRow>(
       `SELECT p.race_id, p.bets_json
        FROM prediction_results pr
@@ -53,6 +59,7 @@ export async function GET() {
        WHERE r.status = '結果確定'
          AND p.bets_json IS NOT NULL
          AND p.bets_json != '[]'
+         ${dateFilter}
        ORDER BY r.date DESC, r.race_number DESC
        LIMIT 1000`,
       [],
@@ -61,7 +68,7 @@ export async function GET() {
     if (predictions.length === 0) {
       return NextResponse.json(
         { betTypes: [] },
-        { headers: getCacheHeaders('stats') },
+        { headers: { 'Cache-Control': 'private, max-age=60' } },
       );
     }
 
@@ -162,7 +169,7 @@ export async function GET() {
 
     return NextResponse.json(
       { betTypes },
-      { headers: getCacheHeaders('stats') },
+      { headers: { 'Cache-Control': 'private, max-age=60' } },
     );
   } catch (error) {
     console.error('stats/bet-types エラー:', error);

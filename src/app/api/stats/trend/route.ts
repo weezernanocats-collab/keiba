@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbAll } from '@/lib/database';
-import { getCacheHeaders } from '@/lib/api-helpers';
 
 export const maxDuration = 15;
+export const dynamic = 'force-dynamic';
 
 /**
  * 的中率推移グラフ用API
@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
     }));
 
     return NextResponse.json({ trend }, {
-      headers: getCacheHeaders('stats'),
+      headers: { 'Cache-Control': 'private, max-age=60' },
     });
   } catch (error) {
     console.error('stats/trend エラー:', error);
