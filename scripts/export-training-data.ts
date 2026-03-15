@@ -1,7 +1,11 @@
 /**
- * ML学習用データをローカルエクスポート v6.0
+ * ML学習用データをローカルエクスポート v8.0
  *
- * Phase 1 改善:
+ * v8.0 改善:
+ *   - 新特徴量8個追加: 前走着順、直近3走勝率/複勝率、クラス変動、
+ *     芝ダ替わり、通算勝率、相対オッズ、連勝数
+ *   - past_performances に grade, track_type を追加取得
+ * v6.0:
  *   - historicalPostBias 削除（postPositionBias に統合）
  *   - オッズ関連特徴量を訓練から除外（バリューフィルター化）
  *   - 新特徴量: 騎手乗替シグナル、コーナー加速、着差定量化、休養日数連続値
@@ -70,6 +74,15 @@ const FEATURE_NAMES = [
   'horseHaiPaceRate',         // ハイペース経験率
   'courseDistPaceAvg',        // コース×距離の典型ペース
   'paceStyleMatch',           // 脚質×ペース相性 (追込×ハイ=高, 逃げ×スロー=高)
+  // v8.0: 直近フォーム + キャリア特徴量
+  'lastRacePosition',        // 前走着順 (1-18, デフォルト9)
+  'last3WinRate',             // 直近3走の勝率 (0-1)
+  'last3PlaceRate',           // 直近3走の複勝率 (0-1)
+  'classChange',              // クラス変動 (今走グレード - 前走グレード)
+  'trackTypeChange',          // 芝↔ダート替わり (0 or 1)
+  'careerWinRate',            // 通算勝率 (0-1)
+  'relativeOdds',             // レース内相対オッズ (log(odds/中央値))
+  'winStreak',                // 連勝数 (0-N)
 ];
 
 const SEX_ENCODE: Record<string, number> = { '牡': 0, '牝': 1, 'セ': 2 };
@@ -143,6 +156,8 @@ interface PastPerfRow {
   jockey_name: string | null;
   margin: string | null;
   corner_positions: string | null;
+  grade: string | null;
+  track_type: string | null;
 }
 
 async function main() {
@@ -175,9 +190,11 @@ async function main() {
   // 過去成績データ取得（騎手乗替、コーナー、着差、休養日数、ペース特徴量用）
   const [ppResult, racePaceResult, horseResult] = await Promise.all([
     db.execute(`
-      SELECT horse_id, race_id, date, position, jockey_name, margin, corner_positions
-      FROM past_performances
-      ORDER BY horse_id, date DESC
+      SELECT pp.horse_id, pp.race_id, pp.date, pp.position, pp.jockey_name, pp.margin, pp.corner_positions,
+             r.grade, r.track_type
+      FROM past_performances pp
+      LEFT JOIN races r ON r.id = pp.race_id
+      ORDER BY pp.horse_id, pp.date DESC
     `),
     // ラップタイム基盤: レースのペースタイプ取得（v7.0）
     db.execute(`
@@ -541,6 +558,57 @@ async function main() {
       const runStyleNorm = (scores.runningStyle ?? 50) / 100;
       const paceStyleMatch = runStyleNorm * courseDistPaceAvg + (1 - runStyleNorm) * (1 - courseDistPaceAvg);
 
+      // === v8.0 直近フォーム + キャリア特徴量 ===
+      // 前走着順
+      const lastRacePosition = horsePerfs.length > 0 ? horsePerfs[0].position : 9;
+
+      // 直近3走の勝率・複勝率
+      const last3 = horsePerfs.slice(0, 3);
+      const last3WinRate = last3.length > 0
+        ? last3.filter(pp => pp.position === 1).length / last3.length : 0;
+      const last3PlaceRate = last3.length > 0
+        ? last3.filter(pp => pp.position <= 3).length / last3.length : 0;
+
+      // クラス変動 (今走グレード - 前走グレード)
+      let classChange = 0;
+      if (horsePerfs.length > 0 && horsePerfs[0].grade) {
+        const prevGrade = GRADE_ENCODE[horsePerfs[0].grade] ?? 3;
+        const curGrade = GRADE_ENCODE[pred.grade ?? ''] ?? 3;
+        classChange = curGrade - prevGrade;
+      }
+
+      // 芝↔ダート替わり
+      let trackTypeChange = 0;
+      if (horsePerfs.length > 0 && horsePerfs[0].track_type) {
+        const prevTrackType = horsePerfs[0].track_type;
+        // 前走と今走のトラックタイプが異なる場合
+        if ((prevTrackType === '芝' && pred.track_type !== '芝') ||
+            (prevTrackType !== '芝' && pred.track_type === '芝')) {
+          trackTypeChange = 1;
+        }
+      }
+
+      // 通算勝率
+      const careerWinRate = horsePerfs.length > 0
+        ? horsePerfs.filter(pp => pp.position === 1).length / horsePerfs.length : 0;
+
+      // レース内相対オッズ (log(odds / レース中央値オッズ))
+      const raceOdds = raceEntries
+        .map(e2 => e2.odds)
+        .filter((o): o is number => o !== null && o > 0)
+        .sort((a, b) => a - b);
+      const medianOdds = raceOdds.length > 0
+        ? raceOdds[Math.floor(raceOdds.length / 2)] : 10;
+      const relativeOdds = entry.odds && entry.odds > 0
+        ? Math.log(entry.odds / medianOdds) : 0;
+
+      // 連勝数
+      let winStreak = 0;
+      for (const pp of horsePerfs) {
+        if (pp.position === 1) winStreak++;
+        else break;
+      }
+
       // 交互作用特徴量
       const weightXspeed = (entry.handicap_weight ?? 54) * ((scores.speedRating ?? 50) / 100);
       const ageXdistance = (entry.age ?? 3) * (pred.distance / 1000);
@@ -593,6 +661,15 @@ async function main() {
           case 'horseHaiPaceRate': return horseHaiPaceRate;
           case 'courseDistPaceAvg': return courseDistPaceAvg;
           case 'paceStyleMatch': return paceStyleMatch;
+          // v8.0 直近フォーム + キャリア特徴量
+          case 'lastRacePosition': return lastRacePosition;
+          case 'last3WinRate': return last3WinRate;
+          case 'last3PlaceRate': return last3PlaceRate;
+          case 'classChange': return classChange;
+          case 'trackTypeChange': return trackTypeChange;
+          case 'careerWinRate': return careerWinRate;
+          case 'relativeOdds': return relativeOdds;
+          case 'winStreak': return winStreak;
           default: return scores[name] ?? 50;
         }
       });

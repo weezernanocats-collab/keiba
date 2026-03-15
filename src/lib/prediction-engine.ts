@@ -466,6 +466,35 @@ export async function generatePrediction(
           horsePacePreference: ctx.horsePaceMap.get(sh.entry.horseId)?.preference,
           horseHaiPaceRate: ctx.horsePaceMap.get(sh.entry.horseId)?.haiRate,
           courseDistPaceAvg: ctx.courseDistPaceAvg,
+          // v8.0: 直近フォーム + キャリア特徴量
+          lastRacePosition: pp.length > 0 ? pp[0].position : 9,
+          last3WinRate: pp.length > 0
+            ? pp.slice(0, 3).filter(p => p.position === 1).length / Math.min(pp.length, 3) : 0,
+          last3PlaceRate: pp.length > 0
+            ? pp.slice(0, 3).filter(p => p.position <= 3).length / Math.min(pp.length, 3) : 0,
+          classChange: 0, // 推論時にはpast_performancesにgradeなし → エクスポート時のみ計算
+          trackTypeChange: (() => {
+            if (pp.length === 0) return 0;
+            const prevTrackType = pp[0].trackType;
+            return (prevTrackType === '芝' && trackType !== '芝') ||
+                   (prevTrackType !== '芝' && trackType === '芝') ? 1 : 0;
+          })(),
+          careerWinRate: pp.length > 0
+            ? pp.filter(p => p.position === 1).length / pp.length : 0,
+          relativeOdds: (() => {
+            const allOdds = scoredHorses
+              .map(s => s.entry.odds)
+              .filter((o): o is number => o != null && o > 0)
+              .sort((a, b) => a - b);
+            const median = allOdds.length > 0 ? allOdds[Math.floor(allOdds.length / 2)] : 10;
+            const odds = sh.entry.odds;
+            return odds && odds > 0 ? Math.log(odds / median) : 0;
+          })(),
+          winStreak: (() => {
+            let streak = 0;
+            for (const p of pp) { if (p.position === 1) streak++; else break; }
+            return streak;
+          })(),
         },
       ),
     };
@@ -603,8 +632,9 @@ export async function generatePrediction(
   const bettingStrategy = generateBettingStrategy(scoredHorses, confidence);
   analysis.bettingStrategy = bettingStrategy;
 
-  // 推奨馬券（戦略ベース + ブレンド確率）
-  const recommendedBets = generateBetRecommendations(scoredHorses, confidence, bettingStrategy, oddsMap, blendedProbsByNumber);
+  // 推奨馬券（戦略ベース + ブレンド確率 + バリューベット判定）
+  const marketAnalysisData = analysis.marketAnalysis as Record<number, { modelProb: number; marketProb: number; disagreement: number; isValue: boolean }> | undefined;
+  const recommendedBets = generateBetRecommendations(scoredHorses, confidence, bettingStrategy, oddsMap, blendedProbsByNumber, trackType, distance, marketAnalysisData);
 
   // サマリー生成
   const summary = generateSummary(topPicks, analysis, raceName, confidence, todayBias, options?.isAfternoon);
@@ -1809,6 +1839,9 @@ function generateBetRecommendations(
   strategy: BettingStrategy,
   oddsMap?: Map<number, number>,
   precomputedProbs?: Map<number, number>,
+  trackType?: string,
+  distance?: number,
+  marketAnalysis?: Record<number, { modelProb: number; marketProb: number; disagreement: number; isValue: boolean }>,
 ): RecommendedBet[] {
   const bets: RecommendedBet[] = [];
   if (scoredHorses.length < 3) return bets;
@@ -1851,6 +1884,25 @@ function generateBetRecommendations(
   const isPrimary = (type: string) => strategy.primaryBets.includes(type);
   const isAvoided = (type: string) => strategy.avoidBets.includes(type);
 
+  // --- バリューベット判定（バックテスト検証済フィルタ: ROI 243%） ---
+  // 条件: (1) ダートスプリント以外 (2) オッズ3-50倍 (3) 乖離度>3%
+  const isValueBetCategory = (() => {
+    if (!trackType || !distance) return true;
+    if (trackType === 'ダート' && distance <= 1400) return false; // ダsprint除外
+    if (trackType === '障害') return false;
+    return true;
+  })();
+
+  const checkValueBet = (h: ScoredHorse): { isValue: boolean; divergence: number } => {
+    const odds = oddsOf(h);
+    if (!odds || !isValueBetCategory) return { isValue: false, divergence: 0 };
+    const inOddsRange = odds >= 3 && odds <= 50;
+    const ma = marketAnalysis?.[h.entry.horseNumber];
+    const divergence = ma ? ma.disagreement * 100 : 0; // %に変換
+    const hasDivergence = divergence > 3;
+    return { isValue: inOddsRange && hasDivergence && ma?.isValue === true, divergence };
+  };
+
   // --- 戦略ベースの馬券推奨 ---
 
   // 単勝: 一強パターンまたは高信頼度時
@@ -1858,17 +1910,20 @@ function generateBetRecommendations(
     const ev = evOf(top);
     const isMain = isPrimary('単勝');
     const kv = kellyOf(top);
+    const vb = checkValueBet(top);
     bets.push({
       type: '単勝',
       selections: [top.entry.horseNumber],
       reasoning: isMain
-        ? `【主力】${top.entry.horseName}が総合力で抜けている。${top.reasons[0] || ''}${ev >= 1.0 ? ` 期待値${ev.toFixed(2)}。` : ''}`
+        ? `【主力】${top.entry.horseName}が総合力で抜けている。${top.reasons[0] || ''}${ev >= 1.0 ? ` 期待値${ev.toFixed(2)}。` : ''}${vb.isValue ? ` 🎯バリューベット(乖離${vb.divergence.toFixed(1)}%)` : ''}`
         : `${top.entry.horseName}の勝利を狙う。ただし${pattern}のため控えめに。`,
       expectedValue: ev,
       odds: oddsOf(top),
       kellyFraction: kv.kelly,
       valueEdge: kv.edge,
       recommendedStake: kv.stake,
+      isValueBet: vb.isValue,
+      divergence: vb.divergence,
     });
   }
 

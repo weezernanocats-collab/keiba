@@ -126,6 +126,15 @@ interface ContextualFeatures {
   horsePacePreference?: number | undefined;
   horseHaiPaceRate?: number | undefined;
   courseDistPaceAvg?: number | undefined;
+  // v8.0: 直近フォーム + キャリア特徴量
+  lastRacePosition?: number | undefined;
+  last3WinRate?: number | undefined;
+  last3PlaceRate?: number | undefined;
+  classChange?: number | undefined;
+  trackTypeChange?: number | undefined;
+  careerWinRate?: number | undefined;
+  relativeOdds?: number | undefined;
+  winStreak?: number | undefined;
 }
 
 /**
@@ -187,6 +196,15 @@ export function buildMLFeatures(
       const cdpa = ctx.courseDistPaceAvg ?? 0.5;
       return runStyleNorm * cdpa + (1 - runStyleNorm) * (1 - cdpa);
     })(),
+    // v8.0: 直近フォーム + キャリア特徴量
+    lastRacePosition: ctx.lastRacePosition ?? 9,
+    last3WinRate: ctx.last3WinRate ?? 0,
+    last3PlaceRate: ctx.last3PlaceRate ?? 0,
+    classChange: ctx.classChange ?? 0,
+    trackTypeChange: ctx.trackTypeChange ?? 0,
+    careerWinRate: ctx.careerWinRate ?? 0,
+    relativeOdds: ctx.relativeOdds ?? 0,
+    winStreak: ctx.winStreak ?? 0,
   };
 }
 

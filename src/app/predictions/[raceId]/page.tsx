@@ -59,6 +59,8 @@ interface Bet {
   kellyFraction?: number;
   valueEdge?: number;
   recommendedStake?: number;
+  isValueBet?: boolean;
+  divergence?: number;
 }
 
 interface PredictionData {
@@ -768,6 +770,11 @@ export default function PredictionDetailPage() {
                           バリュー
                         </span>
                       )}
+                      {bet.isValueBet && (
+                        <span className="text-xs bg-emerald-200 dark:bg-emerald-800 text-emerald-800 dark:text-emerald-200 px-2 py-0.5 rounded font-bold animate-pulse">
+                          VALUE BET
+                        </span>
+                      )}
                       {hasActualResult && (
                         betResult.hit ? (
                           <span className="text-xs bg-green-200 dark:bg-green-800 text-green-800 dark:text-green-200 px-2 py-0.5 rounded font-bold">
@@ -833,6 +840,15 @@ export default function PredictionDetailPage() {
                       {bet.recommendedStake !== undefined && bet.recommendedStake > 0 && (
                         <span className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded">
                           推奨 {(bet.recommendedStake * 100).toFixed(1)}%
+                        </span>
+                      )}
+                      {bet.divergence !== undefined && bet.divergence > 0 && (
+                        <span className={`px-2 py-0.5 rounded ${
+                          bet.isValueBet
+                            ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 font-bold'
+                            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                        }`}>
+                          乖離 {bet.divergence.toFixed(1)}%
                         </span>
                       )}
                     </div>

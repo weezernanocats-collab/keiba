@@ -53,5 +53,13 @@
   "horsePacePreference",
   "horseHaiPaceRate",
   "courseDistPaceAvg",
-  "paceStyleMatch"
+  "paceStyleMatch",
+  "lastRacePosition",
+  "last3WinRate",
+  "last3PlaceRate",
+  "classChange",
+  "trackTypeChange",
+  "careerWinRate",
+  "relativeOdds",
+  "winStreak"
 ]

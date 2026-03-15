@@ -190,16 +190,18 @@ def train_catboost_ranker(X_train, y_train, groups_train,
     )
 
     model = CatBoostRanker(
-        iterations=500,
-        learning_rate=0.05,
+        iterations=1500,
+        learning_rate=0.02,
         depth=6,
         loss_function='YetiRank',
         eval_metric='NDCG:top=1',
         random_seed=42,
         verbose=100,
-        early_stopping_rounds=25,
-        l2_leaf_reg=5.0,
-        bagging_temperature=0.6,
+        early_stopping_rounds=75,
+        l2_leaf_reg=3.0,
+        bagging_temperature=0.8,
+        border_count=128,
+        random_strength=0.5,
     )
 
     model.fit(train_pool, eval_set=eval_pool)
