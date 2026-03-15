@@ -67,10 +67,10 @@ export default function RacesPage() {
     setOddsRefreshing(date);
     setOddsResult(null);
     try {
-      const res = await fetch('/api/sync', {
+      const res = await fetch('/api/odds', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'odds_refresh', date }),
+        body: JSON.stringify({ date }),
       });
       const data = await res.json();
       if (res.ok) {

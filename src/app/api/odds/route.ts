@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getOddsByRaceId, upsertOdds, upsertRaceEntryOdds } from '@/lib/queries';
 import { getCacheHeaders } from '@/lib/api-helpers';
 import { scrapeOdds, scrapeRaceResult } from '@/lib/scraper';
+import { dbAll, dbRun } from '@/lib/database';
+
+export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,9 +27,15 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const raceId = body.raceId as string | undefined;
+    const date = body.date as string | undefined;
+
+    // 日付指定 → 一括オッズ更新
+    if (date) {
+      return await handleBulkOddsRefresh(date);
+    }
 
     if (!raceId) {
-      return NextResponse.json({ error: 'raceId が必要です' }, { status: 400 });
+      return NextResponse.json({ error: 'raceId または date が必要です' }, { status: 400 });
     }
 
     let fetched = 0;
@@ -64,5 +73,59 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('オッズ取得エラー:', error);
     return NextResponse.json({ error: 'オッズ取得に失敗しました' }, { status: 500 });
+  }
+}
+
+// ==================== 一括オッズ更新 ====================
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+async function handleBulkOddsRefresh(date: string) {
+  try {
+    const races = await dbAll<{ id: string; name: string }>(
+      `SELECT r.id, r.name FROM races r
+       WHERE r.date = ? AND r.status IN ('予定', '出走確定')
+       ORDER BY r.racecourse_name, r.race_number`,
+      [date]
+    );
+
+    let totalWin = 0;
+    let totalPlace = 0;
+    let failCount = 0;
+
+    for (const race of races) {
+      try {
+        const odds = await scrapeOdds(race.id);
+        if (odds.win.length > 0) {
+          for (const w of odds.win) {
+            await upsertOdds(race.id, '単勝', [w.horseNumber], w.odds);
+            await dbRun(
+              'UPDATE race_entries SET odds = ? WHERE race_id = ? AND horse_number = ?',
+              [w.odds, race.id, w.horseNumber]
+            );
+            totalWin++;
+          }
+          for (const p of odds.place) {
+            await upsertOdds(race.id, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
+            totalPlace++;
+          }
+        }
+      } catch {
+        failCount++;
+      }
+      await sleep(1000);
+    }
+
+    return NextResponse.json({
+      status: 'ok',
+      date,
+      races: races.length,
+      totalWin,
+      totalPlace,
+      failCount,
+    });
+  } catch (error) {
+    console.error('一括オッズ更新エラー:', error);
+    return NextResponse.json({ error: '一括オッズ更新に失敗しました' }, { status: 500 });
   }
 }
