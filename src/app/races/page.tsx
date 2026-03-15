@@ -72,7 +72,13 @@ export default function RacesPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date }),
       });
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        setOddsResult({ date, message: `サーバーエラー (HTTP ${res.status})` });
+        return;
+      }
       if (res.ok) {
         setOddsResult({
           date,
@@ -80,10 +86,11 @@ export default function RacesPage() {
         });
         fetchRaces(false);
       } else {
-        setOddsResult({ date, message: data.error || 'オッズ更新に失敗しました' });
+        setOddsResult({ date, message: data.error || `オッズ更新失敗 (HTTP ${res.status})` });
       }
-    } catch {
-      setOddsResult({ date, message: 'オッズ更新中にエラーが発生しました' });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setOddsResult({ date, message: `通信エラー: ${msg}` });
     } finally {
       setOddsRefreshing(null);
     }
