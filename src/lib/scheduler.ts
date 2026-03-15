@@ -555,7 +555,7 @@ async function executeAfternoonPredictions(date: string): Promise<void> {
  * 予想未生成レースの補完（不足分のみ、既存予想は削除しない）
  * 朝の bulk_chunked パイプラインが途中で切れた場合の安全網
  */
-export async function executeMissingPredictions(date: string): Promise<{ generated: number; total: number }> {
+export async function executeMissingPredictions(date: string, timeBudgetMs?: number): Promise<{ generated: number; total: number }> {
   const missing = await dbAll<{
     id: string; name: string; track_type: string; distance: number;
     track_condition: string; racecourse_name: string; grade: string; weather: string;
@@ -577,8 +577,17 @@ export async function executeMissingPredictions(date: string): Promise<{ generat
 
   await ensureCalibrationLoaded();
 
+  const startTime = Date.now();
+  const hasTime = timeBudgetMs
+    ? () => (Date.now() - startTime) < timeBudgetMs
+    : () => true;
+
   let generated = 0;
   for (const race of missing) {
+    if (!hasTime()) {
+      console.log(`[executeMissingPredictions] タイムバジェット超過: ${generated}/${missing.length}件生成済み`);
+      break;
+    }
     try {
       const raceData = await getRaceById(race.id);
       if (!raceData?.entries?.length || raceData.entries.length < 2) continue;

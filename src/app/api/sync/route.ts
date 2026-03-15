@@ -274,8 +274,12 @@ export async function POST(request: NextRequest) {
         method: 'POST',
         headers: chainHeaders,
         body: JSON.stringify({ type: 'bulk_chunked', state: updatedState }),
-      }).catch(() => {
-        // fire-and-forget: エラーは無視（次のcron実行で再試行される）
+      }).then(res => {
+        if (!res.ok) {
+          console.error(`[bulk_chunked] チェーン失敗: HTTP ${res.status}, phase=${updatedState.phase}, remaining=${updatedState.phaseRemaining}`);
+        }
+      }).catch(err => {
+        console.error(`[bulk_chunked] チェーン失敗: ${err instanceof Error ? err.message : err}, phase=${updatedState.phase}, remaining=${updatedState.phaseRemaining}`);
       });
     }
 
@@ -338,7 +342,11 @@ export async function POST(request: NextRequest) {
         method: 'POST',
         headers: chainHeaders,
         body: JSON.stringify({ type: 'bulk_chunked', state: updatedState }),
-      }).catch(() => {});
+      }).then(res => {
+        if (!res.ok) console.error(`[bulk_chunked/full] チェーン失敗: HTTP ${res.status}, phase=${updatedState.phase}`);
+      }).catch(err => {
+        console.error(`[bulk_chunked/full] チェーン失敗: ${err instanceof Error ? err.message : err}, phase=${updatedState.phase}`);
+      });
     }
 
     return NextResponse.json({
