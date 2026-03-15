@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
     const daysParam = request.nextUrl.searchParams.get('days');
     const days = daysParam && daysParam !== 'all' ? parseInt(daysParam, 10) : 0;
     const dateFilter = days > 0
-      ? `AND r.date >= date('now', '-${days} days')`
+      ? `AND r.date >= date('now', '+9 hours', '-${days} days')`
       : '';
 
     // 1. prediction_results + predictions を JOIN して結果確定済みレースを取得

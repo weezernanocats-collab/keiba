@@ -22,7 +22,7 @@ export const dynamic = 'force-dynamic';
 
 // インメモリキャッシュ（Turso Read量を削減）
 const cache = new Map<string, { data: unknown; expires: number }>();
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30分（結果確定済みデータのみ使用、日中変動なし）
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5分
 
 export async function GET(request: NextRequest) {
   try {
@@ -38,8 +38,9 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // JST基準の日付フィルタ（Tursoのdate('now')はUTCなので+9時間補正）
     const dateFilter = days > 0
-      ? `AND r.date >= date('now', '-${days} days')`
+      ? `AND r.date >= date('now', '+9 hours', '-${days} days')`
       : '';
 
     // メインクエリ: prediction_results + races + race_entries(オッズ) + odds(複勝実オッズ) + predictions(bets_json) を1回で取得

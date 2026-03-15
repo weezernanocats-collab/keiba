@@ -142,11 +142,12 @@ export default function StatsPage() {
       setLoading(true);
       try {
         const params = period !== 'all' ? `?days=${period}` : '';
+        const fetchOpts: RequestInit = { cache: 'no-store' };
         const [statsRes, trendRes, betPnlRes, venueRes] = await Promise.all([
-          fetch(`/api/accuracy-stats${params}`),
-          fetch(`/api/stats/trend?period=${trendPeriod}`),
-          fetch(`/api/stats/bet-types${params}`),
-          fetch(`/api/stats/venue${params}`),
+          fetch(`/api/accuracy-stats${params}`, fetchOpts),
+          fetch(`/api/stats/trend?period=${trendPeriod}`, fetchOpts),
+          fetch(`/api/stats/bet-types${params}`, fetchOpts),
+          fetch(`/api/stats/venue${params}`, fetchOpts),
         ]);
         const data = await statsRes.json();
         setSummary(data.summary);
@@ -511,7 +512,7 @@ export default function StatsPage() {
       {/* 馬券種別 収支サマリー */}
       {betTypePnl.length > 0 && (
         <div className="bg-card-bg border border-card-border rounded-xl p-6">
-          <h2 className="text-lg font-bold mb-4">馬券種別 収支サマリー（直近1000R）</h2>
+          <h2 className="text-lg font-bold mb-4">馬券種別 収支サマリー ({periodLabel})</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -558,7 +559,7 @@ export default function StatsPage() {
       {/* 競馬場別・トラック別 的中傾向 */}
       {(venueDetails.length > 0 || trackDetails.length > 0) && (
         <div className="bg-card-bg border border-card-border rounded-xl p-6">
-          <h2 className="text-lg font-bold mb-4">競馬場別・トラック別 的中傾向（全期間）</h2>
+          <h2 className="text-lg font-bold mb-4">競馬場別・トラック別 的中傾向 ({periodLabel})</h2>
 
           {/* トラック別 */}
           {trackDetails.length > 0 && (
