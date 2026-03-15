@@ -81,12 +81,9 @@ export default function RacesPage() {
         return;
       }
       if (res.ok) {
-        const raceLabel = data.totalRaces && data.totalRaces > data.races
-          ? `${data.races}/${data.totalRaces}レース`
-          : `${data.races}レース`;
         setOddsResult({
           date,
-          message: `${raceLabel}のオッズ更新完了（単勝${data.totalWin}件, 複勝${data.totalPlace}件${data.failCount > 0 ? `, 失敗${data.failCount}件` : ''}）`,
+          message: `${data.races}レースのオッズ更新完了（単勝${data.totalWin}件, 複勝${data.totalPlace}件${data.failCount > 0 ? `, 失敗${data.failCount}件` : ''}）`,
         });
         fetchRaces(false);
       } else {

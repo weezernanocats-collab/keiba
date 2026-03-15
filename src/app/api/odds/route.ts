@@ -80,11 +80,31 @@ export async function POST(request: NextRequest) {
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-async function handleBulkOddsRefresh(date: string) {
-  const TIME_BUDGET_MS = 50_000; // 60s maxDuration - 10s安全マージン
-  const startTime = Date.now();
-  const hasTime = () => Date.now() - startTime < TIME_BUDGET_MS;
+const BATCH_SIZE = 3; // 同時スクレイプ数（netkeiba負荷軽減）
+const BATCH_DELAY_MS = 300; // バッチ間の待機
 
+async function processOneRace(raceId: string) {
+  const odds = await scrapeOdds(raceId);
+  let win = 0;
+  let place = 0;
+  if (odds.win.length > 0) {
+    for (const w of odds.win) {
+      await upsertOdds(raceId, '単勝', [w.horseNumber], w.odds);
+      await dbRun(
+        'UPDATE race_entries SET odds = ? WHERE race_id = ? AND horse_number = ?',
+        [w.odds, raceId, w.horseNumber]
+      );
+      win++;
+    }
+    for (const p of odds.place) {
+      await upsertOdds(raceId, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
+      place++;
+    }
+  }
+  return { win, place };
+}
+
+async function handleBulkOddsRefresh(date: string) {
   try {
     const races = await dbAll<{ id: string; name: string }>(
       `SELECT r.id, r.name FROM races r
@@ -96,38 +116,28 @@ async function handleBulkOddsRefresh(date: string) {
     let totalWin = 0;
     let totalPlace = 0;
     let failCount = 0;
-    let processed = 0;
 
-    for (const race of races) {
-      if (!hasTime()) break;
-      try {
-        const odds = await scrapeOdds(race.id);
-        if (odds.win.length > 0) {
-          for (const w of odds.win) {
-            await upsertOdds(race.id, '単勝', [w.horseNumber], w.odds);
-            await dbRun(
-              'UPDATE race_entries SET odds = ? WHERE race_id = ? AND horse_number = ?',
-              [w.odds, race.id, w.horseNumber]
-            );
-            totalWin++;
-          }
-          for (const p of odds.place) {
-            await upsertOdds(race.id, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
-            totalPlace++;
-          }
+    // 3レースずつ並列処理（36レース → 12バッチ × ~2s ≒ 24s）
+    for (let i = 0; i < races.length; i += BATCH_SIZE) {
+      const batch = races.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(race => processOneRace(race.id))
+      );
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          totalWin += r.value.win;
+          totalPlace += r.value.place;
+        } else {
+          failCount++;
         }
-      } catch {
-        failCount++;
       }
-      processed++;
-      if (hasTime()) await sleep(500);
+      if (i + BATCH_SIZE < races.length) await sleep(BATCH_DELAY_MS);
     }
 
     return NextResponse.json({
       status: 'ok',
       date,
-      races: processed,
-      totalRaces: races.length,
+      races: races.length,
       totalWin,
       totalPlace,
       failCount,
