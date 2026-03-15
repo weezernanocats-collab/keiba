@@ -135,6 +135,7 @@ function UpcomingRaces() {
   const [predCache, setPredCache] = useState<Map<string, PredCache>>(new Map());
   const [loadingPred, setLoadingPred] = useState<string | null>(null);
   const [betTypeStats, setBetTypeStats] = useState<BetTypeStat[]>([]);
+  const [confidenceFilter, setConfidenceFilter] = useState<string>('all');
   const { isRaceFavoriteInProfile, toggleRaceForProfile } = useFavorites();
 
   useEffect(() => {
@@ -192,15 +193,26 @@ function UpcomingRaces() {
     }
   }, [expandedId, predCache]);
 
+  const filteredRaces = useMemo(() => {
+    if (confidenceFilter === 'all') return races;
+    return races.filter(r => {
+      if (confidenceFilter === 'high') return r.confidence != null && r.confidence >= 70;
+      if (confidenceFilter === 'mid') return r.confidence != null && r.confidence >= 50 && r.confidence < 70;
+      if (confidenceFilter === 'low') return r.confidence != null && r.confidence < 50;
+      if (confidenceFilter === 'none') return r.confidence == null;
+      return true;
+    });
+  }, [races, confidenceFilter]);
+
   const grouped = useMemo(() => {
     const map = new Map<string, RaceRow[]>();
-    for (const race of races) {
+    for (const race of filteredRaces) {
       const key = race.date;
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(race);
     }
     return map;
-  }, [races]);
+  }, [filteredRaces]);
 
   if (loading) return <LoadingSpinner />;
 
@@ -215,9 +227,25 @@ function UpcomingRaces() {
 
   return (
     <div className="space-y-6">
-      <p className="text-muted text-sm">
-        過去の成績データを多角的に分析し、各レースの予想を提供します。タップで推奨馬券を表示します。
-      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-muted text-sm">
+          過去の成績データを多角的に分析し、各レースの予想を提供します。タップで推奨馬券を表示します。
+        </p>
+        <div className="flex items-center gap-2 ml-auto">
+          <select
+            className="px-3 py-2 text-sm border border-card-border rounded-lg bg-card-bg"
+            value={confidenceFilter}
+            onChange={e => setConfidenceFilter(e.target.value)}
+          >
+            <option value="all">全信頼度</option>
+            <option value="high">高 (70%+)</option>
+            <option value="mid">中 (50-69%)</option>
+            <option value="low">低 (&lt;50%)</option>
+            <option value="none">未算出</option>
+          </select>
+          <span className="text-sm text-muted">{filteredRaces.length}件</span>
+        </div>
+      </div>
       {[...grouped.entries()].map(([date, dateRaces]) => (
         <div key={date}>
           <h2 className="text-lg font-bold mb-2 border-b border-card-border pb-1">{date}</h2>

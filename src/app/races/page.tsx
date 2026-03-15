@@ -28,6 +28,7 @@ export default function RacesPage() {
   const [courseFilter, setCourseFilter] = useState<string>('all');
   const [trackFilter, setTrackFilter] = useState<string>('all');
   const [gradeFilter, setGradeFilter] = useState<string>('all');
+  const [confidenceFilter, setConfidenceFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [oddsRefreshing, setOddsRefreshing] = useState<string | null>(null);
@@ -106,9 +107,13 @@ export default function RacesPage() {
       if (gradeFilter === 'G1' && r.grade !== 'G1') return false;
       if (gradeFilter === 'G2' && r.grade !== 'G2') return false;
       if (gradeFilter === 'G3' && r.grade !== 'G3') return false;
+      if (confidenceFilter === 'high' && (r.confidence == null || r.confidence < 70)) return false;
+      if (confidenceFilter === 'mid' && (r.confidence == null || r.confidence < 50 || r.confidence >= 70)) return false;
+      if (confidenceFilter === 'low' && (r.confidence == null || r.confidence >= 50)) return false;
+      if (confidenceFilter === 'none' && r.confidence != null) return false;
       return true;
     });
-  }, [races, courseFilter, trackFilter, gradeFilter]);
+  }, [races, courseFilter, trackFilter, gradeFilter, confidenceFilter]);
 
   // 日付ごとにグループ化
   const groupedByDate: Record<string, RaceRow[]> = {};
@@ -179,10 +184,22 @@ export default function RacesPage() {
           <option value="G3">G3</option>
         </select>
 
-        {(dateFilter || courseFilter !== 'all' || trackFilter !== 'all' || gradeFilter !== 'all') && (
+        <select
+          className="px-3 py-2 text-sm border border-card-border rounded-lg bg-card-bg"
+          value={confidenceFilter}
+          onChange={e => setConfidenceFilter(e.target.value)}
+        >
+          <option value="all">全信頼度</option>
+          <option value="high">高 (70%+)</option>
+          <option value="mid">中 (50-69%)</option>
+          <option value="low">低 (&lt;50%)</option>
+          <option value="none">未算出</option>
+        </select>
+
+        {(dateFilter || courseFilter !== 'all' || trackFilter !== 'all' || gradeFilter !== 'all' || confidenceFilter !== 'all') && (
           <button
             className="px-3 py-2 text-xs text-red-400 hover:text-red-300 transition-colors"
-            onClick={() => { setDateFilter(''); setCourseFilter('all'); setTrackFilter('all'); setGradeFilter('all'); }}
+            onClick={() => { setDateFilter(''); setCourseFilter('all'); setTrackFilter('all'); setGradeFilter('all'); setConfidenceFilter('all'); }}
           >
             フィルタをリセット
           </button>
