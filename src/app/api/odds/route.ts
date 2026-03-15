@@ -81,6 +81,10 @@ export async function POST(request: NextRequest) {
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 async function handleBulkOddsRefresh(date: string) {
+  const TIME_BUDGET_MS = 50_000; // 60s maxDuration - 10s安全マージン
+  const startTime = Date.now();
+  const hasTime = () => Date.now() - startTime < TIME_BUDGET_MS;
+
   try {
     const races = await dbAll<{ id: string; name: string }>(
       `SELECT r.id, r.name FROM races r
@@ -92,8 +96,10 @@ async function handleBulkOddsRefresh(date: string) {
     let totalWin = 0;
     let totalPlace = 0;
     let failCount = 0;
+    let processed = 0;
 
     for (const race of races) {
+      if (!hasTime()) break;
       try {
         const odds = await scrapeOdds(race.id);
         if (odds.win.length > 0) {
@@ -113,13 +119,15 @@ async function handleBulkOddsRefresh(date: string) {
       } catch {
         failCount++;
       }
-      await sleep(1000);
+      processed++;
+      if (hasTime()) await sleep(500);
     }
 
     return NextResponse.json({
       status: 'ok',
       date,
-      races: races.length,
+      races: processed,
+      totalRaces: races.length,
       totalWin,
       totalPlace,
       failCount,
