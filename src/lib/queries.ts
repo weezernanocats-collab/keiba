@@ -115,17 +115,22 @@ function mapRaceEntry(row: Record<string, any>): RaceEntry {
 }
 
 export async function getUpcomingRaces(limit: number = 50) {
+  // JST日付を計算（UTC+9）- SQLite の date('now') は UTC のため
+  const now = new Date();
+  const jstOffset = 9 * 60 * 60_000;
+  const jstToday = new Date(now.getTime() + jstOffset).toISOString().split('T')[0];
+
   const rows = await dbAll<Record<string, unknown>>(`
     SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
     LEFT JOIN predictions p ON r.id = p.race_id
-    WHERE r.date >= date('now')
+    WHERE r.date >= ?
     AND r.status IN ('予定', '出走確定')
     GROUP BY r.id
     ORDER BY r.date, r.racecourse_name, r.race_number
     LIMIT ?
-  `, [limit]);
+  `, [jstToday, limit]);
   return rows.map(r => ({
     ...mapRace(r),
     entryCount: (r.entry_count ?? 0) as number,

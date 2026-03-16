@@ -9,6 +9,7 @@ import BudgetSimulator from '@/components/BudgetSimulator';
 import MonteCarloSimulator from '@/components/MonteCarloSimulator';
 import ModelVsMarket from '@/components/ModelVsMarket';
 import { useFavorites } from '@/lib/use-favorites';
+import type { MarketAnalysisEntry as MarketEntry, BetDisplay as Bet, BetTypeStat, BetSummaryDisplay as BetSummary } from '@/types';
 
 interface Pick {
   rank: number;
@@ -18,14 +19,6 @@ interface Pick {
   reasons: string[];
   runningStyle?: string;
   escapeRate?: number;
-}
-
-interface MarketEntry {
-  modelProb: number;
-  marketProb: number;
-  blendedProb: number;
-  disagreement: number;
-  isValue: boolean;
 }
 
 interface Analysis {
@@ -48,19 +41,6 @@ interface BettingStrategy {
   primaryBets: string[];
   avoidBets: string[];
   budgetAdvice: string;
-}
-
-interface Bet {
-  type: string;
-  selections: number[];
-  reasoning: string;
-  expectedValue: number;
-  odds?: number;
-  kellyFraction?: number;
-  valueEdge?: number;
-  recommendedStake?: number;
-  isValueBet?: boolean;
-  divergence?: number;
 }
 
 interface PredictionData {
@@ -101,12 +81,6 @@ interface BetResultDetail extends Bet {
   profit: number;
 }
 
-interface BetSummary {
-  totalInvestment: number;
-  totalPayout: number;
-  totalProfit: number;
-}
-
 interface ActualTop3Entry {
   horseNumber: number;
   horseName: string;
@@ -130,15 +104,6 @@ interface ScoreBucket {
   total: number;
   winRate: number;
   placeRate: number;
-}
-
-interface BetTypeStat {
-  type: string;
-  total: number;
-  hitRate: number;
-  roi: number;
-  avgOdds: number;
-  hitCount: number;
 }
 
 export default function PredictionDetailPage() {
@@ -242,7 +207,13 @@ export default function PredictionDetailPage() {
     .map(bet => {
       const stat = betTypeStatsMap.get(bet.type);
       const odds = bet.odds || 0;
-      const hitRate = stat?.hitRate || 0;
+      // 馬券固有の的中率を優先
+      const hasModelProb = bet.hitProbability != null;
+      const betHitProb = hasModelProb ? bet.hitProbability! * 100 : 0;
+      const typeHitRate = stat?.hitRate || 0;
+      const hitRate = hasModelProb && typeHitRate > 0
+        ? betHitProb * 0.7 + typeHitRate * 0.3
+        : hasModelProb ? betHitProb : typeHitRate;
       const evScore = odds > 0 && hitRate > 0 ? Math.round(odds * hitRate) : 0;
       return { bet, stat, odds, hitRate, evScore };
     })
@@ -726,7 +697,10 @@ export default function PredictionDetailPage() {
       {/* 推奨馬券 */}
       {prediction.recommendedBets.length > 0 && (
         <div id="bets" ref={setSectionRef('bets')} className="scroll-mt-16">
-          <h2 className="text-lg font-bold mb-4">推奨馬券</h2>
+          <h2 className="text-lg font-bold mb-1">推奨馬券</h2>
+          <p className="text-xs text-muted mb-4">
+            的中率算出要素: 過去成績・騎手適性・競馬場相性・脚質相性・安定性・買い方実績
+          </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {prediction.recommendedBets.map((bet, idx) => {
               const isMain = bet.reasoning.startsWith('【主力】');
@@ -743,9 +717,15 @@ export default function PredictionDetailPage() {
               const roiPositive = roi >= 100;
               // 的中率・期待値の算出
               const betStat = betTypeStatsMap.get(bet.type);
-              const betHitRate = betStat?.hitRate || 0;
+              const typeHitRate = betStat?.hitRate || 0;
+              // モデル推定と買い方実績をブレンド（モデル70% + 実績30%）
+              const hasModelProb = bet.hitProbability != null;
+              const betHitProb = hasModelProb ? bet.hitProbability! * 100 : 0;
+              const betHitRate = hasModelProb && typeHitRate > 0
+                ? betHitProb * 0.7 + typeHitRate * 0.3
+                : hasModelProb ? betHitProb : typeHitRate;
               const betOdds = bet.odds || (hasActualResult && betResult.odds > 0 ? betResult.odds : 0);
-              // 期待値 = 的中率(システム実績) × オッズ（100が損益分岐点）
+              // 期待値 = ブレンド的中率 × オッズ（100が損益分岐点）
               const evScore = betOdds > 0 && betHitRate > 0 ? Math.round(betOdds * betHitRate) : 0;
               return (
                 <div key={idx} className={`border rounded-xl p-4 ${
@@ -807,12 +787,16 @@ export default function PredictionDetailPage() {
                       {bet.selections.join(' - ')}
                     </p>
                     <div className="flex items-center gap-3">
-                      {betHitRate > 0 && (
+                      {hasModelProb ? (
                         <span className="text-sm text-muted">
                           的中率 <span className="font-bold text-foreground">{betHitRate.toFixed(1)}%</span>
+                        </span>
+                      ) : typeHitRate > 0 ? (
+                        <span className="text-sm text-muted">
+                          的中率 <span className="font-bold text-foreground">{typeHitRate.toFixed(1)}%</span>
                           <span className="text-xs ml-0.5">({betStat?.total || 0}件)</span>
                         </span>
-                      )}
+                      ) : null}
                       {evScore > 0 && (
                         <span className={`text-sm font-bold ${
                           evScore >= 100

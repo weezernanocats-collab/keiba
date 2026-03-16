@@ -1,4 +1,4 @@
-name: XGBoost Model Training
+name: Weekly Model Retraining
 
 on:
   schedule:
@@ -11,25 +11,62 @@ permissions:
   contents: write
 
 jobs:
-  train:
+  retrain:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
 
+      # ---- Node.js: Tursoから最新学習データをエクスポート ----
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Export training data from Turso
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          # export-training-data.ts は .env.local を読むが、CI では環境変数を直接使う
+          # .env.local を生成して互換性を確保
+          echo "TURSO_DATABASE_URL=${TURSO_DATABASE_URL}" > .env.local
+          echo "TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN}" >> .env.local
+          npx tsx -r tsconfig-paths/register scripts/export-training-data.ts
+
+      - name: Verify training data
+        run: |
+          if [ ! -f model/training_data.json ]; then
+            echo "ERROR: training_data.json not generated"
+            exit 1
+          fi
+          SIZE=$(stat -c%s model/training_data.json)
+          echo "Training data size: ${SIZE} bytes"
+          if [ "$SIZE" -lt 1000 ]; then
+            echo "ERROR: training_data.json too small (${SIZE} bytes)"
+            exit 1
+          fi
+
+      # ---- Python: XGBoost + CatBoost 学習 ----
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: pip install xgboost==2.0.3 scikit-learn==1.4.2 numpy==1.26.4 requests
+      - name: Install Python dependencies
+        run: pip install xgboost==2.0.3 catboost==1.2.7 scikit-learn==1.4.2 numpy==1.26.4 requests
 
       - name: Train XGBoost models
-        env:
-          VERCEL_URL: ${{ secrets.APP_URL }}
-          SYNC_KEY: ${{ secrets.SYNC_KEY }}
         run: python scripts/train_model.py
+
+      - name: Train CatBoost models
+        run: python scripts/train_catboost.py
+
+      # ---- コミット & プッシュ ----
+      - name: Clean up .env.local
+        run: rm -f .env.local
 
       - name: Check for model changes
         id: check
@@ -39,7 +76,8 @@ jobs:
             echo "No model changes detected"
           else
             echo "changed=true" >> $GITHUB_OUTPUT
-            echo "Model files updated"
+            echo "Model files updated:"
+            git diff --stat model/
           fi
 
       - name: Commit and push models
@@ -48,5 +86,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add model/
-          git commit -m "chore: XGBoost モデル自動再学習 ($(date -u +%Y-%m-%d))"
+          git commit -m "chore: 週次モデル再学習 XGBoost+CatBoost ($(date -u +%Y-%m-%d))"
           git push

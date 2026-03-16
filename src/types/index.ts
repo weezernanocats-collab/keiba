@@ -202,6 +202,7 @@ export interface RecommendedBet {
   recommendedStake?: number; // 推奨賭け率 (fractional Kelly f*/4, 0-0.25)
   isValueBet?: boolean;      // バリューベット推奨 (バックテスト検証済フィルタ通過)
   divergence?: number;       // モデル確率と市場確率の乖離度 (%)
+  hitProbability?: number;   // この馬券の的中確率 (0-1, モデル推定)
 }
 
 // 過去成績
@@ -229,6 +230,52 @@ export interface PastPerformance {
   odds: number;
   popularity: number;
   prize: number;
+}
+
+// フロントエンド共通型
+
+/** 推奨ベットの表示用型（RecommendedBet のフロントエンド版） */
+export interface BetDisplay {
+  type: string;
+  selections: number[];
+  reasoning: string;
+  expectedValue: number;
+  odds?: number;
+  kellyFraction?: number;
+  valueEdge?: number;
+  recommendedStake?: number;
+  isValueBet?: boolean;
+  divergence?: number;
+  hitProbability?: number;
+}
+
+/** ベット結果 */
+export interface BetResultDisplay {
+  type: string;
+  selections: number[];
+  hit: boolean;
+  odds: number;
+  isEstimated: boolean;
+  investment: number;
+  payout: number;
+  profit: number;
+}
+
+/** ベット集計 */
+export interface BetSummaryDisplay {
+  totalInvestment: number;
+  totalPayout: number;
+  totalProfit: number;
+}
+
+/** 券種別成績 */
+export interface BetTypeStat {
+  type: string;
+  total: number;
+  hitRate: number;
+  roi: number;
+  avgOdds: number;
+  hitCount: number;
 }
 
 // 競馬場一覧

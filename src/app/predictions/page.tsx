@@ -7,6 +7,7 @@ import ConfidenceBadge from '@/components/ConfidenceBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import FavoriteProfilePopover from '@/components/FavoriteProfilePopover';
 import { useFavorites } from '@/lib/use-favorites';
+import type { BetTypeStat } from '@/types';
 import { PredictionHistoryContent } from './history/page';
 
 interface RaceRow {
@@ -34,6 +35,7 @@ interface PredBet {
   kellyFraction?: number;
   valueEdge?: number;
   recommendedStake?: number;
+  hitProbability?: number;
 }
 
 interface PredPick {
@@ -50,14 +52,6 @@ interface PredCache {
   confidence: number;
 }
 
-interface BetTypeStat {
-  type: string;
-  total: number;
-  hitRate: number;
-  roi: number;
-  avgOdds: number;
-  hitCount: number;
-}
 
 const TABS = [
   { key: 'upcoming', label: 'AI予想' },
@@ -324,7 +318,10 @@ function UpcomingRaces() {
                           {/* 推奨馬券 */}
                           {pred.recommendedBets.length > 0 && (
                             <div>
-                              <h3 className="text-sm font-bold text-muted mb-2">推奨馬券</h3>
+                              <h3 className="text-sm font-bold text-muted mb-1">推奨馬券</h3>
+                              <p className="text-xs text-muted mb-2">
+                                的中率算出要素: 過去成績・騎手適性・競馬場相性・脚質相性・安定性・買い方実績
+                              </p>
                               <div className="overflow-x-auto">
                                 <table className="w-full text-sm">
                                   <thead>
@@ -341,11 +338,17 @@ function UpcomingRaces() {
                                   <tbody>
                                     {pred.recommendedBets.map((bet, idx) => {
                                       const stat = betTypeStatsMap.get(bet.type);
-                                      const hitRate = stat?.hitRate || 0; // システム実績的中率 (例: 30.0%)
+                                      // 馬券固有の的中率（モデル推定）を優先、なければ券種全体統計
+                                      const hasModelProb = bet.hitProbability != null;
+                                      const betHitProb = hasModelProb ? bet.hitProbability! * 100 : 0;
+                                      const typeHitRate = stat?.hitRate || 0;
                                       const odds = bet.odds || 0;
-                                      // 期待値 = 的中率 × オッズ（100が損益分岐点）
-                                      // 期待値 = 的中率 × オッズ（100が損益分岐点）
-                                      const evScore = odds > 0 && hitRate > 0 ? Math.round(odds * hitRate) : 0;
+                                      // モデル推定と買い方実績をブレンド（モデル70% + 実績30%）
+                                      const blendedHitRate = hasModelProb && typeHitRate > 0
+                                        ? betHitProb * 0.7 + typeHitRate * 0.3
+                                        : hasModelProb ? betHitProb : typeHitRate;
+                                      // 期待値 = ブレンド的中率 × オッズ（100が損益分岐点）
+                                      const evScore = odds > 0 && blendedHitRate > 0 ? Math.round(odds * blendedHitRate) : 0;
                                       // 予想ROI = モデル推定勝率 × オッズ × 100
                                       const predRoi = bet.expectedValue > 0 ? Math.round(bet.expectedValue * 100) : 0;
                                       const isMain = bet.reasoning.startsWith('\u3010\u4E3B\u529B\u3011');
@@ -380,9 +383,13 @@ function UpcomingRaces() {
                                             ) : '-'}
                                           </td>
                                           <td className="py-1.5 px-2 text-right">
-                                            {hitRate > 0 ? (
+                                            {hasModelProb ? (
+                                              <span className="text-foreground font-bold">
+                                                {blendedHitRate.toFixed(1)}%
+                                              </span>
+                                            ) : typeHitRate > 0 ? (
                                               <span className="text-muted">
-                                                {hitRate.toFixed(1)}%
+                                                {typeHitRate.toFixed(1)}%
                                                 <span className="text-xs ml-0.5">({stat?.total || 0})</span>
                                               </span>
                                             ) : '-'}

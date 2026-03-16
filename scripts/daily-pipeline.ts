@@ -34,10 +34,10 @@ if (!process.env.TURSO_DATABASE_URL || !process.env.TURSO_AUTH_TOKEN) {
   process.exit(1);
 }
 
-import { runSchedulerJob } from '@/lib/scheduler';
+import { runSchedulerJob, cleanupStaleRaces } from '@/lib/scheduler';
 import { closeDatabase } from '@/lib/database';
 
-const VALID_JOBS = ['morning', 'odds', 'afternoon', 'results', 'night'] as const;
+const VALID_JOBS = ['morning', 'odds', 'afternoon', 'results', 'night', 'cleanup'] as const;
 type JobType = typeof VALID_JOBS[number];
 
 function parseArgs(): JobType {
@@ -73,7 +73,18 @@ async function main() {
   const startTime = Date.now();
 
   try {
-    await runSchedulerJob(job);
+    if (job === 'cleanup') {
+      const { fixed, total } = await cleanupStaleRaces();
+      console.log(`\n✓ Cleanup completed: ${fixed}/${total} races fixed`);
+    } else {
+      // results ジョブの場合、先にステータス修復を実行して取りこぼしを回収
+      if (job === 'results') {
+        console.log('--- Cleanup stale races before results fetch ---');
+        const { fixed, total } = await cleanupStaleRaces();
+        if (total > 0) console.log(`  Cleaned up ${fixed}/${total} stale races`);
+      }
+      await runSchedulerJob(job);
+    }
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`\n✓ Job "${job}" completed in ${elapsed}s`);
   } catch (error) {

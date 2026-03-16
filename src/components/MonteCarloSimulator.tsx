@@ -1,16 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-interface Bet {
-  type: string;
-  selections: number[];
-  reasoning: string;
-  expectedValue: number;
-  odds?: number;
-  kellyFraction?: number;
-  valueEdge?: number;
-  recommendedStake?: number;
-}
+import type { BetDisplay as Bet } from '@/types';
 
 interface MonteCarloSimulatorProps {
   bets: Bet[];

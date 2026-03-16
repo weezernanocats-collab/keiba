@@ -41,7 +41,7 @@
       "top1_accuracy": 0.3407,
       "top3_accuracy": 0.7037
     },
-    "dirt_short": {
+    "dirt_sprint": {
       "ndcg_1": 0.4595,
       "ndcg_3": 0.5224,
       "top1_accuracy": 0.325,
@@ -58,7 +58,7 @@
     "turf_sprint",
     "turf_mile",
     "turf_long",
-    "dirt_short",
+    "dirt_sprint",
     "dirt_long"
   ],
   "catboost": {
@@ -87,7 +87,7 @@
         "top1_accuracy": 0.3704,
         "top3_accuracy": 0.6889
       },
-      "dirt_short": {
+      "dirt_sprint": {
         "ndcg_1": 0.5083,
         "ndcg_3": 0.5292,
         "top1_accuracy": 0.3536,
@@ -104,7 +104,7 @@
       "turf_sprint",
       "turf_mile",
       "turf_long",
-      "dirt_short",
+      "dirt_sprint",
       "dirt_long"
     ],
     "ensemble_weights": {
@@ -123,7 +123,7 @@
           "xgb": 1.0,
           "catboost": 0.0
         },
-        "dirt_short": {
+        "dirt_sprint": {
           "xgb": 1.0,
           "catboost": 0.0
         },

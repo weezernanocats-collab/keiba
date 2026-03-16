@@ -2,8 +2,10 @@ name: Daily Results Pipeline
 
 on:
   schedule:
-    # 毎日 08:00 UTC = 17:00 JST
-    - cron: '0 8 * * *'
+    # Vercel Cron のバックアップとして毎日実行
+    # 17:30 JST = 08:30 UTC (Vercel Cron は 17:00 JST)
+    # GitHub Actions は Vercel の 60秒制限がないため、大量レースも処理可能
+    - cron: '30 8 * * *'
   workflow_dispatch:
 
 jobs:
@@ -29,7 +31,7 @@ jobs:
           echo "TURSO_DATABASE_URL=\"${{ secrets.TURSO_DATABASE_URL }}\"" > .env.local
           echo "TURSO_AUTH_TOKEN=\"${{ secrets.TURSO_AUTH_TOKEN }}\"" >> .env.local
 
-      - name: Run results pipeline (results + accuracy verification)
+      - name: Run results pipeline (cleanup + results + accuracy verification)
         run: npx tsx -r tsconfig-paths/register scripts/daily-pipeline.ts --job results
 
       - name: Cleanup

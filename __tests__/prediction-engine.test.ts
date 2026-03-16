@@ -6,13 +6,18 @@
 import { describe, it, expect } from 'vitest';
 import { _testExports } from '@/lib/prediction-engine';
 import {
+  adjustWeights,
+  DEFAULT_WEIGHTS,
+  getCurrentWeights,
+} from '@/lib/weight-management';
+import {
   makePP, makeStrongHorsePP,
   makeEscapeHorsePP, makeCloserHorsePP, makeGradeRacePP,
   makeScoredHorse, makeEmptyContext,
 } from './fixtures/mock-data';
 
 const {
-  calcFactorReliability, bayesianScore, adjustWeights,
+  calcFactorReliability, bayesianScore,
   detectRunningStyle,
   calcRecentFormScore, calcDistanceAptitude,
   calcTrackConditionAptitude, calcJockeyScore, calcSpeedRating,
@@ -20,8 +25,11 @@ const {
   calcRotation, calcLastThreeFurlongs, calcConsistency,
   applyPaceBonus, calculateConfidence, generateBetRecommendations,
   positionToScore, ratioToScore, timeToSeconds,
-  WEIGHTS, POPULATION_PRIORS,
+  POPULATION_PRIORS,
 } = _testExports;
+
+// WEIGHTS は weight-management モジュールから取得
+const WEIGHTS = DEFAULT_WEIGHTS;
 
 // ==================== ユーティリティ ====================
 
@@ -154,7 +162,7 @@ describe('adjustWeights', () => {
     }));
     const adjusted = adjustWeights(reliabilities);
     const firstFactor = Object.keys(WEIGHTS)[0];
-    expect(adjusted[firstFactor]).toBeLessThan(WEIGHTS[firstFactor as keyof typeof WEIGHTS] as number);
+    expect(adjusted[firstFactor]).toBeLessThan(WEIGHTS[firstFactor]);
   });
 
   it('全ファクターの調整後重み合計は基本重み合計と概ね等しい', () => {
@@ -163,7 +171,7 @@ describe('adjustWeights', () => {
     }));
     const adjusted = adjustWeights(reliabilities);
     const totalAdjusted = Object.values(adjusted).reduce((s, v) => s + v, 0);
-    const totalBase = Object.values(WEIGHTS).reduce((s, v) => s + (v as number), 0);
+    const totalBase = Object.values(WEIGHTS).reduce((s, v) => s + v, 0);
     expect(totalAdjusted).toBeCloseTo(totalBase, 1);
   });
 });

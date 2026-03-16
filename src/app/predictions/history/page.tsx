@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import type { BetResultDisplay as BetResult, BetSummaryDisplay as BetSummary } from '@/types';
 
 interface PickResult {
   rank: number;
@@ -13,23 +14,6 @@ interface PickResult {
   actualPosition: number | null;
   hit: boolean;
   placeHit: boolean;
-}
-
-interface BetResult {
-  type: string;
-  selections: number[];
-  odds: number;
-  hit: boolean;
-  isEstimated: boolean;
-  investment: number;
-  payout: number;
-  profit: number;
-}
-
-interface BetSummary {
-  totalInvestment: number;
-  totalPayout: number;
-  totalProfit: number;
 }
 
 interface ActualTop3Entry {

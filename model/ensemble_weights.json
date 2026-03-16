@@ -5,7 +5,7 @@
     "turf_sprint": { "xgb": 0.6, "catboost": 0.4 },
     "turf_mile": { "xgb": 0.6, "catboost": 0.4 },
     "turf_long": { "xgb": 0.6, "catboost": 0.4 },
-    "dirt_short": { "xgb": 0.6, "catboost": 0.4 },
+    "dirt_sprint": { "xgb": 0.6, "catboost": 0.4 },
     "dirt_long": { "xgb": 0.6, "catboost": 0.4 }
   }
 }

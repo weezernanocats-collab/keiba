@@ -10,7 +10,7 @@
  *   - 夕方 (17:00 JST): 結果スクレイプ + 予想照合 + 予想補完
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { runCronJob, executeMissingPredictions } from '@/lib/scheduler';
+import { runCronJob, executeMissingPredictions, cleanupStaleRaces } from '@/lib/scheduler';
 import { evaluateAllPendingRaces } from '@/lib/accuracy-tracker';
 
 // Hobby: 60秒、Pro: 300秒 — Vercel が自動的にプランに応じて制限
@@ -78,6 +78,17 @@ export async function GET(request: NextRequest) {
         }
       } catch (e) {
         console.error('[cron] morning evaluate failed:', e);
+      }
+
+      // 過去の滞留レースをクリーンアップ（前日のcron失敗を回収）
+      // bulk_chunked トリガー後に実行し、チェーン開始をブロックしない
+      try {
+        const { fixed, total } = await cleanupStaleRaces(15_000);
+        if (total > 0) {
+          executed.push(`morning: ステータス修復 ${fixed}/${total}件`);
+        }
+      } catch (e) {
+        console.error('[cron] morning cleanup failed:', e);
       }
 
       return NextResponse.json({
@@ -156,8 +167,17 @@ export async function GET(request: NextRequest) {
       result.skipped.push(`runCronJob失敗: ${msg}`);
     }
 
-    // 夕方cronでは結果照合と予想補完を追加で実行（runCronJob失敗時の安全網）
+    // 夕方cronでは結果照合と予想補完、ステータス修復を追加で実行
     if (jstHour >= 16 && jstHour <= 18) {
+      // 当日の結果取得が一部失敗した場合や、過去の滞留レースを修復
+      try {
+        const { fixed, total } = await cleanupStaleRaces(15_000);
+        if (fixed > 0) {
+          result.executed.push(`evening: ステータス修復 ${fixed}/${total}件`);
+        }
+      } catch (e) {
+        console.error('[cron] evening cleanup failed:', e);
+      }
       // runCronJobが失敗した場合のみ、evaluateAllPendingRacesを追加実行
       // （成功時は executeResultFetch 内で既に呼ばれている）
       if (result.skipped.some(s => s.includes('runCronJob失敗'))) {

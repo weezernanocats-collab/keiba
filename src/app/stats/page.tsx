@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import type { BetTypeStat } from '@/types';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Legend, ReferenceLine,
@@ -53,15 +54,6 @@ interface RoiBreakdown {
   winReturned: number;
   placeInvested: number;
   placeReturned: number;
-}
-
-interface BetTypeStat {
-  type: string;
-  total: number;
-  hitRate: number;
-  roi: number;
-  avgOdds: number;
-  hitCount: number;
 }
 
 interface TrendPoint {

@@ -35,8 +35,8 @@ CATEGORIES = {
     'turf_sprint': (0, 0, 1400),
     'turf_mile': (0, 1401, 1800),
     'turf_long': (0, 1901, 99999),
-    'dirt_short': (1, 0, 1600),
-    'dirt_long': (1, 1601, 99999),
+    'dirt_sprint': (1, 0, 1400),
+    'dirt_long': (1, 1401, 99999),
 }
 
 
@@ -520,7 +520,7 @@ def main():
             for r in rows
         ], dtype=object)
         print("カテゴリ判定: メタデータ使用")
-    else:
+    elif 'trackType_encoded' in feature_names:
         track_type_idx = feature_names.index('trackType_encoded')
         distance_idx = feature_names.index('distance')
         sample_categories = np.array([
@@ -528,6 +528,11 @@ def main():
             for i in range(len(rows))
         ], dtype=object)
         print("カテゴリ判定: 特徴量使用")
+    else:
+        # trackType_encoded が特徴量にもメタデータにもない場合
+        # distance のみでカテゴリを推定（芝/ダート区別不可 → カテゴリ別学習スキップ）
+        print("WARNING: トラックタイプ情報なし → カテゴリ別学習スキップ")
+        sample_categories = np.array([None] * len(rows), dtype=object)
 
     category_metrics = {}
 

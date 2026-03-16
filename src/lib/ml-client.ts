@@ -87,8 +87,8 @@ const CATEGORY_DEFS: Record<string, [number, number, number]> = {
   'turf_sprint': [0, 0, 1400],
   'turf_mile': [0, 1401, 1800],
   'turf_long': [0, 1801, 99999],
-  'dirt_short': [1, 0, 1600],
-  'dirt_long': [1, 1601, 99999],
+  'dirt_sprint': [1, 0, 1400],
+  'dirt_long': [1, 1401, 99999],
 };
 
 interface ContextualFeatures {

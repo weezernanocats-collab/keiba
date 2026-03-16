@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import type { BetResultDisplay as BetResult } from '@/types';
 
 interface RaceRow {
   id: string;
@@ -15,17 +16,6 @@ interface RaceRow {
   distance: number;
   status: string;
   entryCount: number;
-}
-
-interface BetResult {
-  type: string;
-  selections: number[];
-  hit: boolean;
-  odds: number;
-  isEstimated: boolean;
-  investment: number;
-  payout: number;
-  profit: number;
 }
 
 interface HitRecord {

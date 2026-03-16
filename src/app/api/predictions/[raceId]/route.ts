@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getPredictionByRaceId, getRaceById, getHorseById, getHorsePastPerformances, getJockeyStats, savePrediction } from '@/lib/queries';
+import { getPredictionByRaceId, getRaceById, savePrediction } from '@/lib/queries';
 import { dbRun, dbAll } from '@/lib/database';
-import { generatePrediction } from '@/lib/prediction-engine';
+import { buildAndPredict } from '@/lib/prediction-builder';
 import { isBetHit } from '@/lib/bet-utils';
 import { getCacheHeaders } from '@/lib/api-helpers';
-import type { RaceEntry } from '@/types';
+
 
 export const maxDuration = 30;
 
@@ -35,29 +35,11 @@ export async function GET(
         await dbRun('DELETE FROM predictions WHERE race_id = ?', [raceId]);
 
         // 再生成
-        const horseInputs = await Promise.all(
-          race.entries.map(async (re: RaceEntry) => {
-            const pastPerfs = await getHorsePastPerformances(re.horseId, race.date, 100);
-            const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
-            const jockeyStats = await getJockeyStats(re.jockeyId, race.date);
-            return {
-              entry: re,
-              pastPerformances: pastPerfs,
-              jockeyWinRate: jockeyStats.winRate,
-              jockeyPlaceRate: jockeyStats.placeRate,
-              fatherName: horseData?.father_name || '',
-            };
-          })
-        );
-
-        const newPrediction = await generatePrediction(
+        const newPrediction = await buildAndPredict(
           raceId, race.name, race.date,
-          race.trackType as '芝' | 'ダート' | '障害',
-          race.distance,
+          race.trackType as '芝' | 'ダート' | '障害', race.distance,
           race.trackCondition as '良' | '稍重' | '重' | '不良' | undefined,
-          race.racecourseName,
-          race.grade,
-          horseInputs,
+          race.racecourseName, race.grade, race.entries,
         );
         await savePrediction(newPrediction);
         prediction = newPrediction;

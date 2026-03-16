@@ -1,12 +1,6 @@
 'use client';
 
-interface MarketEntry {
-  modelProb: number;
-  marketProb: number;
-  blendedProb: number;
-  disagreement: number;
-  isValue: boolean;
-}
+import type { MarketAnalysisEntry as MarketEntry } from '@/types';
 
 interface Props {
   marketAnalysis: Record<number, MarketEntry>;

@@ -21,12 +21,10 @@ import {
   upsertHorse,
   insertPastPerformance,
   getHorsePastPerformances,
-  getHorseById,
   getRaceById,
   savePrediction,
-  getJockeyStats,
 } from '@/lib/queries';
-import { generatePrediction } from '@/lib/prediction-engine';
+import { buildAndPredict } from '@/lib/prediction-builder';
 import { dbAll, dbRun } from '@/lib/database';
 import { runBulkImport, getBulkImportProgress, abortBulkImport, type BulkImportConfig, runBulkChunk, createInitialChunkedState, type BulkChunkedState } from '@/lib/bulk-importer';
 import { evaluateRacePrediction, evaluateAllPendingRaces, getAccuracyStats, calibrateWeights, autoCalibrate, ensureCalibrationLoaded, repairBetsOdds, reEvaluateRepairedChunk } from '@/lib/accuracy-tracker';
@@ -793,31 +791,10 @@ async function syncFull(entry: SyncLogEntry, date?: string): Promise<void> {
       const raceData = await getRaceById(detail.id);
       if (!raceData || !raceData.entries || raceData.entries.length === 0) continue;
 
-      // Build horse analysis inputs for prediction engine
-      const horseInputs = [];
-      for (const re of raceData.entries) {
-        const pastPerfs = await getHorsePastPerformances(re.horseId, targetDate, 100);
-        const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
-        const jockeyStats = await getJockeyStats(re.jockeyId, targetDate);
-        horseInputs.push({
-          entry: re,
-          pastPerformances: pastPerfs,
-          jockeyWinRate: jockeyStats.winRate,
-          jockeyPlaceRate: jockeyStats.placeRate,
-          fatherName: horseData?.father_name || '',
-        });
-      }
-
-      const prediction = await generatePrediction(
-        detail.id,
-        detail.name,
-        targetDate,
-        detail.trackType,
-        detail.distance,
-        detail.trackCondition,
-        detail.racecourseName,
-        detail.grade,
-        horseInputs,
+      const prediction = await buildAndPredict(
+        detail.id, detail.name, targetDate,
+        detail.trackType, detail.distance, detail.trackCondition,
+        detail.racecourseName, detail.grade, raceData.entries,
       );
 
       await savePrediction(prediction);
@@ -941,30 +918,11 @@ async function syncRegeneratePredictions(entry: SyncLogEntry, date?: string): Pr
       const raceData = await getRaceById(race.id);
       if (!raceData || !raceData.entries || raceData.entries.length === 0) continue;
 
-      const horseInputs = [];
-      for (const re of raceData.entries) {
-        const pastPerfs = await getHorsePastPerformances(re.horseId, targetDate, 100);
-        const horseData = await getHorseById(re.horseId) as { father_name?: string } | null;
-        const jockeyStats = await getJockeyStats(re.jockeyId, targetDate);
-        horseInputs.push({
-          entry: re,
-          pastPerformances: pastPerfs,
-          jockeyWinRate: jockeyStats.winRate,
-          jockeyPlaceRate: jockeyStats.placeRate,
-          fatherName: horseData?.father_name || '',
-        });
-      }
-
-      const prediction = await generatePrediction(
-        race.id,
-        race.name,
-        targetDate,
-        race.track_type as import('@/types').TrackType,
-        race.distance,
+      const prediction = await buildAndPredict(
+        race.id, race.name, targetDate,
+        race.track_type as import('@/types').TrackType, race.distance,
         race.track_condition as import('@/types').TrackCondition | undefined,
-        race.racecourse_name,
-        race.grade,
-        horseInputs,
+        race.racecourse_name, race.grade, raceData.entries,
       );
 
       await savePrediction(prediction);
