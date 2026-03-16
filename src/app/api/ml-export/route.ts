@@ -34,6 +34,10 @@ const FEATURE_NAMES = [
   'fieldSizeXpost', 'rotationXform', 'conditionXsire',
   // v7.0: ラップタイム基盤特徴量
   'horsePacePreference', 'horseHaiPaceRate', 'courseDistPaceAvg', 'paceStyleMatch',
+  // v8.0: 直近フォーム + キャリア特徴量
+  'lastRacePosition', 'last3WinRate', 'last3PlaceRate',
+  'classChange', 'trackTypeChange',
+  'careerWinRate', 'relativeOdds', 'winStreak',
 ];
 
 const SEX_ENCODE: Record<string, number> = { '牡': 0, '牝': 1, 'セ': 2 };
@@ -62,6 +66,15 @@ interface PredictionWithRace {
   track_condition: string | null;
   weather: string | null;
   racecourse_name: string;
+  date: string;
+}
+
+interface PastPerfRow {
+  horse_id: string;
+  date: string;
+  position: number;
+  grade: string | null;
+  track_type: string | null;
 }
 
 interface EntryRow {
@@ -181,7 +194,7 @@ export async function GET(request: NextRequest) {
   const [predictions, allEntries] = await Promise.all([
     dbAll<PredictionWithRace>(`
       SELECT p.race_id, p.analysis_json,
-             r.grade, r.track_type, r.distance, r.track_condition, r.weather, r.racecourse_name
+             r.grade, r.track_type, r.distance, r.track_condition, r.weather, r.racecourse_name, r.date
       FROM predictions p
       JOIN races r ON r.id = p.race_id
       WHERE r.status = '結果確定'
@@ -212,10 +225,12 @@ export async function GET(request: NextRequest) {
   const raceDistanceMap = new Map<string, number>();
   const raceCourseMap = new Map<string, string>();
   const raceTrackTypeMap = new Map<string, string>();
+  const raceDateMap = new Map<string, string>();
   for (const p of predictions) {
     raceDistanceMap.set(p.race_id, p.distance);
     raceCourseMap.set(p.race_id, p.racecourse_name);
     raceTrackTypeMap.set(p.race_id, p.track_type);
+    raceDateMap.set(p.race_id, p.date);
   }
 
   // horse_id → father_name（唯一の追加DBクエリ）
@@ -232,6 +247,28 @@ export async function GET(request: NextRequest) {
       `, chunk);
       for (const h of horses) {
         horseFatherMap.set(h.id, h.father_name);
+      }
+    }
+  }
+
+  // v8.0: 過去成績データ取得（horse_id ごとの直近レース情報）
+  const ppByHorse = new Map<string, PastPerfRow[]>();
+  if (horseIds.length > 0) {
+    const chunkSize = 500;
+    for (let i = 0; i < horseIds.length; i += chunkSize) {
+      const chunk = horseIds.slice(i, i + chunkSize);
+      const placeholders = chunk.map(() => '?').join(',');
+      const ppRows = await dbAll<PastPerfRow>(`
+        SELECT pp.horse_id, pp.date, pp.position, r.grade, r.track_type
+        FROM past_performances pp
+        LEFT JOIN races r ON r.id = pp.race_id
+        WHERE pp.horse_id IN (${placeholders})
+        ORDER BY pp.horse_id, pp.date DESC
+      `, chunk);
+      for (const pp of ppRows) {
+        const arr = ppByHorse.get(pp.horse_id) || [];
+        arr.push(pp);
+        ppByHorse.set(pp.horse_id, arr);
       }
     }
   }
@@ -257,6 +294,8 @@ export async function GET(request: NextRequest) {
     features: number[];
     label_win: number;
     label_place: number;
+    track_type_encoded: number;
+    distance_val: number;
   }> = [];
 
   for (const pred of predictions) {
@@ -275,6 +314,14 @@ export async function GET(request: NextRequest) {
 
     const fieldSize = entries.length;
 
+    // v8.0: レース内オッズ中央値を計算
+    const raceOdds = entries
+      .map(e => e.odds)
+      .filter((o): o is number => o !== null && o > 0)
+      .sort((a, b) => a - b);
+    const medianOdds = raceOdds.length > 0
+      ? raceOdds[Math.floor(raceOdds.length / 2)] : 10;
+
     for (const entry of entries) {
       const scores = horseScores[String(entry.horse_number)];
       if (!scores) continue;
@@ -292,6 +339,46 @@ export async function GET(request: NextRequest) {
       const jockeyDistWR = jdEntry ? jdEntry.wins / jdEntry.total : 0.08;
       const jcEntry = entry.jockey_id ? jockeyCourseMap.get(`${entry.jockey_id}__${pred.racecourse_name}`) : undefined;
       const jockeyCourseWR = jcEntry ? jcEntry.wins / jcEntry.total : 0.08;
+
+      // v8.0: 過去成績ベースの特徴量
+      const horsePerfs = entry.horse_id
+        ? (ppByHorse.get(entry.horse_id) || []).filter(pp => pp.date < pred.date)
+        : [];
+
+      const lastRacePosition = horsePerfs.length > 0 ? horsePerfs[0].position : 9;
+      const last3 = horsePerfs.slice(0, 3);
+      const last3WinRate = last3.length > 0
+        ? last3.filter(pp => pp.position === 1).length / last3.length : 0;
+      const last3PlaceRate = last3.length > 0
+        ? last3.filter(pp => pp.position <= 3).length / last3.length : 0;
+
+      let classChange = 0;
+      if (horsePerfs.length > 0 && horsePerfs[0].grade) {
+        const prevGrade = GRADE_ENCODE[horsePerfs[0].grade] ?? 3;
+        const curGrade = GRADE_ENCODE[pred.grade ?? ''] ?? 3;
+        classChange = curGrade - prevGrade;
+      }
+
+      let trackTypeChange = 0;
+      if (horsePerfs.length > 0 && horsePerfs[0].track_type) {
+        const prevTT = horsePerfs[0].track_type;
+        if ((prevTT === '芝' && pred.track_type !== '芝') ||
+            (prevTT !== '芝' && pred.track_type === '芝')) {
+          trackTypeChange = 1;
+        }
+      }
+
+      const careerWinRate = horsePerfs.length > 0
+        ? horsePerfs.filter(pp => pp.position === 1).length / horsePerfs.length : 0;
+
+      const relativeOdds = entry.odds && entry.odds > 0
+        ? Math.log(entry.odds / medianOdds) : 0;
+
+      let winStreak = 0;
+      for (const pp of horsePerfs) {
+        if (pp.position === 1) winStreak++;
+        else break;
+      }
 
       const features = FEATURE_NAMES.map(name => {
         switch (name) {
@@ -316,6 +403,15 @@ export async function GET(request: NextRequest) {
           case 'sireTrackWinRate': return sireTrackWR;
           case 'jockeyDistanceWinRate': return jockeyDistWR;
           case 'jockeyCourseWinRate': return jockeyCourseWR;
+          // v8.0: 直近フォーム + キャリア特徴量
+          case 'lastRacePosition': return lastRacePosition;
+          case 'last3WinRate': return last3WinRate;
+          case 'last3PlaceRate': return last3PlaceRate;
+          case 'classChange': return classChange;
+          case 'trackTypeChange': return trackTypeChange;
+          case 'careerWinRate': return careerWinRate;
+          case 'relativeOdds': return relativeOdds;
+          case 'winStreak': return winStreak;
           default: return scores[name] ?? 50;
         }
       });
@@ -328,6 +424,8 @@ export async function GET(request: NextRequest) {
         features,
         label_win: entry.result_position === 1 ? 1 : 0,
         label_place: entry.result_position <= 3 ? 1 : 0,
+        track_type_encoded: TRACK_TYPE_ENCODE[pred.track_type] ?? 0,
+        distance_val: pred.distance,
       });
     }
   }
