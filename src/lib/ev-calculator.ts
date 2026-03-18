@@ -13,6 +13,7 @@ interface PredictionRow {
   confidence: number;
   picks_json: string;
   bets_json: string;
+  analysis_json: string | null;
 }
 
 interface OddsRow {
@@ -39,7 +40,7 @@ interface PredictionPick {
  */
 export async function recalculateExpectedValues(raceId: string): Promise<boolean> {
   const prediction = await dbAll<PredictionRow>(
-    'SELECT race_id, confidence, picks_json, bets_json FROM predictions WHERE race_id = ?',
+    'SELECT race_id, confidence, picks_json, bets_json, analysis_json FROM predictions WHERE race_id = ?',
     [raceId],
   );
   if (prediction.length === 0) return false;
@@ -72,10 +73,13 @@ export async function recalculateExpectedValues(raceId: string): Promise<boolean
   if (oddsMap.size === 0) return false;
 
   const picks: PredictionPick[] = JSON.parse(pred.picks_json || '[]');
-  const confidence = pred.confidence / 100;
 
-  // スコアの合計（確率近似用）
-  const totalScore = picks.reduce((s, p) => s + p.score, 0);
+  // ML較正済み確率をanalysis_jsonから取得（v10: score share推定を廃止）
+  let winProbabilities: Record<string, number> = {};
+  try {
+    const analysis = JSON.parse(pred.analysis_json || '{}');
+    winProbabilities = analysis.winProbabilities || {};
+  } catch { /* analysis_jsonがない場合は空dictでフォールバック */ }
 
   let updated = false;
   const newBets = bets.map(bet => {
@@ -83,20 +87,41 @@ export async function recalculateExpectedValues(raceId: string): Promise<boolean
     const odds = oddsMap.get(primaryHorse);
     if (!odds) return bet;
 
-    // 推定的中率: そのピックのスコア占有率 × confidence
-    const pick = picks.find(p => p.horseNumber === primaryHorse);
-    const scoreShare = pick && totalScore > 0 ? pick.score / totalScore : 0.1;
+    // ML較正済みの勝率を使用（旧: score share × confidence の粗雑な推定）
+    const mlWinProb = winProbabilities[String(primaryHorse)] ?? 0;
 
     let estimatedHitRate: number;
-    if (bet.type === '単勝') {
-      estimatedHitRate = confidence * scoreShare;
-    } else if (bet.type === '複勝') {
-      estimatedHitRate = Math.min(0.95, confidence * scoreShare * 3);
-    } else if (bet.type === 'ワイド' || bet.type === '馬連') {
-      estimatedHitRate = confidence * scoreShare * 0.5;
+    if (mlWinProb > 0) {
+      // ML確率ベース: 券種に応じて調整
+      if (bet.type === '単勝') {
+        estimatedHitRate = mlWinProb;
+      } else if (bet.type === '複勝') {
+        // 複勝 ≈ 3着以内確率。ML winProbから簡易推定: min(0.95, winProb * 3)
+        // ただし上位馬ほど3着以内率はwinProb×3より高い傾向
+        estimatedHitRate = Math.min(0.95, mlWinProb * 3.2);
+      } else if (bet.type === 'ワイド' || bet.type === '馬連') {
+        // 2頭組合せ: 各馬の複勝圏入り確率の積に近似
+        const secondHorse = bet.selections[1];
+        const secondProb = winProbabilities[String(secondHorse)] ?? 0.05;
+        const p1Place = Math.min(0.95, mlWinProb * 3.2);
+        const p2Place = Math.min(0.95, secondProb * 3.2);
+        estimatedHitRate = bet.type === '馬連'
+          ? mlWinProb * secondProb * 2  // 順不同の2頭1着-2着
+          : p1Place * p2Place * 0.8;    // ワイド: 3着以内に両方
+      } else {
+        // 三連複・三連単・馬単
+        const probs = bet.selections.map(s => winProbabilities[String(s)] ?? 0.03);
+        estimatedHitRate = probs.reduce((acc, p) => acc * Math.min(0.95, p * 3.2), 1) * 0.5;
+      }
     } else {
-      // 三連複・三連単・馬単
-      estimatedHitRate = confidence * scoreShare * 0.2;
+      // フォールバック: ML確率がない場合はスコアベース推定
+      const totalScore = picks.reduce((s, p) => s + p.score, 0);
+      const pick = picks.find(p => p.horseNumber === primaryHorse);
+      const scoreShare = pick && totalScore > 0 ? pick.score / totalScore : 0.1;
+      const confidence = pred.confidence / 100;
+      estimatedHitRate = bet.type === '単勝'
+        ? confidence * scoreShare
+        : Math.min(0.95, confidence * scoreShare * 3);
     }
 
     const ev = estimatedHitRate * odds;

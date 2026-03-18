@@ -154,7 +154,7 @@ export function buildMLFeatures(
 
   const condEncoded = TRACK_CONDITION_ENCODE[ctx.trackCondition] ?? 0;
 
-  return {
+  const features: Record<string, number> = {
     ...factorScores,
     fieldSize: ctx.fieldSize,
     popularity,
@@ -189,7 +189,7 @@ export function buildMLFeatures(
     weightXspeed: ctx.handicapWeight * ((factorScores.speedRating ?? 50) / 100),
     ageXdistance: ctx.age * (ctx.distance / 1000),
     jockeyXform: ((factorScores.jockeyAbility ?? 50) / 100) * ((factorScores.recentForm ?? 50) / 100),
-    fieldSizeXpost: ctx.fieldSize * (ctx.postPosition / ctx.fieldSize),
+    fieldSizeXpost: ctx.fieldSize > 0 ? ctx.fieldSize * (ctx.postPosition / ctx.fieldSize) : ctx.postPosition,
     rotationXform: ((factorScores.rotation ?? 50) / 100) * ((factorScores.recentForm ?? 50) / 100),
     conditionXsire: condEncoded * ((factorScores.sireAptitude ?? 50) / 100),
     // v7.0: ラップタイム基盤特徴量
@@ -216,6 +216,15 @@ export function buildMLFeatures(
     avgPastOdds: ctx.avgPastOdds ?? Math.log(10),
     totalEarningsLog: ctx.totalEarningsLog ?? 0,
   };
+
+  // NaN/Infinity ガード: 初出走馬やデータ欠損で特徴量が壊れるのを防止
+  for (const key of Object.keys(features)) {
+    if (!Number.isFinite(features[key])) {
+      features[key] = 0;
+    }
+  }
+
+  return features;
 }
 
 // ==================== CatBoost Oblivious Tree Types ====================

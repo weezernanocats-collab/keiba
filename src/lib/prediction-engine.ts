@@ -348,23 +348,37 @@ export async function generatePrediction(
   const softmaxTemp = blendParams.temperature;
 
   if (mlPredictions) {
+    // v10: ML較正済み確率を直接使用（二重softmax問題を解消）
+    // 旧: totalScore = 16factor*0.05 + winProb*100*0.95 → softmax → 確率（較正が破壊される）
+    // 新: totalScoreはソート用にwinProbベース、確率はMLから直接取得
     for (const sh of scoredHorses) {
       const ml = mlPredictions[sh.entry.horseNumber];
       if (ml) {
-        sh.totalScore = sh.totalScore * (1 - mlBlendWeight) + ml.winProb * 100 * mlBlendWeight;
+        sh.totalScore = ml.winProb * 100;
       }
     }
     scoredHorses.sort((a, b) => b.totalScore - a.totalScore);
   }
   // --- ML推論ここまで ---
 
-  // --- 市場オッズブレンド (v7.2: カテゴリ別温度) ---
-  // softmaxでモデル確率を算出（カテゴリ別温度）
-  const modelWinProbs = estimateWinProbabilities(scoredHorses, softmaxTemp);
-  // 馬番→確率のMapに変換
+  // --- 市場オッズブレンド ---
+  // ML確率が利用可能な場合は較正済み確率を直接使用
+  // ML不可の場合のみsoftmaxフォールバック（カテゴリ別温度）
   const modelProbsByNumber = new Map<number, number>();
-  for (const [sh, prob] of modelWinProbs) {
-    modelProbsByNumber.set(sh.entry.horseNumber, prob);
+  if (mlPredictions) {
+    // ML較正済み確率を直接使用（二重softmaxを回避）
+    for (const sh of scoredHorses) {
+      const ml = mlPredictions[sh.entry.horseNumber];
+      if (ml) {
+        modelProbsByNumber.set(sh.entry.horseNumber, ml.winProb);
+      }
+    }
+  } else {
+    // MLなし: 16因子スコアからsoftmaxで確率推定
+    const modelWinProbs = estimateWinProbabilities(scoredHorses, softmaxTemp);
+    for (const [sh, prob] of modelWinProbs) {
+      modelProbsByNumber.set(sh.entry.horseNumber, prob);
+    }
   }
 
   // 市場暗示確率を算出（oddsMapは既に上で取得済み）
