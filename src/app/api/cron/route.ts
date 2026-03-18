@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runCronJob, executeMissingPredictions, cleanupStaleRaces } from '@/lib/scheduler';
 import { evaluateAllPendingRaces } from '@/lib/accuracy-tracker';
+import { dbGet } from '@/lib/database';
 
 // Hobby: 60秒、Pro: 300秒 — Vercel が自動的にプランに応じて制限
 export const maxDuration = 60;
@@ -39,6 +40,21 @@ export async function GET(request: NextRequest) {
     // 共通変数
     const jstTime = new Date(now.getTime() + jstOffset * 60_000);
     const todayStr = jstTime.toISOString().split('T')[0];
+
+    // 非開催日の早期リターン: 今日・明日にレースがなければ全処理をスキップ
+    const tomorrowStr = new Date(jstTime.getTime() + 86400000).toISOString().split('T')[0];
+    const hasRaces = await dbGet<{ cnt: number }>(
+      'SELECT COUNT(*) as cnt FROM races WHERE date IN (?, ?)',
+      [todayStr, tomorrowStr],
+    );
+    if (!hasRaces || hasRaces.cnt === 0) {
+      return NextResponse.json({
+        ok: true,
+        timestamp: now.toISOString(),
+        executed: [],
+        skipped: ['非開催日: レースなし'],
+      });
+    }
     const baseUrl = request.nextUrl.origin;
     const syncKey = process.env.SYNC_KEY;
 

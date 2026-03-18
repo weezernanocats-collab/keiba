@@ -388,4 +388,5 @@ const MIGRATIONS = [
   `ALTER TABLE prediction_results ADD COLUMN log_loss REAL`,
   `ALTER TABLE races ADD COLUMN lap_times_json TEXT`,
   `ALTER TABLE races ADD COLUMN pace_type TEXT`,
+  `ALTER TABLE prediction_results ADD COLUMN bet_hit_types TEXT`,
 ];

@@ -3,8 +3,8 @@ name: Daily Morning Pipeline
 on:
   schedule:
     # Vercel Cron のバックアップとして毎日実行
-    # 09:30 JST = 00:30 UTC (Vercel Cron は 09:00 JST)
-    - cron: '30 0 * * *'
+    # 10:30 JST = 01:30 UTC (Vercel Cron 09:00 JST のバックアップ、重複回避)
+    - cron: '30 1 * * *'
   workflow_dispatch:
     inputs:
       job:

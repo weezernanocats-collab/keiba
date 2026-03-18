@@ -4,18 +4,20 @@
  * HorseAnalysisInput の構築 → generatePrediction 呼び出しを共通化。
  * scheduler.ts, bulk-importer.ts, sync/route.ts, predictions/[raceId]/route.ts
  * で重複していたデータ取得 + 予測生成ロジックを一元管理する。
+ *
+ * N+1 最適化: 全馬分のデータをバッチクエリで一括取得（~7クエリ/レース）
  */
 
 import type { Prediction, RaceEntry, TrackType, TrackCondition } from '@/types';
 import { generatePrediction, type HorseAnalysisInput } from './prediction-engine';
 import {
-  getHorsePastPerformances,
-  getHorseById,
-  getJockeyStats,
-  getTrainerStats,
-  getSireTrackWinRate,
-  getJockeyDistanceWinRate,
-  getJockeyCourseWinRate,
+  getHorsePastPerformancesBatch,
+  getHorsesByIds,
+  getJockeyStatsBatch,
+  getTrainerStatsBatch,
+  getSireTrackWinRateBatch,
+  getJockeyDistanceWinRateBatch,
+  getJockeyCourseWinRateBatch,
 } from './queries';
 
 export interface BuildPredictionOptions {
@@ -29,6 +31,9 @@ export interface BuildPredictionOptions {
  *
  * includeTrainerStats: true の場合、調教師・種牡馬・騎手の詳細統計も取得する。
  * （scheduler 経由の本番予測で使用。sync/bulk-import では省略可）
+ *
+ * バッチクエリで全馬分を一括取得し、N+1 問題を回避する。
+ * ~112クエリ/レース → ~7クエリ/レース に削減。
  */
 export async function buildAndPredict(
   raceId: string,
@@ -46,53 +51,79 @@ export async function buildAndPredict(
   const maxPP = options?.maxPP ?? 100;
   const includeTrainer = options?.includeTrainerStats ?? false;
 
-  const horseInputs: HorseAnalysisInput[] = await Promise.all(
-    entries.map(async (re) => {
-      // 基本データ取得（並列）
-      const [pastPerfs, horseData, jockeyStats] = await Promise.all([
-        getHorsePastPerformances(re.horseId, date, maxPP),
-        getHorseById(re.horseId) as Promise<{ father_name?: string } | null>,
-        getJockeyStats(re.jockeyId, date),
-      ]);
+  // 全馬のIDを収集
+  const horseIds = entries.map(re => re.horseId);
+  const jockeyIds = entries.map(re => re.jockeyId);
 
-      const fatherName = horseData?.father_name || '';
+  // 基本データをバッチ取得（3クエリ、並列実行）
+  const [pastPerfsMap, horsesMap, jockeyStatsMap] = await Promise.all([
+    getHorsePastPerformancesBatch(horseIds, date, maxPP),
+    getHorsesByIds(horseIds),
+    getJockeyStatsBatch(jockeyIds, date),
+  ]);
 
-      const base: HorseAnalysisInput = {
-        entry: re,
-        pastPerformances: pastPerfs,
-        jockeyWinRate: jockeyStats.winRate,
-        jockeyPlaceRate: jockeyStats.placeRate,
-        fatherName,
-      };
+  // 拡張統計をバッチ取得（includeTrainer の場合のみ、4クエリ、並列実行）
+  const trainerNames = entries.map(re => re.trainerName);
+  const sireNames = entries.map(re => {
+    const horse = horsesMap.get(re.horseId);
+    return (horse as Record<string, unknown> | undefined)?.father_name as string || '';
+  });
 
-      if (!includeTrainer) return base;
+  const [trainerStatsMap, sireTrackWRMap, jockeyDistWRMap, jockeyCourseWRMap] = includeTrainer
+    ? await Promise.all([
+        getTrainerStatsBatch(trainerNames, date),
+        getSireTrackWinRateBatch(sireNames, trackType, date),
+        getJockeyDistanceWinRateBatch(jockeyIds, distance, date),
+        getJockeyCourseWinRateBatch(jockeyIds, racecourseName, date),
+      ])
+    : [null, null, null, null];
 
-      // 拡張統計取得（並列）
-      const [trainerStats, sireTrackWR, jockeyDistWR, jockeyCourseWR] = await Promise.all([
-        getTrainerStats(re.trainerName, date),
-        getSireTrackWinRate(fatherName, trackType, date),
-        getJockeyDistanceWinRate(re.jockeyId, distance, date),
-        getJockeyCourseWinRate(re.jockeyId, racecourseName, date),
-      ]);
+  const distCat = distance <= 1400 ? 'sprint' : distance <= 1800 ? 'mile' : 'long';
+  const isHeavy = trackCondition === '重' || trackCondition === '不良';
+  const isGrade = ['G3', 'G2', 'G1'].includes(grade || '');
 
-      const distCat = distance <= 1400 ? 'sprint' : distance <= 1800 ? 'mile' : 'long';
-      const isHeavy = trackCondition === '重' || trackCondition === '不良';
-      const isGrade = ['G3', 'G2', 'G1'].includes(grade || '');
+  // Map から各馬に配分
+  const horseInputs: HorseAnalysisInput[] = entries.map((re) => {
+    const pastPerfs = pastPerfsMap.get(re.horseId) || [];
+    const horseData = horsesMap.get(re.horseId);
+    const jockeyStats = jockeyStatsMap.get(re.jockeyId) || { winRate: 0.08, placeRate: 0.20 };
+    const fatherName = (horseData as Record<string, unknown> | undefined)?.father_name as string || '';
 
-      return {
-        ...base,
-        trainerWinRate: trainerStats.winRate,
-        trainerPlaceRate: trainerStats.placeRate,
-        sireTrackWinRate: sireTrackWR,
-        jockeyDistanceWinRate: jockeyDistWR,
-        jockeyCourseWinRate: jockeyCourseWR,
-        trainerDistCatWinRate: distCat === 'sprint' ? trainerStats.sprintWinRate
-          : distCat === 'mile' ? trainerStats.mileWinRate : trainerStats.longWinRate,
-        trainerCondWinRate: isHeavy ? trainerStats.heavyWinRate : trainerStats.winRate,
-        trainerGradeWinRate: isGrade ? trainerStats.gradeWinRate : trainerStats.winRate,
-      };
-    })
-  );
+    const base: HorseAnalysisInput = {
+      entry: re,
+      pastPerformances: pastPerfs,
+      jockeyWinRate: jockeyStats.winRate,
+      jockeyPlaceRate: jockeyStats.placeRate,
+      fatherName,
+    };
+
+    if (!includeTrainer || !trainerStatsMap || !sireTrackWRMap || !jockeyDistWRMap || !jockeyCourseWRMap) {
+      return base;
+    }
+
+    const defaultTrainer = {
+      winRate: 0.08, placeRate: 0.20,
+      sprintWinRate: 0.08, mileWinRate: 0.08, longWinRate: 0.08,
+      heavyWinRate: 0.08, gradeWinRate: 0.08,
+    };
+    const trainerStats = trainerStatsMap.get(re.trainerName) || defaultTrainer;
+    const sireTrackWR = sireTrackWRMap.get(fatherName) ?? 0.07;
+    const jockeyDistWR = jockeyDistWRMap.get(re.jockeyId) ?? 0.08;
+    const jockeyCourseWR = jockeyCourseWRMap.get(re.jockeyId) ?? 0.08;
+
+    return {
+      ...base,
+      trainerWinRate: trainerStats.winRate,
+      trainerPlaceRate: trainerStats.placeRate,
+      sireTrackWinRate: sireTrackWR,
+      jockeyDistanceWinRate: jockeyDistWR,
+      jockeyCourseWinRate: jockeyCourseWR,
+      trainerDistCatWinRate: distCat === 'sprint' ? trainerStats.sprintWinRate
+        : distCat === 'mile' ? trainerStats.mileWinRate : trainerStats.longWinRate,
+      trainerCondWinRate: isHeavy ? trainerStats.heavyWinRate : trainerStats.winRate,
+      trainerGradeWinRate: isGrade ? trainerStats.gradeWinRate : trainerStats.winRate,
+    };
+  });
 
   return generatePrediction(
     raceId, raceName, date, trackType, distance,

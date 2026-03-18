@@ -1037,7 +1037,8 @@ function calcJockeyScoreV5(winRate: number, placeRate: number, form: JockeyRecen
   if (form) {
     // 直近30日のフォームを反映（十分なサンプルがある場合）
     if (form.recent30DayRaces >= 5) {
-      const recentScore = calcJockeyScore(form.recent30DayWinRate, form.recent30DayWinRate * 2.5);
+      const recentPlaceRate = (form as { recent30DayPlaceRate?: number }).recent30DayPlaceRate ?? form.recent30DayWinRate * 2.5;
+      const recentScore = calcJockeyScore(form.recent30DayWinRate, recentPlaceRate);
       // 通算70% + 直近30% でブレンド
       score = score * 0.7 + recentScore * 0.3;
     }

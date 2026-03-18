@@ -54,9 +54,9 @@ export async function recalculateExpectedValues(raceId: string): Promise<boolean
     [raceId],
   );
 
-  // race_entry_odds テーブルも確認（結果ページから取得したオッズ）
+  // race_entries テーブルのオッズも確認（結果ページから取得したオッズ）
   const entryOddsRows = await dbAll<OddsRow>(
-    'SELECT horse_number, odds FROM race_entry_odds WHERE race_id = ?',
+    'SELECT horse_number, odds FROM race_entries WHERE race_id = ? AND odds IS NOT NULL AND odds > 0',
     [raceId],
   );
 

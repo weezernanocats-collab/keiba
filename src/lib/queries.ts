@@ -175,7 +175,7 @@ export async function upsertRace(race: Partial<Race> & { id: string }) {
       distance = CASE WHEN @distance > 0 THEN @distance ELSE races.distance END,
       track_condition = COALESCE(@track_condition, races.track_condition),
       weather = COALESCE(@weather, races.weather),
-      status = @status
+      status = CASE WHEN @status IS NOT NULL AND @status != '' THEN @status ELSE races.status END
   `, {
     id: race.id,
     name: race.name || '',
@@ -189,7 +189,7 @@ export async function upsertRace(race: Partial<Race> & { id: string }) {
     distance: race.distance || 0,
     track_condition: race.trackCondition || null,
     weather: race.weather || null,
-    status: race.status || '予定',
+    status: race.status || '',
   });
 }
 
@@ -926,6 +926,340 @@ export async function getJockeyCourseWinRate(jockeyId: string, racecourseName: s
     return stats.wins / stats.total;
   }
   return 0.08;
+}
+
+// ==================== バッチクエリ（prediction-builder 用） ====================
+
+/**
+ * 複数馬の過去成績を一括取得する。
+ * 各馬ごとに beforeDate 前の最新 limit 件を返す。
+ */
+export async function getHorsePastPerformancesBatch(
+  horseIds: string[],
+  beforeDate: string,
+  limit: number = 100,
+): Promise<Map<string, PastPerformance[]>> {
+  const result = new Map<string, PastPerformance[]>();
+  if (horseIds.length === 0) return result;
+
+  const uniqueIds = [...new Set(horseIds)];
+  const placeholders = uniqueIds.map(() => '?').join(',');
+
+  // ROW_NUMBER で各馬ごとに limit 件に絞る
+  const rows = await dbAll(`
+    SELECT * FROM (
+      SELECT pp.*, ROW_NUMBER() OVER (PARTITION BY pp.horse_id ORDER BY pp.date DESC) as rn
+      FROM past_performances pp
+      WHERE pp.horse_id IN (${placeholders}) AND pp.date < ?
+    ) sub
+    WHERE sub.rn <= ?
+    ORDER BY sub.horse_id, sub.date DESC
+  `, [...uniqueIds, beforeDate, limit]);
+
+  // 初期化
+  for (const id of uniqueIds) {
+    result.set(id, []);
+  }
+  for (const row of rows) {
+    const horseId = (row as Record<string, unknown>).horse_id as string;
+    const perfs = result.get(horseId);
+    if (perfs) {
+      perfs.push(mapPastPerformance(row));
+    }
+  }
+  return result;
+}
+
+/**
+ * 複数馬の基本情報を一括取得する。
+ */
+export async function getHorsesByIds(
+  horseIds: string[],
+): Promise<Map<string, Record<string, unknown> & { id: string; name: string; strengths: string[]; weaknesses: string[] }>> {
+  const result = new Map<string, Record<string, unknown> & { id: string; name: string; strengths: string[]; weaknesses: string[] }>();
+  if (horseIds.length === 0) return result;
+
+  const uniqueIds = [...new Set(horseIds)];
+  const placeholders = uniqueIds.map(() => '?').join(',');
+
+  const [horses, traits] = await Promise.all([
+    dbAll<Record<string, unknown> & { id: string; name: string }>(
+      `SELECT * FROM horses WHERE id IN (${placeholders})`,
+      uniqueIds,
+    ),
+    dbAll<{ horse_id: string; trait_type: string; description: string }>(
+      `SELECT * FROM horse_traits WHERE horse_id IN (${placeholders})`,
+      uniqueIds,
+    ),
+  ]);
+
+  // traits をまとめる
+  const traitsByHorse = new Map<string, { strengths: string[]; weaknesses: string[] }>();
+  for (const t of traits) {
+    if (!traitsByHorse.has(t.horse_id)) {
+      traitsByHorse.set(t.horse_id, { strengths: [], weaknesses: [] });
+    }
+    const entry = traitsByHorse.get(t.horse_id)!;
+    if (t.trait_type === 'strength') entry.strengths.push(t.description);
+    else if (t.trait_type === 'weakness') entry.weaknesses.push(t.description);
+  }
+
+  for (const h of horses) {
+    const t = traitsByHorse.get(h.id) || { strengths: [], weaknesses: [] };
+    result.set(h.id, { ...h, strengths: t.strengths, weaknesses: t.weaknesses });
+  }
+  return result;
+}
+
+/**
+ * 複数騎手の勝率・複勝率を一括取得する。
+ */
+export async function getJockeyStatsBatch(
+  jockeyIds: string[],
+  beforeDate: string,
+): Promise<Map<string, { winRate: number; placeRate: number }>> {
+  const DEFAULT_WIN_RATE = 0.08;
+  const DEFAULT_PLACE_RATE = 0.20;
+  const defaults = { winRate: DEFAULT_WIN_RATE, placeRate: DEFAULT_PLACE_RATE };
+
+  const result = new Map<string, { winRate: number; placeRate: number }>();
+  if (jockeyIds.length === 0) return result;
+
+  const uniqueIds = [...new Set(jockeyIds.filter(id => !!id))];
+  // デフォルト値で初期化（空IDの馬も含めて）
+  for (const id of jockeyIds) {
+    if (!id) result.set('', { ...defaults });
+  }
+  if (uniqueIds.length === 0) return result;
+
+  const placeholders = uniqueIds.map(() => '?').join(',');
+
+  const rows = await dbAll<{ jockey_id: string; total: number; wins: number; places: number }>(`
+    SELECT
+      e.jockey_id,
+      COUNT(*) as total,
+      SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN e.result_position <= 3 THEN 1 ELSE 0 END) as places
+    FROM race_entries e
+    JOIN races r ON e.race_id = r.id
+    WHERE e.jockey_id IN (${placeholders}) AND r.status = '結果確定' AND e.result_position IS NOT NULL AND r.date < ?
+    GROUP BY e.jockey_id
+  `, [...uniqueIds, beforeDate]);
+
+  for (const id of uniqueIds) {
+    result.set(id, { ...defaults });
+  }
+  for (const row of rows) {
+    if (row.total >= 5) {
+      result.set(row.jockey_id, {
+        winRate: row.wins / row.total,
+        placeRate: row.places / row.total,
+      });
+    }
+  }
+  return result;
+}
+
+/**
+ * 複数調教師の統計を一括取得する。
+ */
+export async function getTrainerStatsBatch(
+  trainerNames: string[],
+  beforeDate: string,
+): Promise<Map<string, TrainerStatsResult>> {
+  const DEF_W = 0.08;
+  const DEF_P = 0.20;
+  const defaults: TrainerStatsResult = {
+    winRate: DEF_W, placeRate: DEF_P,
+    sprintWinRate: DEF_W, mileWinRate: DEF_W, longWinRate: DEF_W,
+    heavyWinRate: DEF_W, gradeWinRate: DEF_W,
+  };
+
+  const result = new Map<string, TrainerStatsResult>();
+  if (trainerNames.length === 0) return result;
+
+  const uniqueNames = [...new Set(trainerNames.filter(n => !!n))];
+  for (const n of trainerNames) {
+    if (!n) result.set('', { ...defaults });
+  }
+  if (uniqueNames.length === 0) return result;
+
+  const placeholders = uniqueNames.map(() => '?').join(',');
+
+  const rows = await dbAll<{
+    trainer_name: string;
+    total: number; wins: number; places: number;
+    sprint_total: number; sprint_wins: number;
+    mile_total: number; mile_wins: number;
+    long_total: number; long_wins: number;
+    heavy_total: number; heavy_wins: number;
+    grade_total: number; grade_wins: number;
+  }>(`
+    SELECT
+      e.trainer_name,
+      COUNT(*) as total,
+      SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN e.result_position <= 3 THEN 1 ELSE 0 END) as places,
+      SUM(CASE WHEN r.distance <= 1400 THEN 1 ELSE 0 END) as sprint_total,
+      SUM(CASE WHEN r.distance <= 1400 AND e.result_position = 1 THEN 1 ELSE 0 END) as sprint_wins,
+      SUM(CASE WHEN r.distance BETWEEN 1401 AND 1800 THEN 1 ELSE 0 END) as mile_total,
+      SUM(CASE WHEN r.distance BETWEEN 1401 AND 1800 AND e.result_position = 1 THEN 1 ELSE 0 END) as mile_wins,
+      SUM(CASE WHEN r.distance >= 1801 THEN 1 ELSE 0 END) as long_total,
+      SUM(CASE WHEN r.distance >= 1801 AND e.result_position = 1 THEN 1 ELSE 0 END) as long_wins,
+      SUM(CASE WHEN r.track_condition IN ('重', '不良') THEN 1 ELSE 0 END) as heavy_total,
+      SUM(CASE WHEN r.track_condition IN ('重', '不良') AND e.result_position = 1 THEN 1 ELSE 0 END) as heavy_wins,
+      SUM(CASE WHEN r.grade IN ('G3', 'G2', 'G1') THEN 1 ELSE 0 END) as grade_total,
+      SUM(CASE WHEN r.grade IN ('G3', 'G2', 'G1') AND e.result_position = 1 THEN 1 ELSE 0 END) as grade_wins
+    FROM race_entries e
+    JOIN races r ON e.race_id = r.id
+    WHERE e.trainer_name IN (${placeholders}) AND r.status = '結果確定' AND e.result_position IS NOT NULL AND r.date < ?
+    GROUP BY e.trainer_name
+  `, [...uniqueNames, beforeDate]);
+
+  const safeRate = (wins: number, total: number) => total >= 5 ? wins / total : DEF_W;
+
+  // デフォルトで初期化
+  for (const n of uniqueNames) {
+    result.set(n, { ...defaults });
+  }
+  for (const row of rows) {
+    if (row.total >= 10) {
+      result.set(row.trainer_name, {
+        winRate: row.wins / row.total,
+        placeRate: row.places / row.total,
+        sprintWinRate: safeRate(row.sprint_wins, row.sprint_total),
+        mileWinRate: safeRate(row.mile_wins, row.mile_total),
+        longWinRate: safeRate(row.long_wins, row.long_total),
+        heavyWinRate: safeRate(row.heavy_wins, row.heavy_total),
+        gradeWinRate: safeRate(row.grade_wins, row.grade_total),
+      });
+    }
+  }
+  return result;
+}
+
+/**
+ * 複数種牡馬×馬場タイプの勝率を一括取得する。
+ */
+export async function getSireTrackWinRateBatch(
+  sireNames: string[],
+  trackType: string,
+  beforeDate: string,
+): Promise<Map<string, number>> {
+  const DEFAULT_RATE = 0.07;
+  const result = new Map<string, number>();
+  if (sireNames.length === 0) return result;
+
+  const uniqueNames = [...new Set(sireNames.filter(n => !!n))];
+  for (const n of sireNames) {
+    if (!n) result.set('', DEFAULT_RATE);
+  }
+  if (uniqueNames.length === 0) return result;
+
+  const placeholders = uniqueNames.map(() => '?').join(',');
+
+  const rows = await dbAll<{ father_name: string; total: number; wins: number }>(`
+    SELECT h.father_name,
+           COUNT(*) as total,
+           SUM(CASE WHEN pp.position = 1 THEN 1 ELSE 0 END) as wins
+    FROM past_performances pp
+    JOIN horses h ON pp.horse_id = h.id
+    WHERE h.father_name IN (${placeholders}) AND pp.track_type = ? AND pp.position IS NOT NULL AND pp.date < ?
+    GROUP BY h.father_name
+  `, [...uniqueNames, trackType, beforeDate]);
+
+  for (const n of uniqueNames) {
+    result.set(n, DEFAULT_RATE);
+  }
+  for (const row of rows) {
+    if (row.total >= 10) {
+      result.set(row.father_name, row.wins / row.total);
+    }
+  }
+  return result;
+}
+
+/**
+ * 複数騎手×距離帯（±200m）の勝率を一括取得する。
+ */
+export async function getJockeyDistanceWinRateBatch(
+  jockeyIds: string[],
+  distance: number,
+  beforeDate: string,
+): Promise<Map<string, number>> {
+  const DEFAULT_RATE = 0.08;
+  const result = new Map<string, number>();
+  if (jockeyIds.length === 0) return result;
+
+  const uniqueIds = [...new Set(jockeyIds.filter(id => !!id))];
+  for (const id of jockeyIds) {
+    if (!id) result.set('', DEFAULT_RATE);
+  }
+  if (uniqueIds.length === 0) return result;
+
+  const placeholders = uniqueIds.map(() => '?').join(',');
+
+  const rows = await dbAll<{ jockey_id: string; total: number; wins: number }>(`
+    SELECT e.jockey_id,
+           COUNT(*) as total,
+           SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins
+    FROM race_entries e
+    JOIN races r ON e.race_id = r.id
+    WHERE e.jockey_id IN (${placeholders}) AND r.status = '結果確定' AND e.result_position IS NOT NULL
+      AND ABS(r.distance - ?) <= 200 AND r.date < ?
+    GROUP BY e.jockey_id
+  `, [...uniqueIds, distance, beforeDate]);
+
+  for (const id of uniqueIds) {
+    result.set(id, DEFAULT_RATE);
+  }
+  for (const row of rows) {
+    if (row.total >= 10) {
+      result.set(row.jockey_id, row.wins / row.total);
+    }
+  }
+  return result;
+}
+
+/**
+ * 複数騎手×コースの勝率を一括取得する。
+ */
+export async function getJockeyCourseWinRateBatch(
+  jockeyIds: string[],
+  courseName: string,
+  beforeDate: string,
+): Promise<Map<string, number>> {
+  const DEFAULT_RATE = 0.08;
+  const result = new Map<string, number>();
+  if (jockeyIds.length === 0) return result;
+
+  const uniqueIds = [...new Set(jockeyIds.filter(id => !!id))];
+  for (const id of jockeyIds) {
+    if (!id) result.set('', DEFAULT_RATE);
+  }
+  if (uniqueIds.length === 0) return result;
+
+  const placeholders = uniqueIds.map(() => '?').join(',');
+
+  const rows = await dbAll<{ jockey_id: string; total: number; wins: number }>(`
+    SELECT e.jockey_id,
+           COUNT(*) as total,
+           SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins
+    FROM race_entries e
+    JOIN races r ON e.race_id = r.id
+    WHERE e.jockey_id IN (${placeholders}) AND r.racecourse_name = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL AND r.date < ?
+    GROUP BY e.jockey_id
+  `, [...uniqueIds, courseName, beforeDate]);
+
+  for (const id of uniqueIds) {
+    result.set(id, DEFAULT_RATE);
+  }
+  for (const row of rows) {
+    if (row.total >= 10) {
+      result.set(row.jockey_id, row.wins / row.total);
+    }
+  }
+  return result;
 }
 
 // ==================== キャリブレーション ====================
