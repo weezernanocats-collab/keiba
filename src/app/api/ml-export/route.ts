@@ -12,7 +12,7 @@ const FEATURE_NAMES = [
   'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
   'sireAptitude', 'trainerAbility',
   'seasonalPattern', 'handicapAdvantage',
-  'marginCompetitiveness', 'weatherAptitude',
+  'marginCompetitiveness',
   // コンテキスト特徴量
   'fieldSize', 'popularity', 'age', 'sex_encoded',
   'handicapWeight', 'postPosition', 'grade_encoded',
@@ -21,8 +21,6 @@ const FEATURE_NAMES = [
   'weather_encoded',
   'trainerWinRate', 'trainerPlaceRate',
   'sireTrackWinRate', 'jockeyDistanceWinRate', 'jockeyCourseWinRate',
-  // v5.1: 馬体重トレンド
-  'weightStability', 'weightTrendSlope', 'weightOptimalDelta',
   // v6.0: 新特徴量
   'jockeySwitchQuality', 'cornerDelta',
   'avgMarginWhenWinning', 'avgMarginWhenLosing',

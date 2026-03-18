@@ -1,16 +1,14 @@
 {
-  "total_samples": 85892,
-  "test_samples": 12884,
+  "total_samples": 86953,
+  "test_samples": 13043,
   "perm_samples": 3000,
-  "feature_count": 38,
+  "feature_count": 67,
   "feature_names": [
     "recentForm",
-    "courseAptitude",
     "distanceAptitude",
     "trackConditionAptitude",
     "jockeyAbility",
     "speedRating",
-    "classPerformance",
     "runningStyle",
     "postPositionBias",
     "rotation",
@@ -18,333 +16,596 @@
     "consistency",
     "sireAptitude",
     "trainerAbility",
-    "jockeyTrainerCombo",
-    "historicalPostBias",
     "seasonalPattern",
     "handicapAdvantage",
+    "marginCompetitiveness",
+    "weatherAptitude",
     "fieldSize",
-    "odds",
     "popularity",
     "age",
     "sex_encoded",
     "handicapWeight",
     "postPosition",
     "grade_encoded",
-    "trackType_encoded",
     "distance",
     "trackCondition_encoded",
     "oddsLogTransform",
     "popularityRatio",
     "weather_encoded",
-    "weightChange",
     "trainerWinRate",
     "trainerPlaceRate",
     "sireTrackWinRate",
     "jockeyDistanceWinRate",
-    "jockeyCourseWinRate"
+    "jockeyCourseWinRate",
+    "weightStability",
+    "weightTrendSlope",
+    "weightOptimalDelta",
+    "jockeySwitchQuality",
+    "cornerDelta",
+    "avgMarginWhenWinning",
+    "avgMarginWhenLosing",
+    "daysSinceLastRace",
+    "meetDay",
+    "trainerDistCatWinRate",
+    "trainerCondWinRate",
+    "trainerGradeWinRate",
+    "weightXspeed",
+    "ageXdistance",
+    "jockeyXform",
+    "fieldSizeXpost",
+    "rotationXform",
+    "conditionXsire",
+    "horsePacePreference",
+    "horseHaiPaceRate",
+    "courseDistPaceAvg",
+    "paceStyleMatch",
+    "lastRacePosition",
+    "last3WinRate",
+    "last3PlaceRate",
+    "classChange",
+    "trackTypeChange",
+    "careerWinRate",
+    "relativeOdds",
+    "winStreak",
+    "relativePosition",
+    "upsetRate",
+    "avgPastOdds",
+    "totalEarningsLog"
   ],
   "xgb_global": {
-    "baseline_ndcg1": 0.0,
+    "baseline_ndcg1": 1.0,
     "importance": [
       {
         "rank": 1,
-        "feature": "odds",
-        "gain_pct": 14.79,
-        "perm_drop": -0.466667,
-        "cover_pct": 7.8,
-        "composite_score": 8.48
+        "feature": "sireTrackWinRate",
+        "gain_pct": 6.14,
+        "perm_drop": 0.6,
+        "cover_pct": 5.59,
+        "composite_score": 34.23
       },
       {
         "rank": 2,
         "feature": "oddsLogTransform",
-        "gain_pct": 13.35,
-        "perm_drop": -0.266667,
-        "cover_pct": 7.9,
-        "composite_score": 7.11
+        "gain_pct": 14.19,
+        "perm_drop": 0.466667,
+        "cover_pct": 7.04,
+        "composite_score": 31.54
       },
       {
         "rank": 3,
-        "feature": "sireTrackWinRate",
-        "gain_pct": 8.09,
-        "perm_drop": -0.266667,
-        "cover_pct": 9.62,
-        "composite_score": 5.58
+        "feature": "relativeOdds",
+        "gain_pct": 9.6,
+        "perm_drop": 0.2,
+        "cover_pct": 5.92,
+        "composite_score": 15.6
       },
       {
         "rank": 4,
-        "feature": "jockeyDistanceWinRate",
-        "gain_pct": 5.42,
-        "perm_drop": -0.466667,
-        "cover_pct": 7.19,
-        "composite_score": 4.53
+        "feature": "popularityRatio",
+        "gain_pct": 3.38,
+        "perm_drop": 0.2,
+        "cover_pct": 2.91,
+        "composite_score": 12.21
       },
       {
         "rank": 5,
-        "feature": "trainerWinRate",
-        "gain_pct": 4.05,
-        "perm_drop": -0.8,
-        "cover_pct": 5.97,
-        "composite_score": 3.79
+        "feature": "grade_encoded",
+        "gain_pct": 2.21,
+        "perm_drop": 0.2,
+        "cover_pct": 3.3,
+        "composite_score": 12.16
       },
       {
         "rank": 6,
-        "feature": "jockeyCourseWinRate",
-        "gain_pct": 3.99,
-        "perm_drop": -0.333333,
-        "cover_pct": 6.32,
-        "composite_score": 3.56
-      },
-      {
-        "rank": 7,
-        "feature": "rotation",
-        "gain_pct": 6.17,
-        "perm_drop": -0.533333,
-        "cover_pct": 4.06,
-        "composite_score": 3.33
-      },
-      {
-        "rank": 8,
-        "feature": "jockeyAbility",
-        "gain_pct": 2.78,
-        "perm_drop": -0.333333,
-        "cover_pct": 5.07,
-        "composite_score": 2.96
-      },
-      {
-        "rank": 9,
-        "feature": "popularity",
-        "gain_pct": 4.39,
-        "perm_drop": -0.4,
-        "cover_pct": 3.3,
-        "composite_score": 2.53
-      },
-      {
-        "rank": 10,
-        "feature": "popularityRatio",
-        "gain_pct": 4.13,
-        "perm_drop": -0.266667,
-        "cover_pct": 2.31,
-        "composite_score": 2.49
-      },
-      {
-        "rank": 11,
-        "feature": "trainerAbility",
-        "gain_pct": 2.11,
-        "perm_drop": -0.133333,
-        "cover_pct": 4.18,
-        "composite_score": 2.42
-      },
-      {
-        "rank": 12,
-        "feature": "grade_encoded",
-        "gain_pct": 2.75,
-        "perm_drop": -0.533333,
-        "cover_pct": 5.15,
-        "composite_score": 2.21
-      },
-      {
-        "rank": 13,
-        "feature": "age",
-        "gain_pct": 2.76,
+        "feature": "avgMarginWhenLosing",
+        "gain_pct": 2.09,
         "perm_drop": 0.0,
-        "cover_pct": 3.66,
-        "composite_score": 2.02
-      },
-      {
-        "rank": 14,
-        "feature": "trainerPlaceRate",
-        "gain_pct": 1.65,
-        "perm_drop": -0.6,
-        "cover_pct": 2.34,
+        "cover_pct": 2.75,
         "composite_score": 1.64
       },
       {
-        "rank": 15,
-        "feature": "seasonalPattern",
-        "gain_pct": 1.52,
-        "perm_drop": -0.4,
-        "cover_pct": 2.89,
-        "composite_score": 1.27
+        "rank": 7,
+        "feature": "popularity",
+        "gain_pct": 2.01,
+        "perm_drop": 0.0,
+        "cover_pct": 2.81,
+        "composite_score": 1.48
       },
       {
-        "rank": 16,
-        "feature": "lastThreeFurlongs",
-        "gain_pct": 1.49,
+        "rank": 8,
+        "feature": "winStreak",
+        "gain_pct": 1.15,
         "perm_drop": 0.0,
-        "cover_pct": 1.94,
+        "cover_pct": 4.82,
+        "composite_score": 1.43
+      },
+      {
+        "rank": 9,
+        "feature": "age",
+        "gain_pct": 1.9,
+        "perm_drop": 0.0,
+        "cover_pct": 1.61,
+        "composite_score": 1.33
+      },
+      {
+        "rank": 10,
+        "feature": "upsetRate",
+        "gain_pct": 1.95,
+        "perm_drop": 0.0,
+        "cover_pct": 2.58,
+        "composite_score": 1.32
+      },
+      {
+        "rank": 11,
+        "feature": "careerWinRate",
+        "gain_pct": 1.47,
+        "perm_drop": 0.0,
+        "cover_pct": 3.19,
         "composite_score": 1.26
       },
       {
+        "rank": 12,
+        "feature": "sireAptitude",
+        "gain_pct": 1.44,
+        "perm_drop": 0.0,
+        "cover_pct": 2.2,
+        "composite_score": 1.22
+      },
+      {
+        "rank": 13,
+        "feature": "cornerDelta",
+        "gain_pct": 1.47,
+        "perm_drop": 0.0,
+        "cover_pct": 1.59,
+        "composite_score": 1.17
+      },
+      {
+        "rank": 14,
+        "feature": "seasonalPattern",
+        "gain_pct": 1.37,
+        "perm_drop": 0.0,
+        "cover_pct": 2.89,
+        "composite_score": 1.17
+      },
+      {
+        "rank": 15,
+        "feature": "ageXdistance",
+        "gain_pct": 1.37,
+        "perm_drop": 0.0,
+        "cover_pct": 1.5,
+        "composite_score": 1.1
+      },
+      {
+        "rank": 16,
+        "feature": "speedRating",
+        "gain_pct": 1.5,
+        "perm_drop": 0.0,
+        "cover_pct": 1.71,
+        "composite_score": 1.09
+      },
+      {
         "rank": 17,
-        "feature": "distanceAptitude",
+        "feature": "trainerAbility",
         "gain_pct": 1.43,
         "perm_drop": 0.0,
-        "cover_pct": 2.33,
-        "composite_score": 1.21
+        "cover_pct": 1.0,
+        "composite_score": 1.07
       },
       {
         "rank": 18,
-        "feature": "handicapAdvantage",
-        "gain_pct": 1.28,
-        "perm_drop": -0.4,
-        "cover_pct": 1.34,
-        "composite_score": 1.18
+        "feature": "last3PlaceRate",
+        "gain_pct": 1.31,
+        "perm_drop": 0.0,
+        "cover_pct": 2.36,
+        "composite_score": 1.01
       },
       {
         "rank": 19,
-        "feature": "sireAptitude",
-        "gain_pct": 1.25,
-        "perm_drop": -0.133333,
-        "cover_pct": 1.43,
-        "composite_score": 1.1
+        "feature": "trainerPlaceRate",
+        "gain_pct": 1.11,
+        "perm_drop": 0.0,
+        "cover_pct": 0.92,
+        "composite_score": 1.0
       },
       {
         "rank": 20,
-        "feature": "speedRating",
-        "gain_pct": 1.48,
-        "perm_drop": -0.266667,
-        "cover_pct": 1.65,
-        "composite_score": 1.1
+        "feature": "lastThreeFurlongs",
+        "gain_pct": 1.31,
+        "perm_drop": 0.0,
+        "cover_pct": 1.25,
+        "composite_score": 0.97
       },
       {
         "rank": 21,
-        "feature": "consistency",
-        "gain_pct": 1.42,
+        "feature": "trainerWinRate",
+        "gain_pct": 1.23,
         "perm_drop": 0.0,
-        "cover_pct": 1.55,
-        "composite_score": 1.02
+        "cover_pct": 0.96,
+        "composite_score": 0.96
       },
       {
         "rank": 22,
-        "feature": "runningStyle",
-        "gain_pct": 1.42,
-        "perm_drop": -0.4,
-        "cover_pct": 1.05,
+        "feature": "recentForm",
+        "gain_pct": 1.44,
+        "perm_drop": 0.0,
+        "cover_pct": 1.55,
         "composite_score": 0.96
       },
       {
         "rank": 23,
-        "feature": "postPositionBias",
-        "gain_pct": 1.22,
-        "perm_drop": -0.533333,
-        "cover_pct": 1.52,
+        "feature": "relativePosition",
+        "gain_pct": 1.31,
+        "perm_drop": 0.0,
+        "cover_pct": 1.59,
         "composite_score": 0.94
       },
       {
         "rank": 24,
-        "feature": "distance",
-        "gain_pct": 1.39,
-        "perm_drop": -0.666667,
-        "cover_pct": 1.19,
+        "feature": "jockeyAbility",
+        "gain_pct": 1.17,
+        "perm_drop": 0.0,
+        "cover_pct": 0.91,
         "composite_score": 0.93
       },
       {
         "rank": 25,
-        "feature": "postPosition",
-        "gain_pct": 1.0,
-        "perm_drop": -0.666667,
-        "cover_pct": 1.87,
-        "composite_score": 0.92
+        "feature": "consistency",
+        "gain_pct": 1.35,
+        "perm_drop": 0.0,
+        "cover_pct": 1.69,
+        "composite_score": 0.93
       },
       {
         "rank": 26,
-        "feature": "recentForm",
-        "gain_pct": 1.13,
-        "perm_drop": -0.533333,
-        "cover_pct": 0.98,
-        "composite_score": 0.91
+        "feature": "handicapAdvantage",
+        "gain_pct": 1.06,
+        "perm_drop": 0.0,
+        "cover_pct": 1.26,
+        "composite_score": 0.92
       },
       {
         "rank": 27,
-        "feature": "trackConditionAptitude",
-        "gain_pct": 1.1,
+        "feature": "trainerDistCatWinRate",
+        "gain_pct": 1.17,
         "perm_drop": 0.0,
-        "cover_pct": 1.62,
-        "composite_score": 0.88
+        "cover_pct": 1.21,
+        "composite_score": 0.92
       },
       {
         "rank": 28,
-        "feature": "fieldSize",
-        "gain_pct": 1.19,
-        "perm_drop": -0.266667,
-        "cover_pct": 0.76,
-        "composite_score": 0.74
+        "feature": "rotationXform",
+        "gain_pct": 1.2,
+        "perm_drop": 0.0,
+        "cover_pct": 1.44,
+        "composite_score": 0.91
       },
       {
         "rank": 29,
-        "feature": "handicapWeight",
-        "gain_pct": 1.25,
+        "feature": "last3WinRate",
+        "gain_pct": 1.2,
         "perm_drop": 0.0,
-        "cover_pct": 0.73,
-        "composite_score": 0.72
+        "cover_pct": 2.04,
+        "composite_score": 0.9
       },
       {
         "rank": 30,
-        "feature": "sex_encoded",
-        "gain_pct": 1.09,
-        "perm_drop": -0.533333,
-        "cover_pct": 0.87,
-        "composite_score": 0.65
+        "feature": "marginCompetitiveness",
+        "gain_pct": 1.41,
+        "perm_drop": 0.0,
+        "cover_pct": 1.27,
+        "composite_score": 0.9
       },
       {
         "rank": 31,
-        "feature": "trackType_encoded",
-        "gain_pct": 1.01,
+        "feature": "conditionXsire",
+        "gain_pct": 1.15,
         "perm_drop": 0.0,
-        "cover_pct": 0.5,
-        "composite_score": 0.52
+        "cover_pct": 1.86,
+        "composite_score": 0.89
       },
       {
         "rank": 32,
-        "feature": "weather_encoded",
-        "gain_pct": 0.87,
-        "perm_drop": -0.533333,
-        "cover_pct": 0.58,
-        "composite_score": 0.51
+        "feature": "daysSinceLastRace",
+        "gain_pct": 1.17,
+        "perm_drop": 0.0,
+        "cover_pct": 1.1,
+        "composite_score": 0.87
       },
       {
         "rank": 33,
-        "feature": "trackCondition_encoded",
-        "gain_pct": 1.03,
+        "feature": "trainerCondWinRate",
+        "gain_pct": 1.18,
         "perm_drop": 0.0,
-        "cover_pct": 0.33,
-        "composite_score": 0.51
+        "cover_pct": 0.83,
+        "composite_score": 0.87
       },
       {
         "rank": 34,
-        "feature": "courseAptitude",
-        "gain_pct": 0.0,
+        "feature": "runningStyle",
+        "gain_pct": 1.37,
         "perm_drop": 0.0,
-        "cover_pct": 0.0,
-        "composite_score": 0.0
+        "cover_pct": 0.87,
+        "composite_score": 0.87
       },
       {
         "rank": 35,
-        "feature": "classPerformance",
-        "gain_pct": 0.0,
+        "feature": "paceStyleMatch",
+        "gain_pct": 1.17,
         "perm_drop": 0.0,
-        "cover_pct": 0.0,
-        "composite_score": 0.0
+        "cover_pct": 1.37,
+        "composite_score": 0.86
       },
       {
         "rank": 36,
-        "feature": "jockeyTrainerCombo",
-        "gain_pct": 0.0,
+        "feature": "avgMarginWhenWinning",
+        "gain_pct": 1.06,
         "perm_drop": 0.0,
-        "cover_pct": 0.0,
-        "composite_score": 0.0
+        "cover_pct": 1.77,
+        "composite_score": 0.85
       },
       {
         "rank": 37,
-        "feature": "historicalPostBias",
+        "feature": "fieldSize",
+        "gain_pct": 1.17,
+        "perm_drop": 0.0,
+        "cover_pct": 1.1,
+        "composite_score": 0.84
+      },
+      {
+        "rank": 38,
+        "feature": "jockeyXform",
+        "gain_pct": 1.1,
+        "perm_drop": 0.0,
+        "cover_pct": 1.03,
+        "composite_score": 0.84
+      },
+      {
+        "rank": 39,
+        "feature": "weightXspeed",
+        "gain_pct": 1.17,
+        "perm_drop": 0.0,
+        "cover_pct": 1.35,
+        "composite_score": 0.84
+      },
+      {
+        "rank": 40,
+        "feature": "postPositionBias",
+        "gain_pct": 1.19,
+        "perm_drop": 0.0,
+        "cover_pct": 1.15,
+        "composite_score": 0.83
+      },
+      {
+        "rank": 41,
+        "feature": "courseDistPaceAvg",
+        "gain_pct": 1.06,
+        "perm_drop": 0.0,
+        "cover_pct": 1.02,
+        "composite_score": 0.8
+      },
+      {
+        "rank": 42,
+        "feature": "fieldSizeXpost",
+        "gain_pct": 1.15,
+        "perm_drop": 0.0,
+        "cover_pct": 1.52,
+        "composite_score": 0.8
+      },
+      {
+        "rank": 43,
+        "feature": "trackConditionAptitude",
+        "gain_pct": 1.25,
+        "perm_drop": 0.0,
+        "cover_pct": 1.14,
+        "composite_score": 0.78
+      },
+      {
+        "rank": 44,
+        "feature": "avgPastOdds",
+        "gain_pct": 1.09,
+        "perm_drop": 0.0,
+        "cover_pct": 1.35,
+        "composite_score": 0.78
+      },
+      {
+        "rank": 45,
+        "feature": "jockeyCourseWinRate",
+        "gain_pct": 0.86,
+        "perm_drop": 0.0,
+        "cover_pct": 1.11,
+        "composite_score": 0.77
+      },
+      {
+        "rank": 46,
+        "feature": "postPosition",
+        "gain_pct": 1.05,
+        "perm_drop": 0.0,
+        "cover_pct": 0.92,
+        "composite_score": 0.76
+      },
+      {
+        "rank": 47,
+        "feature": "distanceAptitude",
+        "gain_pct": 1.09,
+        "perm_drop": 0.0,
+        "cover_pct": 1.11,
+        "composite_score": 0.75
+      },
+      {
+        "rank": 48,
+        "feature": "weather_encoded",
+        "gain_pct": 1.1,
+        "perm_drop": 0.0,
+        "cover_pct": 1.32,
+        "composite_score": 0.72
+      },
+      {
+        "rank": 49,
+        "feature": "jockeySwitchQuality",
+        "gain_pct": 1.02,
+        "perm_drop": 0.0,
+        "cover_pct": 1.1,
+        "composite_score": 0.72
+      },
+      {
+        "rank": 50,
+        "feature": "distance",
+        "gain_pct": 1.07,
+        "perm_drop": 0.0,
+        "cover_pct": 1.0,
+        "composite_score": 0.71
+      },
+      {
+        "rank": 51,
+        "feature": "jockeyDistanceWinRate",
+        "gain_pct": 0.96,
+        "perm_drop": 0.0,
+        "cover_pct": 0.65,
+        "composite_score": 0.69
+      },
+      {
+        "rank": 52,
+        "feature": "lastRacePosition",
+        "gain_pct": 1.13,
+        "perm_drop": 0.0,
+        "cover_pct": 0.99,
+        "composite_score": 0.67
+      },
+      {
+        "rank": 53,
+        "feature": "rotation",
+        "gain_pct": 0.99,
+        "perm_drop": 0.0,
+        "cover_pct": 1.08,
+        "composite_score": 0.66
+      },
+      {
+        "rank": 54,
+        "feature": "handicapWeight",
+        "gain_pct": 1.17,
+        "perm_drop": 0.0,
+        "cover_pct": 0.57,
+        "composite_score": 0.65
+      },
+      {
+        "rank": 55,
+        "feature": "meetDay",
+        "gain_pct": 0.89,
+        "perm_drop": 0.0,
+        "cover_pct": 0.28,
+        "composite_score": 0.48
+      },
+      {
+        "rank": 56,
+        "feature": "sex_encoded",
+        "gain_pct": 0.69,
+        "perm_drop": 0.0,
+        "cover_pct": 0.34,
+        "composite_score": 0.37
+      },
+      {
+        "rank": 57,
+        "feature": "trackCondition_encoded",
+        "gain_pct": 0.74,
+        "perm_drop": 0.0,
+        "cover_pct": 0.23,
+        "composite_score": 0.36
+      },
+      {
+        "rank": 58,
+        "feature": "weatherAptitude",
         "gain_pct": 0.0,
         "perm_drop": 0.0,
         "cover_pct": 0.0,
         "composite_score": 0.0
       },
       {
-        "rank": 38,
-        "feature": "weightChange",
+        "rank": 59,
+        "feature": "weightStability",
+        "gain_pct": 0.0,
+        "perm_drop": 0.0,
+        "cover_pct": 0.0,
+        "composite_score": 0.0
+      },
+      {
+        "rank": 60,
+        "feature": "weightTrendSlope",
+        "gain_pct": 0.0,
+        "perm_drop": 0.0,
+        "cover_pct": 0.0,
+        "composite_score": 0.0
+      },
+      {
+        "rank": 61,
+        "feature": "weightOptimalDelta",
+        "gain_pct": 0.0,
+        "perm_drop": 0.0,
+        "cover_pct": 0.0,
+        "composite_score": 0.0
+      },
+      {
+        "rank": 62,
+        "feature": "trainerGradeWinRate",
+        "gain_pct": 0.0,
+        "perm_drop": 0.0,
+        "cover_pct": 0.0,
+        "composite_score": 0.0
+      },
+      {
+        "rank": 63,
+        "feature": "horsePacePreference",
+        "gain_pct": 0.0,
+        "perm_drop": 0.0,
+        "cover_pct": 0.0,
+        "composite_score": 0.0
+      },
+      {
+        "rank": 64,
+        "feature": "horseHaiPaceRate",
+        "gain_pct": 0.0,
+        "perm_drop": 0.0,
+        "cover_pct": 0.0,
+        "composite_score": 0.0
+      },
+      {
+        "rank": 65,
+        "feature": "classChange",
+        "gain_pct": 0.0,
+        "perm_drop": 0.0,
+        "cover_pct": 0.0,
+        "composite_score": 0.0
+      },
+      {
+        "rank": 66,
+        "feature": "trackTypeChange",
+        "gain_pct": 0.0,
+        "perm_drop": 0.0,
+        "cover_pct": 0.0,
+        "composite_score": 0.0
+      },
+      {
+        "rank": 67,
+        "feature": "totalEarningsLog",
         "gain_pct": 0.0,
         "perm_drop": 0.0,
         "cover_pct": 0.0,
@@ -352,91 +613,145 @@
       }
     ],
     "native_gain": {
-      "recentForm": 1.13,
-      "courseAptitude": 0.0,
-      "distanceAptitude": 1.43,
-      "trackConditionAptitude": 1.1,
-      "jockeyAbility": 2.78,
-      "speedRating": 1.48,
-      "classPerformance": 0.0,
-      "runningStyle": 1.42,
-      "postPositionBias": 1.22,
-      "rotation": 6.17,
-      "lastThreeFurlongs": 1.49,
-      "consistency": 1.42,
-      "sireAptitude": 1.25,
-      "trainerAbility": 2.11,
-      "jockeyTrainerCombo": 0.0,
-      "historicalPostBias": 0.0,
-      "seasonalPattern": 1.52,
-      "handicapAdvantage": 1.28,
-      "fieldSize": 1.19,
-      "odds": 14.79,
-      "popularity": 4.39,
-      "age": 2.76,
-      "sex_encoded": 1.09,
-      "handicapWeight": 1.25,
-      "postPosition": 1.0,
-      "grade_encoded": 2.75,
-      "trackType_encoded": 1.01,
-      "distance": 1.39,
-      "trackCondition_encoded": 1.03,
-      "oddsLogTransform": 13.35,
-      "popularityRatio": 4.13,
-      "weather_encoded": 0.87,
-      "weightChange": 0.0,
-      "trainerWinRate": 4.05,
-      "trainerPlaceRate": 1.65,
-      "sireTrackWinRate": 8.09,
-      "jockeyDistanceWinRate": 5.42,
-      "jockeyCourseWinRate": 3.99
+      "recentForm": 1.44,
+      "distanceAptitude": 1.09,
+      "trackConditionAptitude": 1.25,
+      "jockeyAbility": 1.17,
+      "speedRating": 1.5,
+      "runningStyle": 1.37,
+      "postPositionBias": 1.19,
+      "rotation": 0.99,
+      "lastThreeFurlongs": 1.31,
+      "consistency": 1.35,
+      "sireAptitude": 1.44,
+      "trainerAbility": 1.43,
+      "seasonalPattern": 1.37,
+      "handicapAdvantage": 1.06,
+      "marginCompetitiveness": 1.41,
+      "weatherAptitude": 0.0,
+      "fieldSize": 1.17,
+      "popularity": 2.01,
+      "age": 1.9,
+      "sex_encoded": 0.69,
+      "handicapWeight": 1.17,
+      "postPosition": 1.05,
+      "grade_encoded": 2.21,
+      "distance": 1.07,
+      "trackCondition_encoded": 0.74,
+      "oddsLogTransform": 14.19,
+      "popularityRatio": 3.38,
+      "weather_encoded": 1.1,
+      "trainerWinRate": 1.23,
+      "trainerPlaceRate": 1.11,
+      "sireTrackWinRate": 6.14,
+      "jockeyDistanceWinRate": 0.96,
+      "jockeyCourseWinRate": 0.86,
+      "weightStability": 0.0,
+      "weightTrendSlope": 0.0,
+      "weightOptimalDelta": 0.0,
+      "jockeySwitchQuality": 1.02,
+      "cornerDelta": 1.47,
+      "avgMarginWhenWinning": 1.06,
+      "avgMarginWhenLosing": 2.09,
+      "daysSinceLastRace": 1.17,
+      "meetDay": 0.89,
+      "trainerDistCatWinRate": 1.17,
+      "trainerCondWinRate": 1.18,
+      "trainerGradeWinRate": 0.0,
+      "weightXspeed": 1.17,
+      "ageXdistance": 1.37,
+      "jockeyXform": 1.1,
+      "fieldSizeXpost": 1.15,
+      "rotationXform": 1.2,
+      "conditionXsire": 1.15,
+      "horsePacePreference": 0.0,
+      "horseHaiPaceRate": 0.0,
+      "courseDistPaceAvg": 1.06,
+      "paceStyleMatch": 1.17,
+      "lastRacePosition": 1.13,
+      "last3WinRate": 1.2,
+      "last3PlaceRate": 1.31,
+      "classChange": 0.0,
+      "trackTypeChange": 0.0,
+      "careerWinRate": 1.47,
+      "relativeOdds": 9.6,
+      "winStreak": 1.15,
+      "relativePosition": 1.31,
+      "upsetRate": 1.95,
+      "avgPastOdds": 1.09,
+      "totalEarningsLog": 0.0
     },
     "native_cover": {
-      "recentForm": 0.98,
-      "courseAptitude": 0.0,
-      "distanceAptitude": 2.33,
-      "trackConditionAptitude": 1.62,
-      "jockeyAbility": 5.07,
-      "speedRating": 1.65,
-      "classPerformance": 0.0,
-      "runningStyle": 1.05,
-      "postPositionBias": 1.52,
-      "rotation": 4.06,
-      "lastThreeFurlongs": 1.94,
-      "consistency": 1.55,
-      "sireAptitude": 1.43,
-      "trainerAbility": 4.18,
-      "jockeyTrainerCombo": 0.0,
-      "historicalPostBias": 0.0,
+      "recentForm": 1.55,
+      "distanceAptitude": 1.11,
+      "trackConditionAptitude": 1.14,
+      "jockeyAbility": 0.91,
+      "speedRating": 1.71,
+      "runningStyle": 0.87,
+      "postPositionBias": 1.15,
+      "rotation": 1.08,
+      "lastThreeFurlongs": 1.25,
+      "consistency": 1.69,
+      "sireAptitude": 2.2,
+      "trainerAbility": 1.0,
       "seasonalPattern": 2.89,
-      "handicapAdvantage": 1.34,
-      "fieldSize": 0.76,
-      "odds": 7.8,
-      "popularity": 3.3,
-      "age": 3.66,
-      "sex_encoded": 0.87,
-      "handicapWeight": 0.73,
-      "postPosition": 1.87,
-      "grade_encoded": 5.15,
-      "trackType_encoded": 0.5,
-      "distance": 1.19,
-      "trackCondition_encoded": 0.33,
-      "oddsLogTransform": 7.9,
-      "popularityRatio": 2.31,
-      "weather_encoded": 0.58,
-      "weightChange": 0.0,
-      "trainerWinRate": 5.97,
-      "trainerPlaceRate": 2.34,
-      "sireTrackWinRate": 9.62,
-      "jockeyDistanceWinRate": 7.19,
-      "jockeyCourseWinRate": 6.32
+      "handicapAdvantage": 1.26,
+      "marginCompetitiveness": 1.27,
+      "weatherAptitude": 0.0,
+      "fieldSize": 1.1,
+      "popularity": 2.81,
+      "age": 1.61,
+      "sex_encoded": 0.34,
+      "handicapWeight": 0.57,
+      "postPosition": 0.92,
+      "grade_encoded": 3.3,
+      "distance": 1.0,
+      "trackCondition_encoded": 0.23,
+      "oddsLogTransform": 7.04,
+      "popularityRatio": 2.91,
+      "weather_encoded": 1.32,
+      "trainerWinRate": 0.96,
+      "trainerPlaceRate": 0.92,
+      "sireTrackWinRate": 5.59,
+      "jockeyDistanceWinRate": 0.65,
+      "jockeyCourseWinRate": 1.11,
+      "weightStability": 0.0,
+      "weightTrendSlope": 0.0,
+      "weightOptimalDelta": 0.0,
+      "jockeySwitchQuality": 1.1,
+      "cornerDelta": 1.59,
+      "avgMarginWhenWinning": 1.77,
+      "avgMarginWhenLosing": 2.75,
+      "daysSinceLastRace": 1.1,
+      "meetDay": 0.28,
+      "trainerDistCatWinRate": 1.21,
+      "trainerCondWinRate": 0.83,
+      "trainerGradeWinRate": 0.0,
+      "weightXspeed": 1.35,
+      "ageXdistance": 1.5,
+      "jockeyXform": 1.03,
+      "fieldSizeXpost": 1.52,
+      "rotationXform": 1.44,
+      "conditionXsire": 1.86,
+      "horsePacePreference": 0.0,
+      "horseHaiPaceRate": 0.0,
+      "courseDistPaceAvg": 1.02,
+      "paceStyleMatch": 1.37,
+      "lastRacePosition": 0.99,
+      "last3WinRate": 2.04,
+      "last3PlaceRate": 2.36,
+      "classChange": 0.0,
+      "trackTypeChange": 0.0,
+      "careerWinRate": 3.19,
+      "relativeOdds": 5.92,
+      "winStreak": 4.82,
+      "relativePosition": 1.59,
+      "upsetRate": 2.58,
+      "avgPastOdds": 1.35,
+      "totalEarningsLog": 0.0
     },
     "permutation": {
       "recentForm": {
-        "mean_drop": -0.533333,
-        "std_drop": 0.266667
-      },
-      "courseAptitude": {
         "mean_drop": 0.0,
         "std_drop": 0.0
       },
@@ -449,28 +764,24 @@
         "std_drop": 0.0
       },
       "jockeyAbility": {
-        "mean_drop": -0.333333,
-        "std_drop": 0.298142
+        "mean_drop": 0.0,
+        "std_drop": 0.0
       },
       "speedRating": {
-        "mean_drop": -0.266667,
-        "std_drop": 0.326599
-      },
-      "classPerformance": {
         "mean_drop": 0.0,
         "std_drop": 0.0
       },
       "runningStyle": {
-        "mean_drop": -0.4,
-        "std_drop": 0.326599
+        "mean_drop": 0.0,
+        "std_drop": 0.0
       },
       "postPositionBias": {
-        "mean_drop": -0.533333,
-        "std_drop": 0.266667
+        "mean_drop": 0.0,
+        "std_drop": 0.0
       },
       "rotation": {
-        "mean_drop": -0.533333,
-        "std_drop": 0.266667
+        "mean_drop": 0.0,
+        "std_drop": 0.0
       },
       "lastThreeFurlongs": {
         "mean_drop": 0.0,
@@ -481,67 +792,59 @@
         "std_drop": 0.0
       },
       "sireAptitude": {
-        "mean_drop": -0.133333,
-        "std_drop": 0.266667
-      },
-      "trainerAbility": {
-        "mean_drop": -0.133333,
-        "std_drop": 0.266667
-      },
-      "jockeyTrainerCombo": {
         "mean_drop": 0.0,
         "std_drop": 0.0
       },
-      "historicalPostBias": {
+      "trainerAbility": {
         "mean_drop": 0.0,
         "std_drop": 0.0
       },
       "seasonalPattern": {
-        "mean_drop": -0.4,
-        "std_drop": 0.326599
+        "mean_drop": 0.0,
+        "std_drop": 0.0
       },
       "handicapAdvantage": {
-        "mean_drop": -0.4,
-        "std_drop": 0.326599
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "marginCompetitiveness": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "weatherAptitude": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
       },
       "fieldSize": {
-        "mean_drop": -0.266667,
-        "std_drop": 0.326599
-      },
-      "odds": {
-        "mean_drop": -0.466667,
-        "std_drop": 0.4
+        "mean_drop": 0.0,
+        "std_drop": 0.0
       },
       "popularity": {
-        "mean_drop": -0.4,
-        "std_drop": 0.326599
+        "mean_drop": 0.0,
+        "std_drop": 0.0
       },
       "age": {
         "mean_drop": 0.0,
         "std_drop": 0.0
       },
       "sex_encoded": {
-        "mean_drop": -0.533333,
-        "std_drop": 0.266667
+        "mean_drop": 0.0,
+        "std_drop": 0.0
       },
       "handicapWeight": {
         "mean_drop": 0.0,
         "std_drop": 0.0
       },
       "postPosition": {
-        "mean_drop": -0.666667,
-        "std_drop": 0.0
-      },
-      "grade_encoded": {
-        "mean_drop": -0.533333,
-        "std_drop": 0.266667
-      },
-      "trackType_encoded": {
         "mean_drop": 0.0,
         "std_drop": 0.0
       },
+      "grade_encoded": {
+        "mean_drop": 0.2,
+        "std_drop": 0.4
+      },
       "distance": {
-        "mean_drop": -0.666667,
+        "mean_drop": 0.0,
         "std_drop": 0.0
       },
       "trackCondition_encoded": {
@@ -549,469 +852,833 @@
         "std_drop": 0.0
       },
       "oddsLogTransform": {
-        "mean_drop": -0.266667,
-        "std_drop": 0.326599
+        "mean_drop": 0.466667,
+        "std_drop": 0.452155
       },
       "popularityRatio": {
-        "mean_drop": -0.266667,
-        "std_drop": 0.326599
+        "mean_drop": 0.2,
+        "std_drop": 0.4
       },
       "weather_encoded": {
-        "mean_drop": -0.533333,
-        "std_drop": 0.266667
-      },
-      "weightChange": {
         "mean_drop": 0.0,
         "std_drop": 0.0
       },
       "trainerWinRate": {
-        "mean_drop": -0.8,
-        "std_drop": 0.4
+        "mean_drop": 0.0,
+        "std_drop": 0.0
       },
       "trainerPlaceRate": {
-        "mean_drop": -0.6,
-        "std_drop": 0.38873
+        "mean_drop": 0.0,
+        "std_drop": 0.0
       },
       "sireTrackWinRate": {
-        "mean_drop": -0.266667,
-        "std_drop": 0.326599
+        "mean_drop": 0.6,
+        "std_drop": 0.489898
       },
       "jockeyDistanceWinRate": {
-        "mean_drop": -0.466667,
-        "std_drop": 0.452155
+        "mean_drop": 0.0,
+        "std_drop": 0.0
       },
       "jockeyCourseWinRate": {
-        "mean_drop": -0.333333,
-        "std_drop": 0.421637
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "weightStability": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "weightTrendSlope": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "weightOptimalDelta": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "jockeySwitchQuality": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "cornerDelta": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "avgMarginWhenWinning": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "avgMarginWhenLosing": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "daysSinceLastRace": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "meetDay": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "trainerDistCatWinRate": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "trainerCondWinRate": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "trainerGradeWinRate": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "weightXspeed": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "ageXdistance": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "jockeyXform": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "fieldSizeXpost": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "rotationXform": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "conditionXsire": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "horsePacePreference": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "horseHaiPaceRate": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "courseDistPaceAvg": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "paceStyleMatch": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "lastRacePosition": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "last3WinRate": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "last3PlaceRate": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "classChange": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "trackTypeChange": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "careerWinRate": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "relativeOdds": {
+        "mean_drop": 0.2,
+        "std_drop": 0.4
+      },
+      "winStreak": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "relativePosition": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "upsetRate": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "avgPastOdds": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
+      },
+      "totalEarningsLog": {
+        "mean_drop": 0.0,
+        "std_drop": 0.0
       }
     },
     "winner_vs_loser": [
       {
         "feature": "oddsLogTransform",
-        "winner_mean": 1.9751,
-        "loser_mean": 3.6535,
-        "cohens_d": -1.5584
+        "winner_mean": 1.7853,
+        "loser_mean": 3.5965,
+        "cohens_d": -1.5589
       },
       {
         "feature": "popularity",
-        "winner_mean": 3.518,
-        "loser_mean": 8.8602,
-        "cohens_d": -1.4647
+        "winner_mean": 3.6612,
+        "loser_mean": 8.8563,
+        "cohens_d": -1.4175
+      },
+      {
+        "feature": "relativeOdds",
+        "winner_mean": -1.5404,
+        "loser_mean": 0.1928,
+        "cohens_d": -1.4045
       },
       {
         "feature": "popularityRatio",
-        "winner_mean": 0.2554,
-        "loser_mean": 0.5986,
-        "cohens_d": -1.4328
-      },
-      {
-        "feature": "odds",
-        "winner_mean": 10.8893,
-        "loser_mean": 81.1942,
-        "cohens_d": -0.8994
-      },
-      {
-        "feature": "jockeyCourseWinRate",
-        "winner_mean": 0.1136,
-        "loser_mean": 0.0656,
-        "cohens_d": 0.8201
-      },
-      {
-        "feature": "jockeyDistanceWinRate",
-        "winner_mean": 0.1143,
-        "loser_mean": 0.0661,
-        "cohens_d": 0.8054
+        "winner_mean": 0.2631,
+        "loser_mean": 0.5963,
+        "cohens_d": -1.3887
       },
       {
         "feature": "jockeyAbility",
-        "winner_mean": 50.9301,
-        "loser_mean": 32.86,
-        "cohens_d": 0.7969
+        "winner_mean": 48.8345,
+        "loser_mean": 32.6815,
+        "cohens_d": 0.7064
       },
       {
-        "feature": "seasonalPattern",
-        "winner_mean": 60.1684,
-        "loser_mean": 46.6106,
-        "cohens_d": 0.7922
+        "feature": "jockeyDistanceWinRate",
+        "winner_mean": 0.1015,
+        "loser_mean": 0.0657,
+        "cohens_d": 0.5973
       },
       {
-        "feature": "distanceAptitude",
-        "winner_mean": 51.5402,
-        "loser_mean": 43.5476,
-        "cohens_d": 0.7652
-      },
-      {
-        "feature": "trainerAbility",
-        "winner_mean": 66.1887,
-        "loser_mean": 58.5801,
-        "cohens_d": 0.5433
+        "feature": "jockeyCourseWinRate",
+        "winner_mean": 0.1017,
+        "loser_mean": 0.0663,
+        "cohens_d": 0.5946
       },
       {
         "feature": "trainerPlaceRate",
-        "winner_mean": 0.2516,
-        "loser_mean": 0.215,
-        "cohens_d": 0.5144
+        "winner_mean": 0.25,
+        "loser_mean": 0.2149,
+        "cohens_d": 0.4824
+      },
+      {
+        "feature": "trainerAbility",
+        "winner_mean": 65.0871,
+        "loser_mean": 58.5546,
+        "cohens_d": 0.4564
+      },
+      {
+        "feature": "distanceAptitude",
+        "winner_mean": 48.9081,
+        "loser_mean": 44.9919,
+        "cohens_d": 0.4435
       },
       {
         "feature": "trainerWinRate",
-        "winner_mean": 0.0887,
+        "winner_mean": 0.0869,
+        "loser_mean": 0.071,
+        "cohens_d": 0.4356
+      },
+      {
+        "feature": "trainerCondWinRate",
+        "winner_mean": 0.0877,
         "loser_mean": 0.0712,
-        "cohens_d": 0.4975
+        "cohens_d": 0.4296
       },
       {
-        "feature": "runningStyle",
-        "winner_mean": 57.3639,
-        "loser_mean": 54.4913,
-        "cohens_d": 0.3001
+        "feature": "jockeyXform",
+        "winner_mean": 0.1601,
+        "loser_mean": 0.1017,
+        "cohens_d": 0.4251
       },
       {
-        "feature": "fieldSize",
-        "winner_mean": 14.1158,
-        "loser_mean": 14.9024,
-        "cohens_d": -0.2864
+        "feature": "trainerDistCatWinRate",
+        "winner_mean": 0.087,
+        "loser_mean": 0.0713,
+        "cohens_d": 0.3648
       },
       {
         "feature": "sireTrackWinRate",
-        "winner_mean": 0.0977,
-        "loser_mean": 0.0949,
-        "cohens_d": 0.2709
+        "winner_mean": 0.1051,
+        "loser_mean": 0.1001,
+        "cohens_d": 0.3508
       },
       {
-        "feature": "trackConditionAptitude",
-        "winner_mean": 41.7563,
-        "loser_mean": 37.7192,
-        "cohens_d": 0.2453
+        "feature": "last3PlaceRate",
+        "winner_mean": 0.1478,
+        "loser_mean": 0.0637,
+        "cohens_d": 0.3405
       },
       {
-        "feature": "recentForm",
-        "winner_mean": 32.929,
-        "loser_mean": 27.5987,
-        "cohens_d": 0.2063
+        "feature": "jockeySwitchQuality",
+        "winner_mean": -0.5683,
+        "loser_mean": -4.829,
+        "cohens_d": 0.3267
       },
       {
-        "feature": "sex_encoded",
-        "winner_mean": 0.4339,
-        "loser_mean": 0.5301,
-        "cohens_d": -0.165
+        "feature": "fieldSize",
+        "winner_mean": 14.1965,
+        "loser_mean": 14.947,
+        "cohens_d": -0.2783
       },
       {
-        "feature": "age",
-        "winner_mean": 3.7421,
-        "loser_mean": 3.951,
-        "cohens_d": -0.1644
+        "feature": "rotation",
+        "winner_mean": 63.3022,
+        "loser_mean": 59.7507,
+        "cohens_d": 0.2291
       },
       {
-        "feature": "handicapAdvantage",
-        "winner_mean": 49.8249,
-        "loser_mean": 50.071,
-        "cohens_d": -0.1629
+        "feature": "runningStyle",
+        "winner_mean": 56.4321,
+        "loser_mean": 54.3717,
+        "cohens_d": 0.2285
       }
     ]
   },
   "category_analysis": {
     "turf_sprint": {
       "sample_count": 1500,
-      "baseline_ndcg1": 0.0,
+      "baseline_ndcg1": 1.0,
       "importance": [
         {
           "rank": 1,
-          "feature": "sireTrackWinRate",
-          "gain_pct": 7.26,
-          "perm_drop": 0.0,
-          "cover_pct": 12.01,
-          "composite_score": 5.56
+          "feature": "oddsLogTransform",
+          "gain_pct": 5.49,
+          "perm_drop": 0.666667,
+          "cover_pct": 5.13,
+          "composite_score": 33.93
         },
         {
           "rank": 2,
-          "feature": "odds",
-          "gain_pct": 7.08,
-          "perm_drop": -0.333333,
-          "cover_pct": 5.96,
-          "composite_score": 5.03
+          "feature": "popularityRatio",
+          "gain_pct": 2.15,
+          "perm_drop": 0.666667,
+          "cover_pct": 1.94,
+          "composite_score": 31.61
         },
         {
           "rank": 3,
-          "feature": "jockeyDistanceWinRate",
-          "gain_pct": 6.02,
-          "perm_drop": -0.333333,
-          "cover_pct": 7.43,
-          "composite_score": 4.69
+          "feature": "trainerPlaceRate",
+          "gain_pct": 1.46,
+          "perm_drop": 0.666667,
+          "cover_pct": 1.22,
+          "composite_score": 31.15
         },
         {
           "rank": 4,
-          "feature": "rotation",
-          "gain_pct": 6.47,
-          "perm_drop": 0.0,
-          "cover_pct": 5.16,
-          "composite_score": 3.69
+          "feature": "relativePosition",
+          "gain_pct": 1.64,
+          "perm_drop": 0.666667,
+          "cover_pct": 1.62,
+          "composite_score": 31.14
         },
         {
           "rank": 5,
-          "feature": "trainerWinRate",
-          "gain_pct": 4.02,
-          "perm_drop": 0.0,
-          "cover_pct": 5.71,
-          "composite_score": 3.54
+          "feature": "handicapWeight",
+          "gain_pct": 1.42,
+          "perm_drop": 0.666667,
+          "cover_pct": 1.18,
+          "composite_score": 30.97
         },
         {
           "rank": 6,
-          "feature": "popularityRatio",
-          "gain_pct": 5.23,
-          "perm_drop": 0.0,
-          "cover_pct": 4.44,
-          "composite_score": 3.5
+          "feature": "grade_encoded",
+          "gain_pct": 1.93,
+          "perm_drop": 0.444444,
+          "cover_pct": 3.08,
+          "composite_score": 21.56
         },
         {
           "rank": 7,
-          "feature": "jockeyCourseWinRate",
-          "gain_pct": 3.95,
-          "perm_drop": -0.666667,
-          "cover_pct": 6.59,
-          "composite_score": 3.49
+          "feature": "relativeOdds",
+          "gain_pct": 3.22,
+          "perm_drop": 0.333333,
+          "cover_pct": 3.37,
+          "composite_score": 17.6
         },
         {
           "rank": 8,
-          "feature": "oddsLogTransform",
-          "gain_pct": 6.03,
-          "perm_drop": 0.0,
-          "cover_pct": 4.38,
-          "composite_score": 3.48
+          "feature": "handicapAdvantage",
+          "gain_pct": 1.32,
+          "perm_drop": 0.333333,
+          "cover_pct": 1.89,
+          "composite_score": 16.38
         },
         {
           "rank": 9,
           "feature": "jockeyAbility",
-          "gain_pct": 2.91,
-          "perm_drop": -0.222222,
-          "cover_pct": 4.55,
-          "composite_score": 2.82
+          "gain_pct": 1.45,
+          "perm_drop": 0.333333,
+          "cover_pct": 1.66,
+          "composite_score": 16.25
         },
         {
           "rank": 10,
-          "feature": "lastThreeFurlongs",
-          "gain_pct": 3.2,
-          "perm_drop": -0.333333,
-          "cover_pct": 3.22,
-          "composite_score": 2.38
+          "feature": "weightXspeed",
+          "gain_pct": 1.48,
+          "perm_drop": 0.333333,
+          "cover_pct": 1.93,
+          "composite_score": 16.17
         },
         {
           "rank": 11,
-          "feature": "trainerAbility",
-          "gain_pct": 2.82,
-          "perm_drop": 0.0,
-          "cover_pct": 2.44,
-          "composite_score": 2.33
+          "feature": "avgMarginWhenLosing",
+          "gain_pct": 3.04,
+          "perm_drop": 0.222222,
+          "cover_pct": 4.53,
+          "composite_score": 12.29
         },
         {
           "rank": 12,
-          "feature": "grade_encoded",
-          "gain_pct": 3.5,
-          "perm_drop": 0.0,
-          "cover_pct": 3.16,
-          "composite_score": 2.12
+          "feature": "lastThreeFurlongs",
+          "gain_pct": 1.88,
+          "perm_drop": 0.222222,
+          "cover_pct": 2.37,
+          "composite_score": 11.53
         },
         {
           "rank": 13,
-          "feature": "trainerPlaceRate",
-          "gain_pct": 2.21,
-          "perm_drop": -0.333333,
-          "cover_pct": 2.58,
-          "composite_score": 1.98
+          "feature": "cornerDelta",
+          "gain_pct": 1.67,
+          "perm_drop": 0.111111,
+          "cover_pct": 1.97,
+          "composite_score": 6.27
         },
         {
           "rank": 14,
-          "feature": "recentForm",
-          "gain_pct": 3.02,
+          "feature": "sireTrackWinRate",
+          "gain_pct": 3.9,
           "perm_drop": 0.0,
-          "cover_pct": 2.37,
-          "composite_score": 1.94
+          "cover_pct": 5.69,
+          "composite_score": 3.09
         },
         {
           "rank": 15,
-          "feature": "handicapWeight",
-          "gain_pct": 2.56,
+          "feature": "upsetRate",
+          "gain_pct": 2.72,
           "perm_drop": 0.0,
-          "cover_pct": 3.27,
-          "composite_score": 1.81
+          "cover_pct": 2.0,
+          "composite_score": 1.56
         },
         {
           "rank": 16,
-          "feature": "postPosition",
-          "gain_pct": 2.74,
+          "feature": "paceStyleMatch",
+          "gain_pct": 1.76,
           "perm_drop": 0.0,
-          "cover_pct": 1.88,
-          "composite_score": 1.71
+          "cover_pct": 2.84,
+          "composite_score": 1.4
         },
         {
           "rank": 17,
-          "feature": "handicapAdvantage",
-          "gain_pct": 2.04,
+          "feature": "last3PlaceRate",
+          "gain_pct": 1.62,
           "perm_drop": 0.0,
-          "cover_pct": 1.83,
-          "composite_score": 1.7
+          "cover_pct": 3.41,
+          "composite_score": 1.35
         },
         {
           "rank": 18,
-          "feature": "seasonalPattern",
-          "gain_pct": 2.02,
+          "feature": "trackConditionAptitude",
+          "gain_pct": 1.88,
           "perm_drop": 0.0,
-          "cover_pct": 3.85,
-          "composite_score": 1.66
+          "cover_pct": 2.32,
+          "composite_score": 1.28
         },
         {
           "rank": 19,
-          "feature": "distance",
-          "gain_pct": 3.23,
+          "feature": "trainerWinRate",
+          "gain_pct": 1.68,
           "perm_drop": 0.0,
-          "cover_pct": 1.16,
-          "composite_score": 1.62
+          "cover_pct": 1.63,
+          "composite_score": 1.27
         },
         {
           "rank": 20,
-          "feature": "popularity",
-          "gain_pct": 2.68,
+          "feature": "trainerAbility",
+          "gain_pct": 1.69,
           "perm_drop": 0.0,
-          "cover_pct": 1.8,
-          "composite_score": 1.6
+          "cover_pct": 0.98,
+          "composite_score": 1.26
         },
         {
           "rank": 21,
-          "feature": "speedRating",
-          "gain_pct": 2.43,
+          "feature": "jockeyDistanceWinRate",
+          "gain_pct": 1.66,
           "perm_drop": 0.0,
-          "cover_pct": 2.11,
-          "composite_score": 1.59
+          "cover_pct": 1.3,
+          "composite_score": 1.25
         },
         {
           "rank": 22,
-          "feature": "age",
-          "gain_pct": 2.53,
+          "feature": "marginCompetitiveness",
+          "gain_pct": 1.79,
           "perm_drop": 0.0,
-          "cover_pct": 1.9,
-          "composite_score": 1.54
+          "cover_pct": 2.35,
+          "composite_score": 1.24
         },
         {
           "rank": 23,
-          "feature": "sireAptitude",
-          "gain_pct": 1.94,
+          "feature": "seasonalPattern",
+          "gain_pct": 1.69,
           "perm_drop": 0.0,
-          "cover_pct": 1.76,
-          "composite_score": 1.48
+          "cover_pct": 2.42,
+          "composite_score": 1.21
         },
         {
           "rank": 24,
-          "feature": "runningStyle",
-          "gain_pct": 2.38,
+          "feature": "lastRacePosition",
+          "gain_pct": 1.77,
           "perm_drop": 0.0,
-          "cover_pct": 1.52,
-          "composite_score": 1.44
+          "cover_pct": 2.3,
+          "composite_score": 1.21
         },
         {
           "rank": 25,
-          "feature": "trackConditionAptitude",
-          "gain_pct": 1.79,
+          "feature": "winStreak",
+          "gain_pct": 2.4,
           "perm_drop": 0.0,
-          "cover_pct": 1.83,
-          "composite_score": 1.16
+          "cover_pct": 1.16,
+          "composite_score": 1.19
         },
         {
           "rank": 26,
-          "feature": "consistency",
-          "gain_pct": 1.6,
+          "feature": "careerWinRate",
+          "gain_pct": 1.84,
           "perm_drop": 0.0,
-          "cover_pct": 1.51,
-          "composite_score": 1.1
+          "cover_pct": 2.03,
+          "composite_score": 1.19
         },
         {
           "rank": 27,
-          "feature": "postPositionBias",
-          "gain_pct": 1.88,
+          "feature": "daysSinceLastRace",
+          "gain_pct": 1.77,
           "perm_drop": 0.0,
-          "cover_pct": 0.94,
-          "composite_score": 1.04
+          "cover_pct": 1.34,
+          "composite_score": 1.18
         },
         {
           "rank": 28,
-          "feature": "sex_encoded",
-          "gain_pct": 1.28,
+          "feature": "fieldSizeXpost",
+          "gain_pct": 2.1,
           "perm_drop": 0.0,
-          "cover_pct": 1.63,
-          "composite_score": 0.88
+          "cover_pct": 1.43,
+          "composite_score": 1.18
         },
         {
           "rank": 29,
-          "feature": "trackCondition_encoded",
-          "gain_pct": 1.34,
+          "feature": "last3WinRate",
+          "gain_pct": 1.61,
           "perm_drop": 0.0,
-          "cover_pct": 1.31,
-          "composite_score": 0.87
+          "cover_pct": 2.63,
+          "composite_score": 1.18
         },
         {
           "rank": 30,
-          "feature": "fieldSize",
-          "gain_pct": 1.34,
+          "feature": "age",
+          "gain_pct": 1.69,
           "perm_drop": 0.0,
-          "cover_pct": 0.6,
-          "composite_score": 0.83
+          "cover_pct": 1.8,
+          "composite_score": 1.12
         },
         {
           "rank": 31,
-          "feature": "distanceAptitude",
-          "gain_pct": 1.06,
+          "feature": "jockeyCourseWinRate",
+          "gain_pct": 1.42,
           "perm_drop": 0.0,
-          "cover_pct": 0.72,
-          "composite_score": 0.72
+          "cover_pct": 1.04,
+          "composite_score": 1.12
         },
         {
           "rank": 32,
-          "feature": "weather_encoded",
-          "gain_pct": 1.43,
+          "feature": "ageXdistance",
+          "gain_pct": 1.73,
           "perm_drop": 0.0,
-          "cover_pct": 0.38,
-          "composite_score": 0.7
+          "cover_pct": 1.21,
+          "composite_score": 1.12
         },
         {
           "rank": 33,
-          "feature": "courseAptitude",
-          "gain_pct": 0.0,
+          "feature": "trainerCondWinRate",
+          "gain_pct": 1.57,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 0.82,
+          "composite_score": 1.11
         },
         {
           "rank": 34,
-          "feature": "classPerformance",
-          "gain_pct": 0.0,
+          "feature": "trainerDistCatWinRate",
+          "gain_pct": 1.37,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 1.19,
+          "composite_score": 1.1
         },
         {
           "rank": 35,
-          "feature": "jockeyTrainerCombo",
-          "gain_pct": 0.0,
+          "feature": "avgPastOdds",
+          "gain_pct": 1.58,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 1.91,
+          "composite_score": 1.1
         },
         {
           "rank": 36,
-          "feature": "historicalPostBias",
-          "gain_pct": 0.0,
+          "feature": "consistency",
+          "gain_pct": 1.46,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 2.12,
+          "composite_score": 1.08
         },
         {
           "rank": 37,
-          "feature": "trackType_encoded",
+          "feature": "jockeySwitchQuality",
+          "gain_pct": 1.59,
+          "perm_drop": 0.0,
+          "cover_pct": 1.79,
+          "composite_score": 1.08
+        },
+        {
+          "rank": 38,
+          "feature": "jockeyXform",
+          "gain_pct": 1.42,
+          "perm_drop": 0.0,
+          "cover_pct": 1.23,
+          "composite_score": 1.08
+        },
+        {
+          "rank": 39,
+          "feature": "postPositionBias",
+          "gain_pct": 1.95,
+          "perm_drop": 0.0,
+          "cover_pct": 1.11,
+          "composite_score": 1.07
+        },
+        {
+          "rank": 40,
+          "feature": "distanceAptitude",
+          "gain_pct": 1.6,
+          "perm_drop": 0.0,
+          "cover_pct": 1.58,
+          "composite_score": 1.02
+        },
+        {
+          "rank": 41,
+          "feature": "avgMarginWhenWinning",
+          "gain_pct": 1.35,
+          "perm_drop": 0.0,
+          "cover_pct": 2.09,
+          "composite_score": 1.01
+        },
+        {
+          "rank": 42,
+          "feature": "courseDistPaceAvg",
+          "gain_pct": 1.36,
+          "perm_drop": 0.0,
+          "cover_pct": 0.86,
+          "composite_score": 1.01
+        },
+        {
+          "rank": 43,
+          "feature": "speedRating",
+          "gain_pct": 1.72,
+          "perm_drop": 0.0,
+          "cover_pct": 1.17,
+          "composite_score": 1.0
+        },
+        {
+          "rank": 44,
+          "feature": "popularity",
+          "gain_pct": 1.54,
+          "perm_drop": 0.0,
+          "cover_pct": 1.2,
+          "composite_score": 0.97
+        },
+        {
+          "rank": 45,
+          "feature": "rotationXform",
+          "gain_pct": 1.49,
+          "perm_drop": 0.0,
+          "cover_pct": 1.18,
+          "composite_score": 0.95
+        },
+        {
+          "rank": 46,
+          "feature": "rotation",
+          "gain_pct": 1.59,
+          "perm_drop": 0.0,
+          "cover_pct": 1.18,
+          "composite_score": 0.95
+        },
+        {
+          "rank": 47,
+          "feature": "sireAptitude",
+          "gain_pct": 1.42,
+          "perm_drop": 0.0,
+          "cover_pct": 0.93,
+          "composite_score": 0.95
+        },
+        {
+          "rank": 48,
+          "feature": "postPosition",
+          "gain_pct": 1.2,
+          "perm_drop": 0.0,
+          "cover_pct": 0.83,
+          "composite_score": 0.9
+        },
+        {
+          "rank": 49,
+          "feature": "meetDay",
+          "gain_pct": 1.28,
+          "perm_drop": 0.0,
+          "cover_pct": 0.82,
+          "composite_score": 0.87
+        },
+        {
+          "rank": 50,
+          "feature": "runningStyle",
+          "gain_pct": 1.47,
+          "perm_drop": 0.0,
+          "cover_pct": 0.72,
+          "composite_score": 0.8
+        },
+        {
+          "rank": 51,
+          "feature": "conditionXsire",
+          "gain_pct": 1.14,
+          "perm_drop": 0.0,
+          "cover_pct": 1.25,
+          "composite_score": 0.75
+        },
+        {
+          "rank": 52,
+          "feature": "sex_encoded",
+          "gain_pct": 1.13,
+          "perm_drop": 0.0,
+          "cover_pct": 1.27,
+          "composite_score": 0.73
+        },
+        {
+          "rank": 53,
+          "feature": "weather_encoded",
+          "gain_pct": 1.44,
+          "perm_drop": 0.0,
+          "cover_pct": 0.54,
+          "composite_score": 0.73
+        },
+        {
+          "rank": 54,
+          "feature": "fieldSize",
+          "gain_pct": 1.12,
+          "perm_drop": 0.0,
+          "cover_pct": 0.64,
+          "composite_score": 0.69
+        },
+        {
+          "rank": 55,
+          "feature": "distance",
+          "gain_pct": 1.33,
+          "perm_drop": 0.0,
+          "cover_pct": 0.59,
+          "composite_score": 0.69
+        },
+        {
+          "rank": 56,
+          "feature": "recentForm",
+          "gain_pct": 1.13,
+          "perm_drop": 0.0,
+          "cover_pct": 0.73,
+          "composite_score": 0.68
+        },
+        {
+          "rank": 57,
+          "feature": "trackCondition_encoded",
+          "gain_pct": 0.88,
+          "perm_drop": 0.0,
+          "cover_pct": 0.48,
+          "composite_score": 0.48
+        },
+        {
+          "rank": 58,
+          "feature": "weatherAptitude",
           "gain_pct": 0.0,
           "perm_drop": 0.0,
           "cover_pct": 0.0,
           "composite_score": 0.0
         },
         {
-          "rank": 38,
-          "feature": "weightChange",
+          "rank": 59,
+          "feature": "weightStability",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 60,
+          "feature": "weightTrendSlope",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 61,
+          "feature": "weightOptimalDelta",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 62,
+          "feature": "trainerGradeWinRate",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 63,
+          "feature": "horsePacePreference",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 64,
+          "feature": "horseHaiPaceRate",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 65,
+          "feature": "classChange",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 66,
+          "feature": "trackTypeChange",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 67,
+          "feature": "totalEarningsLog",
           "gain_pct": 0.0,
           "perm_drop": 0.0,
           "cover_pct": 0.0,
@@ -1020,530 +1687,762 @@
       ]
     },
     "turf_mile": {
-      "sample_count": 1237,
-      "baseline_ndcg1": 0.4307,
+      "sample_count": 1249,
+      "baseline_ndcg1": 0.5074,
       "importance": [
         {
           "rank": 1,
-          "feature": "odds",
-          "gain_pct": 7.5,
-          "perm_drop": 0.09613,
-          "cover_pct": 6.92,
-          "composite_score": 35.45
+          "feature": "oddsLogTransform",
+          "gain_pct": 7.44,
+          "perm_drop": 0.190741,
+          "cover_pct": 6.51,
+          "composite_score": 35.11
         },
         {
           "rank": 2,
-          "feature": "popularityRatio",
-          "gain_pct": 8.74,
-          "perm_drop": 0.029963,
-          "cover_pct": 6.13,
-          "composite_score": 14.51
+          "feature": "sireAptitude",
+          "gain_pct": 2.6,
+          "perm_drop": 0.048148,
+          "cover_pct": 3.82,
+          "composite_score": 9.65
         },
         {
           "rank": 3,
-          "feature": "jockeyDistanceWinRate",
-          "gain_pct": 5.46,
-          "perm_drop": 0.02372,
-          "cover_pct": 7.66,
-          "composite_score": 11.94
+          "feature": "relativeOdds",
+          "gain_pct": 3.9,
+          "perm_drop": 0.025926,
+          "cover_pct": 4.92,
+          "composite_score": 7.14
         },
         {
           "rank": 4,
-          "feature": "jockeyCourseWinRate",
-          "gain_pct": 4.95,
-          "perm_drop": 0.019975,
-          "cover_pct": 8.25,
-          "composite_score": 10.45
+          "feature": "postPositionBias",
+          "gain_pct": 1.06,
+          "perm_drop": 0.038272,
+          "cover_pct": 1.35,
+          "composite_score": 6.86
         },
         {
           "rank": 5,
-          "feature": "lastThreeFurlongs",
-          "gain_pct": 2.4,
-          "perm_drop": 0.018727,
-          "cover_pct": 2.16,
-          "composite_score": 7.65
+          "feature": "grade_encoded",
+          "gain_pct": 2.02,
+          "perm_drop": 0.02963,
+          "cover_pct": 2.62,
+          "composite_score": 6.35
         },
         {
           "rank": 6,
-          "feature": "oddsLogTransform",
-          "gain_pct": 8.63,
-          "perm_drop": -0.0,
-          "cover_pct": 6.14,
-          "composite_score": 4.86
+          "feature": "sireTrackWinRate",
+          "gain_pct": 3.67,
+          "perm_drop": 0.017284,
+          "cover_pct": 4.77,
+          "composite_score": 5.58
         },
         {
           "rank": 7,
-          "feature": "handicapAdvantage",
-          "gain_pct": 1.69,
-          "perm_drop": 0.008739,
-          "cover_pct": 1.63,
-          "composite_score": 4.25
+          "feature": "ageXdistance",
+          "gain_pct": 2.08,
+          "perm_drop": 0.022222,
+          "cover_pct": 1.61,
+          "composite_score": 4.96
         },
         {
           "rank": 8,
-          "feature": "speedRating",
-          "gain_pct": 1.78,
-          "perm_drop": 0.006242,
-          "cover_pct": 2.4,
-          "composite_score": 3.45
+          "feature": "rotationXform",
+          "gain_pct": 1.49,
+          "perm_drop": 0.020988,
+          "cover_pct": 1.21,
+          "composite_score": 4.2
         },
         {
           "rank": 9,
-          "feature": "trainerPlaceRate",
-          "gain_pct": 2.47,
-          "perm_drop": 0.003745,
-          "cover_pct": 3.34,
-          "composite_score": 3.39
+          "feature": "trainerGradeWinRate",
+          "gain_pct": 1.95,
+          "perm_drop": 0.011111,
+          "cover_pct": 5.42,
+          "composite_score": 3.65
         },
         {
           "rank": 10,
-          "feature": "sireAptitude",
-          "gain_pct": 3.62,
-          "perm_drop": 0.0,
-          "cover_pct": 5.7,
-          "composite_score": 3.02
+          "feature": "lastThreeFurlongs",
+          "gain_pct": 1.46,
+          "perm_drop": 0.01358,
+          "cover_pct": 2.24,
+          "composite_score": 3.48
         },
         {
           "rank": 11,
-          "feature": "postPositionBias",
-          "gain_pct": 1.12,
-          "perm_drop": 0.004994,
-          "cover_pct": 0.68,
-          "composite_score": 2.33
+          "feature": "conditionXsire",
+          "gain_pct": 2.8,
+          "perm_drop": 0.011111,
+          "cover_pct": 2.08,
+          "composite_score": 3.41
         },
         {
           "rank": 12,
-          "feature": "age",
-          "gain_pct": 2.67,
-          "perm_drop": 0.002497,
-          "cover_pct": 1.39,
-          "composite_score": 2.33
+          "feature": "weightXspeed",
+          "gain_pct": 1.6,
+          "perm_drop": 0.011111,
+          "cover_pct": 3.11,
+          "composite_score": 3.19
         },
         {
           "rank": 13,
-          "feature": "runningStyle",
-          "gain_pct": 4.2,
-          "perm_drop": -0.0,
-          "cover_pct": 1.8,
-          "composite_score": 2.17
+          "feature": "trainerDistCatWinRate",
+          "gain_pct": 1.62,
+          "perm_drop": 0.012346,
+          "cover_pct": 1.35,
+          "composite_score": 3.16
         },
         {
           "rank": 14,
-          "feature": "rotation",
-          "gain_pct": 3.41,
-          "perm_drop": 0.0,
-          "cover_pct": 2.17,
-          "composite_score": 1.85
+          "feature": "popularityRatio",
+          "gain_pct": 4.13,
+          "perm_drop": 0.002469,
+          "cover_pct": 3.01,
+          "composite_score": 3.0
         },
         {
           "rank": 15,
-          "feature": "sireTrackWinRate",
-          "gain_pct": 7.89,
-          "perm_drop": -0.011236,
-          "cover_pct": 8.93,
-          "composite_score": 1.7
+          "feature": "trainerPlaceRate",
+          "gain_pct": 1.66,
+          "perm_drop": 0.006173,
+          "cover_pct": 1.85,
+          "composite_score": 2.48
         },
         {
           "rank": 16,
-          "feature": "fieldSize",
-          "gain_pct": 1.92,
-          "perm_drop": 0.001248,
-          "cover_pct": 1.1,
-          "composite_score": 1.5
+          "feature": "jockeyXform",
+          "gain_pct": 1.4,
+          "perm_drop": 0.007407,
+          "cover_pct": 1.54,
+          "composite_score": 2.38
         },
         {
           "rank": 17,
-          "feature": "grade_encoded",
-          "gain_pct": 3.39,
-          "perm_drop": -0.002497,
-          "cover_pct": 3.22,
-          "composite_score": 1.43
+          "feature": "jockeyDistanceWinRate",
+          "gain_pct": 1.33,
+          "perm_drop": 0.008642,
+          "cover_pct": 0.99,
+          "composite_score": 2.36
         },
         {
           "rank": 18,
-          "feature": "distanceAptitude",
-          "gain_pct": 1.9,
-          "perm_drop": 0.0,
-          "cover_pct": 1.98,
-          "composite_score": 1.33
+          "feature": "relativePosition",
+          "gain_pct": 1.82,
+          "perm_drop": 0.006173,
+          "cover_pct": 2.35,
+          "composite_score": 2.31
         },
         {
           "rank": 19,
-          "feature": "popularity",
-          "gain_pct": 2.19,
-          "perm_drop": 0.0,
-          "cover_pct": 1.2,
-          "composite_score": 1.28
+          "feature": "jockeyAbility",
+          "gain_pct": 1.4,
+          "perm_drop": 0.007407,
+          "cover_pct": 1.16,
+          "composite_score": 2.27
         },
         {
           "rank": 20,
-          "feature": "sex_encoded",
-          "gain_pct": 2.32,
-          "perm_drop": 0.0,
-          "cover_pct": 1.3,
-          "composite_score": 1.22
+          "feature": "recentForm",
+          "gain_pct": 0.97,
+          "perm_drop": 0.008642,
+          "cover_pct": 1.92,
+          "composite_score": 2.25
         },
         {
           "rank": 21,
-          "feature": "trackCondition_encoded",
-          "gain_pct": 1.32,
-          "perm_drop": 0.0,
-          "cover_pct": 1.33,
-          "composite_score": 0.83
+          "feature": "avgMarginWhenLosing",
+          "gain_pct": 1.72,
+          "perm_drop": 0.004938,
+          "cover_pct": 1.99,
+          "composite_score": 2.05
         },
         {
           "rank": 22,
-          "feature": "seasonalPattern",
-          "gain_pct": 1.14,
-          "perm_drop": 0.0,
-          "cover_pct": 1.32,
-          "composite_score": 0.83
+          "feature": "courseDistPaceAvg",
+          "gain_pct": 1.46,
+          "perm_drop": 0.006173,
+          "cover_pct": 0.94,
+          "composite_score": 1.99
         },
         {
           "rank": 23,
-          "feature": "consistency",
-          "gain_pct": 1.22,
-          "perm_drop": 0.0,
-          "cover_pct": 0.9,
-          "composite_score": 0.75
+          "feature": "daysSinceLastRace",
+          "gain_pct": 1.65,
+          "perm_drop": 0.003704,
+          "cover_pct": 1.81,
+          "composite_score": 1.8
         },
         {
           "rank": 24,
-          "feature": "distance",
-          "gain_pct": 1.28,
-          "perm_drop": 0.0,
-          "cover_pct": 0.21,
-          "composite_score": 0.6
+          "feature": "seasonalPattern",
+          "gain_pct": 2.09,
+          "perm_drop": 0.001235,
+          "cover_pct": 3.54,
+          "composite_score": 1.77
         },
         {
           "rank": 25,
-          "feature": "recentForm",
-          "gain_pct": 1.75,
-          "perm_drop": -0.002497,
-          "cover_pct": 1.83,
-          "composite_score": 0.52
+          "feature": "avgPastOdds",
+          "gain_pct": 1.51,
+          "perm_drop": 0.003704,
+          "cover_pct": 2.25,
+          "composite_score": 1.72
         },
         {
           "rank": 26,
-          "feature": "weather_encoded",
-          "gain_pct": 0.93,
-          "perm_drop": 0.0,
-          "cover_pct": 0.38,
-          "composite_score": 0.51
+          "feature": "runningStyle",
+          "gain_pct": 2.21,
+          "perm_drop": 0.002469,
+          "cover_pct": 1.63,
+          "composite_score": 1.71
         },
         {
           "rank": 27,
-          "feature": "courseAptitude",
-          "gain_pct": 0.0,
-          "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "feature": "trainerWinRate",
+          "gain_pct": 1.17,
+          "perm_drop": 0.004938,
+          "cover_pct": 0.73,
+          "composite_score": 1.67
         },
         {
           "rank": 28,
-          "feature": "classPerformance",
-          "gain_pct": 0.0,
-          "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "feature": "marginCompetitiveness",
+          "gain_pct": 1.08,
+          "perm_drop": 0.006173,
+          "cover_pct": 0.94,
+          "composite_score": 1.65
         },
         {
           "rank": 29,
-          "feature": "jockeyTrainerCombo",
-          "gain_pct": 0.0,
-          "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "feature": "trainerAbility",
+          "gain_pct": 1.57,
+          "perm_drop": 0.002469,
+          "cover_pct": 1.21,
+          "composite_score": 1.52
         },
         {
           "rank": 30,
-          "feature": "historicalPostBias",
-          "gain_pct": 0.0,
+          "feature": "upsetRate",
+          "gain_pct": 2.28,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 1.59,
+          "composite_score": 1.25
         },
         {
           "rank": 31,
-          "feature": "trackType_encoded",
-          "gain_pct": 0.0,
+          "feature": "age",
+          "gain_pct": 1.83,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 1.69,
+          "composite_score": 1.12
         },
         {
           "rank": 32,
-          "feature": "weightChange",
+          "feature": "fieldSize",
+          "gain_pct": 1.19,
+          "perm_drop": 0.001235,
+          "cover_pct": 1.13,
+          "composite_score": 1.08
+        },
+        {
+          "rank": 33,
+          "feature": "careerWinRate",
+          "gain_pct": 1.73,
+          "perm_drop": 0.0,
+          "cover_pct": 1.54,
+          "composite_score": 1.05
+        },
+        {
+          "rank": 34,
+          "feature": "jockeySwitchQuality",
+          "gain_pct": 1.36,
+          "perm_drop": 0.0,
+          "cover_pct": 2.09,
+          "composite_score": 1.05
+        },
+        {
+          "rank": 35,
+          "feature": "handicapAdvantage",
+          "gain_pct": 1.24,
+          "perm_drop": -0.0,
+          "cover_pct": 0.95,
+          "composite_score": 1.04
+        },
+        {
+          "rank": 36,
+          "feature": "avgMarginWhenWinning",
+          "gain_pct": 1.6,
+          "perm_drop": 0.0,
+          "cover_pct": 1.79,
+          "composite_score": 1.04
+        },
+        {
+          "rank": 37,
+          "feature": "paceStyleMatch",
+          "gain_pct": 1.6,
+          "perm_drop": 0.0,
+          "cover_pct": 1.36,
+          "composite_score": 0.97
+        },
+        {
+          "rank": 38,
+          "feature": "trackCondition_encoded",
+          "gain_pct": 1.57,
+          "perm_drop": 0.0,
+          "cover_pct": 1.27,
+          "composite_score": 0.94
+        },
+        {
+          "rank": 39,
+          "feature": "distanceAptitude",
+          "gain_pct": 1.37,
+          "perm_drop": 0.0,
+          "cover_pct": 1.29,
+          "composite_score": 0.87
+        },
+        {
+          "rank": 40,
+          "feature": "handicapWeight",
+          "gain_pct": 1.52,
+          "perm_drop": 0.0,
+          "cover_pct": 0.85,
+          "composite_score": 0.85
+        },
+        {
+          "rank": 41,
+          "feature": "consistency",
+          "gain_pct": 1.73,
+          "perm_drop": 0.0,
+          "cover_pct": 0.6,
+          "composite_score": 0.84
+        },
+        {
+          "rank": 42,
+          "feature": "lastRacePosition",
+          "gain_pct": 1.5,
+          "perm_drop": 0.0,
+          "cover_pct": 0.91,
+          "composite_score": 0.81
+        },
+        {
+          "rank": 43,
+          "feature": "trackConditionAptitude",
+          "gain_pct": 1.3,
+          "perm_drop": 0.0,
+          "cover_pct": 0.93,
+          "composite_score": 0.74
+        },
+        {
+          "rank": 44,
+          "feature": "fieldSizeXpost",
+          "gain_pct": 1.12,
+          "perm_drop": 0.0,
+          "cover_pct": 0.91,
+          "composite_score": 0.73
+        },
+        {
+          "rank": 45,
+          "feature": "speedRating",
+          "gain_pct": 1.7,
+          "perm_drop": -0.003704,
+          "cover_pct": 2.74,
+          "composite_score": 0.67
+        },
+        {
+          "rank": 46,
+          "feature": "popularity",
+          "gain_pct": 1.51,
+          "perm_drop": -0.002469,
+          "cover_pct": 1.6,
+          "composite_score": 0.63
+        },
+        {
+          "rank": 47,
+          "feature": "sex_encoded",
+          "gain_pct": 1.24,
+          "perm_drop": 0.0,
+          "cover_pct": 0.42,
+          "composite_score": 0.62
+        },
+        {
+          "rank": 48,
+          "feature": "jockeyCourseWinRate",
+          "gain_pct": 1.22,
+          "perm_drop": -0.002469,
+          "cover_pct": 0.94,
+          "composite_score": 0.55
+        },
+        {
+          "rank": 49,
+          "feature": "distance",
+          "gain_pct": 0.92,
+          "perm_drop": 0.0,
+          "cover_pct": 0.36,
+          "composite_score": 0.47
+        },
+        {
+          "rank": 50,
+          "feature": "last3PlaceRate",
+          "gain_pct": 1.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.19,
+          "composite_score": 0.45
+        },
+        {
+          "rank": 51,
+          "feature": "last3WinRate",
+          "gain_pct": 0.82,
+          "perm_drop": 0.0,
+          "cover_pct": 0.47,
+          "composite_score": 0.43
+        },
+        {
+          "rank": 52,
+          "feature": "weather_encoded",
+          "gain_pct": 0.7,
+          "perm_drop": 0.0,
+          "cover_pct": 0.42,
+          "composite_score": 0.4
+        },
+        {
+          "rank": 53,
+          "feature": "weatherAptitude",
           "gain_pct": 0.0,
           "perm_drop": 0.0,
           "cover_pct": 0.0,
           "composite_score": 0.0
         },
         {
-          "rank": 33,
-          "feature": "trainerAbility",
-          "gain_pct": 2.43,
-          "perm_drop": -0.007491,
-          "cover_pct": 3.8,
-          "composite_score": -0.08
+          "rank": 54,
+          "feature": "weightStability",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
         },
         {
-          "rank": 34,
+          "rank": 55,
+          "feature": "weightTrendSlope",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 56,
+          "feature": "weightOptimalDelta",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 57,
+          "feature": "horsePacePreference",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 58,
+          "feature": "horseHaiPaceRate",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 59,
+          "feature": "classChange",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 60,
+          "feature": "trackTypeChange",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 61,
+          "feature": "winStreak",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 62,
+          "feature": "totalEarningsLog",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 63,
+          "feature": "trainerCondWinRate",
+          "gain_pct": 1.55,
+          "perm_drop": -0.011111,
+          "cover_pct": 1.24,
+          "composite_score": -0.6
+        },
+        {
+          "rank": 64,
+          "feature": "cornerDelta",
+          "gain_pct": 1.47,
+          "perm_drop": -0.009877,
+          "cover_pct": 1.06,
+          "composite_score": -0.61
+        },
+        {
+          "rank": 65,
+          "feature": "meetDay",
+          "gain_pct": 1.25,
+          "perm_drop": -0.009877,
+          "cover_pct": 0.61,
+          "composite_score": -0.83
+        },
+        {
+          "rank": 66,
+          "feature": "rotation",
+          "gain_pct": 1.66,
+          "perm_drop": -0.012346,
+          "cover_pct": 1.21,
+          "composite_score": -0.94
+        },
+        {
+          "rank": 67,
           "feature": "postPosition",
-          "gain_pct": 1.78,
-          "perm_drop": -0.008739,
-          "cover_pct": 1.62,
-          "composite_score": -1.4
-        },
-        {
-          "rank": 35,
-          "feature": "trackConditionAptitude",
-          "gain_pct": 1.19,
-          "perm_drop": -0.007491,
-          "cover_pct": 1.16,
-          "composite_score": -1.48
-        },
-        {
-          "rank": 36,
-          "feature": "trainerWinRate",
-          "gain_pct": 3.93,
-          "perm_drop": -0.031211,
-          "cover_pct": 7.4,
-          "composite_score": -5.87
-        },
-        {
-          "rank": 37,
-          "feature": "jockeyAbility",
-          "gain_pct": 2.85,
-          "perm_drop": -0.033708,
-          "cover_pct": 4.96,
-          "composite_score": -7.75
-        },
-        {
-          "rank": 38,
-          "feature": "handicapWeight",
-          "gain_pct": 1.94,
-          "perm_drop": -0.031211,
-          "cover_pct": 1.0,
-          "composite_score": -8.62
+          "gain_pct": 1.13,
+          "perm_drop": -0.022222,
+          "cover_pct": 0.99,
+          "composite_score": -2.61
         }
       ]
     },
     "turf_long": {
       "sample_count": 1219,
-      "baseline_ndcg1": 0.3993,
+      "baseline_ndcg1": 0.4103,
       "importance": [
         {
           "rank": 1,
-          "feature": "odds",
-          "gain_pct": 8.92,
-          "perm_drop": 0.056166,
-          "cover_pct": 7.99,
-          "composite_score": 36.33
+          "feature": "oddsLogTransform",
+          "gain_pct": 5.55,
+          "perm_drop": 0.086691,
+          "cover_pct": 5.28,
+          "composite_score": 34.19
         },
         {
           "rank": 2,
-          "feature": "distance",
-          "gain_pct": 2.96,
-          "perm_drop": 0.014652,
-          "cover_pct": 2.32,
-          "composite_score": 9.53
+          "feature": "relativeOdds",
+          "gain_pct": 3.47,
+          "perm_drop": 0.007326,
+          "cover_pct": 3.75,
+          "composite_score": 5.21
         },
         {
           "rank": 3,
-          "feature": "sireTrackWinRate",
-          "gain_pct": 4.1,
-          "perm_drop": 0.010989,
-          "cover_pct": 6.56,
-          "composite_score": 8.94
+          "feature": "handicapAdvantage",
+          "gain_pct": 1.33,
+          "perm_drop": 0.006105,
+          "cover_pct": 1.12,
+          "composite_score": 3.27
         },
         {
           "rank": 4,
-          "feature": "seasonalPattern",
-          "gain_pct": 3.26,
-          "perm_drop": 0.010989,
-          "cover_pct": 3.29,
-          "composite_score": 7.92
+          "feature": "jockeyCourseWinRate",
+          "gain_pct": 1.62,
+          "perm_drop": 0.004884,
+          "cover_pct": 1.35,
+          "composite_score": 3.03
         },
         {
           "rank": 5,
-          "feature": "speedRating",
-          "gain_pct": 2.26,
-          "perm_drop": 0.010989,
-          "cover_pct": 2.31,
-          "composite_score": 7.47
+          "feature": "jockeySwitchQuality",
+          "gain_pct": 2.07,
+          "perm_drop": 0.003663,
+          "cover_pct": 3.88,
+          "composite_score": 2.94
         },
         {
           "rank": 6,
-          "feature": "oddsLogTransform",
-          "gain_pct": 8.82,
-          "perm_drop": 0.003663,
-          "cover_pct": 7.84,
-          "composite_score": 7.24
+          "feature": "jockeyAbility",
+          "gain_pct": 1.55,
+          "perm_drop": 0.004884,
+          "cover_pct": 1.28,
+          "composite_score": 2.87
         },
         {
           "rank": 7,
-          "feature": "jockeyDistanceWinRate",
-          "gain_pct": 6.55,
+          "feature": "seasonalPattern",
+          "gain_pct": 1.7,
           "perm_drop": 0.003663,
-          "cover_pct": 8.07,
-          "composite_score": 7.04
+          "cover_pct": 1.87,
+          "composite_score": 2.38
         },
         {
           "rank": 8,
-          "feature": "consistency",
-          "gain_pct": 3.49,
-          "perm_drop": 0.007326,
-          "cover_pct": 4.18,
-          "composite_score": 6.38
+          "feature": "trainerAbility",
+          "gain_pct": 1.32,
+          "perm_drop": 0.003663,
+          "cover_pct": 1.29,
+          "composite_score": 2.28
         },
         {
           "rank": 9,
-          "feature": "sireAptitude",
-          "gain_pct": 3.11,
-          "perm_drop": 0.006105,
-          "cover_pct": 3.31,
-          "composite_score": 5.64
+          "feature": "trainerGradeWinRate",
+          "gain_pct": 1.35,
+          "perm_drop": 0.0,
+          "cover_pct": 6.69,
+          "composite_score": 1.9
         },
         {
           "rank": 10,
-          "feature": "lastThreeFurlongs",
-          "gain_pct": 1.81,
-          "perm_drop": 0.007326,
-          "cover_pct": 1.78,
-          "composite_score": 5.25
+          "feature": "popularity",
+          "gain_pct": 1.43,
+          "perm_drop": 0.002442,
+          "cover_pct": 1.58,
+          "composite_score": 1.85
         },
         {
           "rank": 11,
-          "feature": "recentForm",
-          "gain_pct": 2.65,
-          "perm_drop": 0.006105,
-          "cover_pct": 1.85,
-          "composite_score": 4.99
+          "feature": "meetDay",
+          "gain_pct": 1.3,
+          "perm_drop": 0.002442,
+          "cover_pct": 0.89,
+          "composite_score": 1.8
         },
         {
           "rank": 12,
-          "feature": "age",
-          "gain_pct": 1.79,
-          "perm_drop": 0.006105,
-          "cover_pct": 1.28,
-          "composite_score": 4.34
+          "feature": "trackConditionAptitude",
+          "gain_pct": 1.37,
+          "perm_drop": 0.002442,
+          "cover_pct": 1.12,
+          "composite_score": 1.67
         },
         {
           "rank": 13,
-          "feature": "jockeyAbility",
-          "gain_pct": 2.98,
-          "perm_drop": 0.002442,
-          "cover_pct": 3.35,
-          "composite_score": 3.88
+          "feature": "paceStyleMatch",
+          "gain_pct": 1.42,
+          "perm_drop": 0.001221,
+          "cover_pct": 1.53,
+          "composite_score": 1.37
         },
         {
           "rank": 14,
-          "feature": "grade_encoded",
-          "gain_pct": 3.32,
+          "feature": "fieldSizeXpost",
+          "gain_pct": 1.7,
           "perm_drop": 0.001221,
-          "cover_pct": 4.77,
-          "composite_score": 2.97
+          "cover_pct": 0.76,
+          "composite_score": 1.32
         },
         {
           "rank": 15,
-          "feature": "distanceAptitude",
-          "gain_pct": 2.85,
-          "perm_drop": 0.0,
-          "cover_pct": 2.98,
-          "composite_score": 2.06
+          "feature": "courseDistPaceAvg",
+          "gain_pct": 1.22,
+          "perm_drop": 0.001221,
+          "cover_pct": 0.79,
+          "composite_score": 1.23
         },
         {
           "rank": 16,
-          "feature": "fieldSize",
-          "gain_pct": 1.76,
-          "perm_drop": 0.001221,
-          "cover_pct": 0.93,
-          "composite_score": 1.74
+          "feature": "jockeyXform",
+          "gain_pct": 1.65,
+          "perm_drop": 0.0,
+          "cover_pct": 1.18,
+          "composite_score": 1.17
         },
         {
           "rank": 17,
-          "feature": "rotation",
-          "gain_pct": 3.57,
+          "feature": "avgMarginWhenWinning",
+          "gain_pct": 1.74,
           "perm_drop": 0.0,
-          "cover_pct": 1.24,
-          "composite_score": 1.7
-        },
-        {
-          "rank": 18,
-          "feature": "handicapAdvantage",
-          "gain_pct": 1.66,
-          "perm_drop": 0.0,
-          "cover_pct": 1.65,
-          "composite_score": 1.34
-        },
-        {
-          "rank": 19,
-          "feature": "trackConditionAptitude",
-          "gain_pct": 1.83,
-          "perm_drop": 0.0,
-          "cover_pct": 1.06,
+          "cover_pct": 1.75,
           "composite_score": 1.1
         },
         {
-          "rank": 20,
-          "feature": "postPosition",
-          "gain_pct": 1.83,
+          "rank": 18,
+          "feature": "sireTrackWinRate",
+          "gain_pct": 3.48,
+          "perm_drop": -0.003663,
+          "cover_pct": 3.04,
+          "composite_score": 1.03
+        },
+        {
+          "rank": 19,
+          "feature": "winStreak",
+          "gain_pct": 1.56,
           "perm_drop": 0.0,
-          "cover_pct": 0.79,
-          "composite_score": 1.09
+          "cover_pct": 1.5,
+          "composite_score": 0.93
+        },
+        {
+          "rank": 20,
+          "feature": "last3WinRate",
+          "gain_pct": 1.45,
+          "perm_drop": 0.0,
+          "cover_pct": 1.47,
+          "composite_score": 0.89
         },
         {
           "rank": 21,
           "feature": "handicapWeight",
-          "gain_pct": 1.42,
+          "gain_pct": 1.27,
           "perm_drop": 0.0,
-          "cover_pct": 1.47,
-          "composite_score": 0.99
+          "cover_pct": 0.88,
+          "composite_score": 0.76
         },
         {
           "rank": 22,
-          "feature": "trackCondition_encoded",
-          "gain_pct": 1.26,
-          "perm_drop": 0.0,
-          "cover_pct": 1.06,
-          "composite_score": 0.77
+          "feature": "avgPastOdds",
+          "gain_pct": 1.59,
+          "perm_drop": -0.001221,
+          "cover_pct": 1.85,
+          "composite_score": 0.71
         },
         {
           "rank": 23,
-          "feature": "sex_encoded",
-          "gain_pct": 1.58,
-          "perm_drop": 0.0,
-          "cover_pct": 0.51,
-          "composite_score": 0.75
+          "feature": "weightXspeed",
+          "gain_pct": 1.48,
+          "perm_drop": -0.001221,
+          "cover_pct": 1.68,
+          "composite_score": 0.63
         },
         {
           "rank": 24,
-          "feature": "weather_encoded",
-          "gain_pct": 1.54,
-          "perm_drop": -0.001221,
-          "cover_pct": 0.91,
-          "composite_score": 0.23
+          "feature": "lastRacePosition",
+          "gain_pct": 0.97,
+          "perm_drop": 0.0,
+          "cover_pct": 0.73,
+          "composite_score": 0.57
         },
         {
           "rank": 25,
-          "feature": "courseAptitude",
-          "gain_pct": 0.0,
+          "feature": "trackCondition_encoded",
+          "gain_pct": 1.07,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 0.44,
+          "composite_score": 0.53
         },
         {
           "rank": 26,
-          "feature": "classPerformance",
-          "gain_pct": 0.0,
+          "feature": "weather_encoded",
+          "gain_pct": 0.86,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 0.54,
+          "composite_score": 0.49
         },
         {
           "rank": 27,
-          "feature": "jockeyTrainerCombo",
+          "feature": "weatherAptitude",
           "gain_pct": 0.0,
           "perm_drop": 0.0,
           "cover_pct": 0.0,
@@ -1551,7 +2450,7 @@
         },
         {
           "rank": 28,
-          "feature": "historicalPostBias",
+          "feature": "weightStability",
           "gain_pct": 0.0,
           "perm_drop": 0.0,
           "cover_pct": 0.0,
@@ -1559,7 +2458,7 @@
         },
         {
           "rank": 29,
-          "feature": "trackType_encoded",
+          "feature": "weightTrendSlope",
           "gain_pct": 0.0,
           "perm_drop": 0.0,
           "cover_pct": 0.0,
@@ -1567,7 +2466,7 @@
         },
         {
           "rank": 30,
-          "feature": "weightChange",
+          "feature": "weightOptimalDelta",
           "gain_pct": 0.0,
           "perm_drop": 0.0,
           "cover_pct": 0.0,
@@ -1575,683 +2474,1379 @@
         },
         {
           "rank": 31,
-          "feature": "trainerAbility",
-          "gain_pct": 2.99,
-          "perm_drop": -0.007326,
-          "cover_pct": 4.89,
-          "composite_score": -1.14
+          "feature": "horsePacePreference",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
         },
         {
           "rank": 32,
-          "feature": "runningStyle",
-          "gain_pct": 2.17,
-          "perm_drop": -0.004884,
-          "cover_pct": 2.03,
-          "composite_score": -1.17
+          "feature": "horseHaiPaceRate",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
         },
         {
           "rank": 33,
-          "feature": "postPositionBias",
-          "gain_pct": 2.32,
-          "perm_drop": -0.004884,
-          "cover_pct": 1.5,
-          "composite_score": -1.24
+          "feature": "classChange",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
         },
         {
           "rank": 34,
-          "feature": "jockeyCourseWinRate",
-          "gain_pct": 3.67,
-          "perm_drop": -0.01221,
-          "cover_pct": 6.42,
-          "composite_score": -3.15
+          "feature": "trackTypeChange",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
         },
         {
           "rank": 35,
-          "feature": "popularity",
-          "gain_pct": 3.31,
-          "perm_drop": -0.009768,
-          "cover_pct": 2.19,
-          "composite_score": -3.3
+          "feature": "totalEarningsLog",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
         },
         {
           "rank": 36,
-          "feature": "popularityRatio",
-          "gain_pct": 5.19,
-          "perm_drop": -0.013431,
-          "cover_pct": 4.16,
-          "composite_score": -3.73
+          "feature": "postPosition",
+          "gain_pct": 1.79,
+          "perm_drop": -0.003663,
+          "cover_pct": 1.19,
+          "composite_score": -0.09
         },
         {
           "rank": 37,
-          "feature": "trainerPlaceRate",
-          "gain_pct": 2.17,
-          "perm_drop": -0.013431,
-          "cover_pct": 2.34,
-          "composite_score": -5.22
+          "feature": "careerWinRate",
+          "gain_pct": 1.14,
+          "perm_drop": -0.002442,
+          "cover_pct": 0.57,
+          "composite_score": -0.23
         },
         {
           "rank": 38,
+          "feature": "sex_encoded",
+          "gain_pct": 0.82,
+          "perm_drop": -0.002442,
+          "cover_pct": 0.92,
+          "composite_score": -0.3
+        },
+        {
+          "rank": 39,
+          "feature": "rotation",
+          "gain_pct": 1.37,
+          "perm_drop": -0.003663,
+          "cover_pct": 1.25,
+          "composite_score": -0.4
+        },
+        {
+          "rank": 40,
+          "feature": "cornerDelta",
+          "gain_pct": 1.8,
+          "perm_drop": -0.004884,
+          "cover_pct": 1.35,
+          "composite_score": -0.49
+        },
+        {
+          "rank": 41,
+          "feature": "fieldSize",
+          "gain_pct": 1.19,
+          "perm_drop": -0.003663,
+          "cover_pct": 0.66,
+          "composite_score": -0.49
+        },
+        {
+          "rank": 42,
+          "feature": "conditionXsire",
+          "gain_pct": 1.79,
+          "perm_drop": -0.004884,
+          "cover_pct": 1.61,
+          "composite_score": -0.56
+        },
+        {
+          "rank": 43,
+          "feature": "daysSinceLastRace",
+          "gain_pct": 1.81,
+          "perm_drop": -0.007326,
+          "cover_pct": 2.15,
+          "composite_score": -1.1
+        },
+        {
+          "rank": 44,
+          "feature": "postPositionBias",
+          "gain_pct": 1.29,
+          "perm_drop": -0.006105,
+          "cover_pct": 1.02,
+          "composite_score": -1.3
+        },
+        {
+          "rank": 45,
+          "feature": "consistency",
+          "gain_pct": 2.66,
+          "perm_drop": -0.009768,
+          "cover_pct": 3.38,
+          "composite_score": -1.47
+        },
+        {
+          "rank": 46,
+          "feature": "speedRating",
+          "gain_pct": 1.9,
+          "perm_drop": -0.008547,
+          "cover_pct": 2.8,
+          "composite_score": -1.49
+        },
+        {
+          "rank": 47,
+          "feature": "lastThreeFurlongs",
+          "gain_pct": 1.56,
+          "perm_drop": -0.008547,
+          "cover_pct": 1.59,
+          "composite_score": -1.81
+        },
+        {
+          "rank": 48,
+          "feature": "avgMarginWhenLosing",
+          "gain_pct": 1.7,
+          "perm_drop": -0.008547,
+          "cover_pct": 1.29,
+          "composite_score": -1.84
+        },
+        {
+          "rank": 49,
+          "feature": "distance",
+          "gain_pct": 1.12,
+          "perm_drop": -0.007326,
+          "cover_pct": 0.89,
+          "composite_score": -1.84
+        },
+        {
+          "rank": 50,
+          "feature": "popularityRatio",
+          "gain_pct": 3.16,
+          "perm_drop": -0.01221,
+          "cover_pct": 2.52,
+          "composite_score": -2.07
+        },
+        {
+          "rank": 51,
+          "feature": "runningStyle",
+          "gain_pct": 1.49,
+          "perm_drop": -0.009768,
+          "cover_pct": 1.15,
+          "composite_score": -2.47
+        },
+        {
+          "rank": 52,
+          "feature": "last3PlaceRate",
+          "gain_pct": 2.1,
+          "perm_drop": -0.010989,
+          "cover_pct": 1.87,
+          "composite_score": -2.56
+        },
+        {
+          "rank": 53,
+          "feature": "marginCompetitiveness",
+          "gain_pct": 1.77,
+          "perm_drop": -0.010989,
+          "cover_pct": 2.03,
+          "composite_score": -2.61
+        },
+        {
+          "rank": 54,
+          "feature": "jockeyDistanceWinRate",
+          "gain_pct": 1.52,
+          "perm_drop": -0.010989,
+          "cover_pct": 1.05,
+          "composite_score": -2.67
+        },
+        {
+          "rank": 55,
+          "feature": "rotationXform",
+          "gain_pct": 2.19,
+          "perm_drop": -0.01221,
+          "cover_pct": 1.49,
+          "composite_score": -2.89
+        },
+        {
+          "rank": 56,
+          "feature": "upsetRate",
+          "gain_pct": 1.42,
+          "perm_drop": -0.010989,
+          "cover_pct": 1.24,
+          "composite_score": -2.94
+        },
+        {
+          "rank": 57,
+          "feature": "age",
+          "gain_pct": 1.61,
+          "perm_drop": -0.01221,
+          "cover_pct": 1.88,
+          "composite_score": -3.11
+        },
+        {
+          "rank": 58,
+          "feature": "ageXdistance",
+          "gain_pct": 1.87,
+          "perm_drop": -0.014652,
+          "cover_pct": 1.04,
+          "composite_score": -3.96
+        },
+        {
+          "rank": 59,
+          "feature": "trainerDistCatWinRate",
+          "gain_pct": 1.48,
+          "perm_drop": -0.014652,
+          "cover_pct": 1.04,
+          "composite_score": -4.02
+        },
+        {
+          "rank": 60,
+          "feature": "distanceAptitude",
+          "gain_pct": 1.84,
+          "perm_drop": -0.015873,
+          "cover_pct": 2.84,
+          "composite_score": -4.04
+        },
+        {
+          "rank": 61,
+          "feature": "recentForm",
+          "gain_pct": 1.4,
+          "perm_drop": -0.018315,
+          "cover_pct": 1.1,
+          "composite_score": -5.46
+        },
+        {
+          "rank": 62,
+          "feature": "grade_encoded",
+          "gain_pct": 1.75,
+          "perm_drop": -0.019536,
+          "cover_pct": 1.95,
+          "composite_score": -5.51
+        },
+        {
+          "rank": 63,
+          "feature": "trainerPlaceRate",
+          "gain_pct": 1.35,
+          "perm_drop": -0.019536,
+          "cover_pct": 1.27,
+          "composite_score": -5.65
+        },
+        {
+          "rank": 64,
+          "feature": "relativePosition",
+          "gain_pct": 1.77,
+          "perm_drop": -0.020757,
+          "cover_pct": 2.12,
+          "composite_score": -5.9
+        },
+        {
+          "rank": 65,
           "feature": "trainerWinRate",
-          "gain_pct": 2.88,
-          "perm_drop": -0.034188,
-          "cover_pct": 4.96,
-          "composite_score": -15.3
+          "gain_pct": 1.6,
+          "perm_drop": -0.020757,
+          "cover_pct": 1.83,
+          "composite_score": -5.93
+        },
+        {
+          "rank": 66,
+          "feature": "trainerCondWinRate",
+          "gain_pct": 1.97,
+          "perm_drop": -0.021978,
+          "cover_pct": 1.73,
+          "composite_score": -6.17
+        },
+        {
+          "rank": 67,
+          "feature": "sireAptitude",
+          "gain_pct": 2.26,
+          "perm_drop": -0.030525,
+          "cover_pct": 2.92,
+          "composite_score": -8.85
         }
       ]
     },
     "dirt_sprint": {
       "sample_count": 1500,
-      "baseline_ndcg1": 0.6667,
+      "baseline_ndcg1": 1.0,
       "importance": [
         {
           "rank": 1,
-          "feature": "odds",
-          "gain_pct": 12.75,
-          "perm_drop": 0.222222,
-          "cover_pct": 9.05,
-          "composite_score": 38.14
+          "feature": "oddsLogTransform",
+          "gain_pct": 6.92,
+          "perm_drop": 0.666667,
+          "cover_pct": 5.17,
+          "composite_score": 34.58
         },
         {
           "rank": 2,
-          "feature": "sireTrackWinRate",
-          "gain_pct": 7.25,
-          "perm_drop": 0.0,
-          "cover_pct": 8.27,
-          "composite_score": 5.21
+          "feature": "relativeOdds",
+          "gain_pct": 6.14,
+          "perm_drop": 0.555556,
+          "cover_pct": 5.43,
+          "composite_score": 29.08
         },
         {
           "rank": 3,
-          "feature": "rotation",
-          "gain_pct": 6.07,
-          "perm_drop": 0.0,
-          "cover_pct": 4.28,
-          "composite_score": 3.34
+          "feature": "sireTrackWinRate",
+          "gain_pct": 4.69,
+          "perm_drop": 0.444444,
+          "cover_pct": 5.38,
+          "composite_score": 23.42
         },
         {
           "rank": 4,
-          "feature": "jockeyAbility",
-          "gain_pct": 3.09,
+          "feature": "popularityRatio",
+          "gain_pct": 7.1,
           "perm_drop": 0.0,
-          "cover_pct": 4.26,
-          "composite_score": 2.88
+          "cover_pct": 5.23,
+          "composite_score": 4.28
         },
         {
           "rank": 5,
-          "feature": "popularity",
-          "gain_pct": 3.69,
+          "feature": "sireAptitude",
+          "gain_pct": 3.84,
           "perm_drop": 0.0,
-          "cover_pct": 2.79,
-          "composite_score": 2.17
+          "cover_pct": 4.9,
+          "composite_score": 2.81
         },
         {
           "rank": 6,
-          "feature": "trainerAbility",
-          "gain_pct": 1.48,
+          "feature": "cornerDelta",
+          "gain_pct": 1.72,
           "perm_drop": 0.0,
-          "cover_pct": 1.8,
-          "composite_score": 1.46
+          "cover_pct": 2.81,
+          "composite_score": 1.52
         },
         {
           "rank": 7,
-          "feature": "seasonalPattern",
-          "gain_pct": 1.97,
+          "feature": "grade_encoded",
+          "gain_pct": 1.47,
           "perm_drop": 0.0,
-          "cover_pct": 2.69,
-          "composite_score": 1.43
+          "cover_pct": 2.99,
+          "composite_score": 1.48
         },
         {
           "rank": 8,
-          "feature": "lastThreeFurlongs",
-          "gain_pct": 1.82,
+          "feature": "careerWinRate",
+          "gain_pct": 1.92,
           "perm_drop": 0.0,
-          "cover_pct": 1.88,
-          "composite_score": 1.42
+          "cover_pct": 2.87,
+          "composite_score": 1.41
         },
         {
           "rank": 9,
-          "feature": "handicapWeight",
-          "gain_pct": 1.47,
+          "feature": "trainerWinRate",
+          "gain_pct": 1.73,
           "perm_drop": 0.0,
-          "cover_pct": 3.48,
-          "composite_score": 1.34
+          "cover_pct": 1.76,
+          "composite_score": 1.4
         },
         {
           "rank": 10,
-          "feature": "age",
-          "gain_pct": 1.8,
+          "feature": "avgMarginWhenLosing",
+          "gain_pct": 1.92,
           "perm_drop": 0.0,
-          "cover_pct": 2.07,
+          "cover_pct": 2.01,
           "composite_score": 1.31
         },
         {
           "rank": 11,
-          "feature": "runningStyle",
-          "gain_pct": 2.01,
+          "feature": "trainerAbility",
+          "gain_pct": 1.31,
           "perm_drop": 0.0,
-          "cover_pct": 1.19,
+          "cover_pct": 1.54,
           "composite_score": 1.25
         },
         {
           "rank": 12,
-          "feature": "handicapAdvantage",
-          "gain_pct": 1.47,
+          "feature": "jockeySwitchQuality",
+          "gain_pct": 1.72,
           "perm_drop": 0.0,
-          "cover_pct": 1.16,
-          "composite_score": 1.24
+          "cover_pct": 1.89,
+          "composite_score": 1.23
         },
         {
           "rank": 13,
-          "feature": "consistency",
-          "gain_pct": 1.51,
+          "feature": "trainerPlaceRate",
+          "gain_pct": 1.34,
           "perm_drop": 0.0,
-          "cover_pct": 2.23,
-          "composite_score": 1.17
+          "cover_pct": 1.71,
+          "composite_score": 1.23
         },
         {
           "rank": 14,
-          "feature": "recentForm",
-          "gain_pct": 1.64,
+          "feature": "speedRating",
+          "gain_pct": 1.71,
           "perm_drop": 0.0,
-          "cover_pct": 1.41,
-          "composite_score": 1.15
+          "cover_pct": 2.29,
+          "composite_score": 1.21
         },
         {
           "rank": 15,
-          "feature": "distanceAptitude",
-          "gain_pct": 1.88,
+          "feature": "paceStyleMatch",
+          "gain_pct": 1.87,
           "perm_drop": 0.0,
-          "cover_pct": 1.05,
-          "composite_score": 1.14
+          "cover_pct": 1.49,
+          "composite_score": 1.18
         },
         {
           "rank": 16,
-          "feature": "trackConditionAptitude",
-          "gain_pct": 1.54,
+          "feature": "seasonalPattern",
+          "gain_pct": 2.04,
           "perm_drop": 0.0,
-          "cover_pct": 1.28,
-          "composite_score": 1.08
+          "cover_pct": 1.31,
+          "composite_score": 1.14
         },
         {
           "rank": 17,
-          "feature": "speedRating",
-          "gain_pct": 1.36,
+          "feature": "trainerDistCatWinRate",
+          "gain_pct": 1.38,
           "perm_drop": 0.0,
-          "cover_pct": 1.3,
-          "composite_score": 0.99
+          "cover_pct": 1.21,
+          "composite_score": 1.14
         },
         {
           "rank": 18,
-          "feature": "sex_encoded",
-          "gain_pct": 1.29,
+          "feature": "avgPastOdds",
+          "gain_pct": 1.73,
           "perm_drop": 0.0,
-          "cover_pct": 1.95,
-          "composite_score": 0.93
+          "cover_pct": 1.76,
+          "composite_score": 1.12
         },
         {
           "rank": 19,
-          "feature": "postPosition",
-          "gain_pct": 1.53,
+          "feature": "rotationXform",
+          "gain_pct": 1.38,
           "perm_drop": 0.0,
-          "cover_pct": 0.67,
-          "composite_score": 0.91
+          "cover_pct": 2.09,
+          "composite_score": 1.1
         },
         {
           "rank": 20,
-          "feature": "postPositionBias",
-          "gain_pct": 1.24,
+          "feature": "avgMarginWhenWinning",
+          "gain_pct": 1.61,
           "perm_drop": 0.0,
-          "cover_pct": 1.05,
-          "composite_score": 0.77
+          "cover_pct": 1.84,
+          "composite_score": 1.08
         },
         {
           "rank": 21,
-          "feature": "fieldSize",
-          "gain_pct": 0.85,
+          "feature": "trainerCondWinRate",
+          "gain_pct": 1.55,
           "perm_drop": 0.0,
-          "cover_pct": 1.36,
-          "composite_score": 0.73
+          "cover_pct": 1.21,
+          "composite_score": 1.08
         },
         {
           "rank": 22,
-          "feature": "weather_encoded",
-          "gain_pct": 1.06,
+          "feature": "jockeyAbility",
+          "gain_pct": 1.13,
           "perm_drop": 0.0,
-          "cover_pct": 1.0,
-          "composite_score": 0.68
+          "cover_pct": 1.16,
+          "composite_score": 1.07
         },
         {
           "rank": 23,
-          "feature": "grade_encoded",
-          "gain_pct": 1.01,
+          "feature": "distanceAptitude",
+          "gain_pct": 1.45,
           "perm_drop": 0.0,
-          "cover_pct": 1.01,
-          "composite_score": 0.63
+          "cover_pct": 1.78,
+          "composite_score": 1.05
         },
         {
           "rank": 24,
-          "feature": "distance",
-          "gain_pct": 1.05,
+          "feature": "trackCondition_encoded",
+          "gain_pct": 1.63,
           "perm_drop": 0.0,
-          "cover_pct": 0.44,
-          "composite_score": 0.55
+          "cover_pct": 1.76,
+          "composite_score": 1.05
         },
         {
           "rank": 25,
-          "feature": "trackCondition_encoded",
-          "gain_pct": 0.87,
+          "feature": "jockeyXform",
+          "gain_pct": 1.33,
           "perm_drop": 0.0,
-          "cover_pct": 0.2,
-          "composite_score": 0.42
+          "cover_pct": 1.14,
+          "composite_score": 1.05
         },
         {
           "rank": 26,
-          "feature": "courseAptitude",
-          "gain_pct": 0.0,
+          "feature": "handicapAdvantage",
+          "gain_pct": 1.19,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 1.12,
+          "composite_score": 1.05
         },
         {
           "rank": 27,
-          "feature": "classPerformance",
-          "gain_pct": 0.0,
+          "feature": "marginCompetitiveness",
+          "gain_pct": 1.48,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 1.98,
+          "composite_score": 1.04
         },
         {
           "rank": 28,
-          "feature": "jockeyTrainerCombo",
-          "gain_pct": 0.0,
+          "feature": "lastThreeFurlongs",
+          "gain_pct": 1.24,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 1.73,
+          "composite_score": 1.04
         },
         {
           "rank": 29,
-          "feature": "historicalPostBias",
-          "gain_pct": 0.0,
+          "feature": "last3WinRate",
+          "gain_pct": 1.33,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 2.39,
+          "composite_score": 1.03
         },
         {
           "rank": 30,
-          "feature": "trackType_encoded",
-          "gain_pct": 0.0,
+          "feature": "ageXdistance",
+          "gain_pct": 1.28,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 1.34,
+          "composite_score": 1.03
         },
         {
           "rank": 31,
-          "feature": "weightChange",
+          "feature": "consistency",
+          "gain_pct": 1.56,
+          "perm_drop": 0.0,
+          "cover_pct": 1.7,
+          "composite_score": 1.02
+        },
+        {
+          "rank": 32,
+          "feature": "popularity",
+          "gain_pct": 1.28,
+          "perm_drop": 0.0,
+          "cover_pct": 2.15,
+          "composite_score": 1.01
+        },
+        {
+          "rank": 33,
+          "feature": "trackConditionAptitude",
+          "gain_pct": 1.7,
+          "perm_drop": 0.0,
+          "cover_pct": 1.3,
+          "composite_score": 1.0
+        },
+        {
+          "rank": 34,
+          "feature": "jockeyDistanceWinRate",
+          "gain_pct": 1.25,
+          "perm_drop": 0.0,
+          "cover_pct": 1.19,
+          "composite_score": 1.0
+        },
+        {
+          "rank": 35,
+          "feature": "age",
+          "gain_pct": 1.48,
+          "perm_drop": 0.0,
+          "cover_pct": 1.66,
+          "composite_score": 0.99
+        },
+        {
+          "rank": 36,
+          "feature": "jockeyCourseWinRate",
+          "gain_pct": 1.11,
+          "perm_drop": 0.0,
+          "cover_pct": 1.11,
+          "composite_score": 0.98
+        },
+        {
+          "rank": 37,
+          "feature": "rotation",
+          "gain_pct": 1.45,
+          "perm_drop": 0.0,
+          "cover_pct": 1.5,
+          "composite_score": 0.95
+        },
+        {
+          "rank": 38,
+          "feature": "weightXspeed",
+          "gain_pct": 1.59,
+          "perm_drop": 0.0,
+          "cover_pct": 1.03,
+          "composite_score": 0.95
+        },
+        {
+          "rank": 39,
+          "feature": "daysSinceLastRace",
+          "gain_pct": 1.24,
+          "perm_drop": 0.0,
+          "cover_pct": 1.05,
+          "composite_score": 0.9
+        },
+        {
+          "rank": 40,
+          "feature": "courseDistPaceAvg",
+          "gain_pct": 1.18,
+          "perm_drop": 0.0,
+          "cover_pct": 0.76,
+          "composite_score": 0.87
+        },
+        {
+          "rank": 41,
+          "feature": "recentForm",
+          "gain_pct": 1.12,
+          "perm_drop": 0.0,
+          "cover_pct": 1.74,
+          "composite_score": 0.86
+        },
+        {
+          "rank": 42,
+          "feature": "conditionXsire",
+          "gain_pct": 1.51,
+          "perm_drop": 0.0,
+          "cover_pct": 0.83,
+          "composite_score": 0.85
+        },
+        {
+          "rank": 43,
+          "feature": "meetDay",
+          "gain_pct": 1.11,
+          "perm_drop": 0.0,
+          "cover_pct": 0.91,
+          "composite_score": 0.82
+        },
+        {
+          "rank": 44,
+          "feature": "weather_encoded",
+          "gain_pct": 1.02,
+          "perm_drop": 0.0,
+          "cover_pct": 1.75,
+          "composite_score": 0.81
+        },
+        {
+          "rank": 45,
+          "feature": "relativePosition",
+          "gain_pct": 1.08,
+          "perm_drop": 0.0,
+          "cover_pct": 1.12,
+          "composite_score": 0.8
+        },
+        {
+          "rank": 46,
+          "feature": "upsetRate",
+          "gain_pct": 1.32,
+          "perm_drop": 0.0,
+          "cover_pct": 1.09,
+          "composite_score": 0.79
+        },
+        {
+          "rank": 47,
+          "feature": "runningStyle",
+          "gain_pct": 1.44,
+          "perm_drop": 0.0,
+          "cover_pct": 0.75,
+          "composite_score": 0.78
+        },
+        {
+          "rank": 48,
+          "feature": "postPositionBias",
+          "gain_pct": 1.19,
+          "perm_drop": 0.0,
+          "cover_pct": 1.19,
+          "composite_score": 0.78
+        },
+        {
+          "rank": 49,
+          "feature": "postPosition",
+          "gain_pct": 1.12,
+          "perm_drop": 0.0,
+          "cover_pct": 0.8,
+          "composite_score": 0.75
+        },
+        {
+          "rank": 50,
+          "feature": "handicapWeight",
+          "gain_pct": 1.24,
+          "perm_drop": 0.0,
+          "cover_pct": 0.61,
+          "composite_score": 0.74
+        },
+        {
+          "rank": 51,
+          "feature": "last3PlaceRate",
+          "gain_pct": 1.23,
+          "perm_drop": 0.0,
+          "cover_pct": 1.0,
+          "composite_score": 0.72
+        },
+        {
+          "rank": 52,
+          "feature": "fieldSizeXpost",
+          "gain_pct": 1.26,
+          "perm_drop": 0.0,
+          "cover_pct": 0.71,
+          "composite_score": 0.69
+        },
+        {
+          "rank": 53,
+          "feature": "distance",
+          "gain_pct": 1.07,
+          "perm_drop": 0.0,
+          "cover_pct": 0.99,
+          "composite_score": 0.66
+        },
+        {
+          "rank": 54,
+          "feature": "fieldSize",
+          "gain_pct": 0.89,
+          "perm_drop": 0.0,
+          "cover_pct": 1.12,
+          "composite_score": 0.65
+        },
+        {
+          "rank": 55,
+          "feature": "lastRacePosition",
+          "gain_pct": 1.43,
+          "perm_drop": 0.0,
+          "cover_pct": 0.28,
+          "composite_score": 0.65
+        },
+        {
+          "rank": 56,
+          "feature": "sex_encoded",
+          "gain_pct": 1.01,
+          "perm_drop": 0.0,
+          "cover_pct": 0.34,
+          "composite_score": 0.52
+        },
+        {
+          "rank": 57,
+          "feature": "weatherAptitude",
           "gain_pct": 0.0,
           "perm_drop": 0.0,
           "cover_pct": 0.0,
           "composite_score": 0.0
         },
         {
-          "rank": 32,
-          "feature": "jockeyDistanceWinRate",
-          "gain_pct": 5.59,
-          "perm_drop": -0.111111,
-          "cover_pct": 8.24,
-          "composite_score": -10.2
+          "rank": 58,
+          "feature": "weightStability",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
         },
         {
-          "rank": 33,
-          "feature": "popularityRatio",
-          "gain_pct": 5.8,
-          "perm_drop": -0.111111,
-          "cover_pct": 4.29,
-          "composite_score": -11.39
+          "rank": 59,
+          "feature": "weightTrendSlope",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
         },
         {
-          "rank": 34,
-          "feature": "jockeyCourseWinRate",
-          "gain_pct": 4.19,
-          "perm_drop": -0.111111,
-          "cover_pct": 6.34,
-          "composite_score": -11.48
+          "rank": 60,
+          "feature": "weightOptimalDelta",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
         },
         {
-          "rank": 35,
-          "feature": "trainerPlaceRate",
-          "gain_pct": 2.54,
-          "perm_drop": -0.111111,
-          "cover_pct": 2.66,
-          "composite_score": -12.84
+          "rank": 61,
+          "feature": "trainerGradeWinRate",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
         },
         {
-          "rank": 36,
-          "feature": "trainerWinRate",
-          "gain_pct": 4.35,
-          "perm_drop": -0.222222,
-          "cover_pct": 6.39,
-          "composite_score": -26.15
+          "rank": 62,
+          "feature": "horsePacePreference",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
         },
         {
-          "rank": 37,
-          "feature": "sireAptitude",
-          "gain_pct": 1.77,
-          "perm_drop": -0.222222,
-          "cover_pct": 3.08,
-          "composite_score": -28.31
+          "rank": 63,
+          "feature": "horseHaiPaceRate",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
         },
         {
-          "rank": 38,
-          "feature": "oddsLogTransform",
-          "gain_pct": 14.07,
-          "perm_drop": -0.333333,
-          "cover_pct": 11.12,
-          "composite_score": -36.96
+          "rank": 64,
+          "feature": "classChange",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 65,
+          "feature": "trackTypeChange",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 66,
+          "feature": "winStreak",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 67,
+          "feature": "totalEarningsLog",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
         }
       ]
     },
     "dirt_long": {
       "sample_count": 1500,
-      "baseline_ndcg1": 0.0,
+      "baseline_ndcg1": 1.0,
       "importance": [
         {
           "rank": 1,
-          "feature": "odds",
-          "gain_pct": 10.13,
-          "perm_drop": -0.444444,
-          "cover_pct": 7.76,
-          "composite_score": 6.79
+          "feature": "oddsLogTransform",
+          "gain_pct": 8.99,
+          "perm_drop": 0.333333,
+          "cover_pct": 6.51,
+          "composite_score": 35.76
         },
         {
           "rank": 2,
-          "feature": "sireTrackWinRate",
-          "gain_pct": 8.2,
+          "feature": "relativeOdds",
+          "gain_pct": 6.25,
           "perm_drop": 0.0,
-          "cover_pct": 11.89,
-          "composite_score": 5.92
+          "cover_pct": 5.94,
+          "composite_score": 4.17
         },
         {
           "rank": 3,
-          "feature": "oddsLogTransform",
-          "gain_pct": 9.61,
-          "perm_drop": -0.666667,
-          "cover_pct": 6.71,
-          "composite_score": 5.38
+          "feature": "sireTrackWinRate",
+          "gain_pct": 3.51,
+          "perm_drop": 0.0,
+          "cover_pct": 5.08,
+          "composite_score": 2.79
         },
         {
           "rank": 4,
-          "feature": "jockeyCourseWinRate",
-          "gain_pct": 5.45,
+          "feature": "sireAptitude",
+          "gain_pct": 3.59,
           "perm_drop": 0.0,
-          "cover_pct": 5.57,
-          "composite_score": 3.99
+          "cover_pct": 2.99,
+          "composite_score": 2.42
         },
         {
           "rank": 5,
-          "feature": "jockeyDistanceWinRate",
-          "gain_pct": 4.7,
-          "perm_drop": -0.444444,
-          "cover_pct": 5.71,
-          "composite_score": 3.99
+          "feature": "popularityRatio",
+          "gain_pct": 2.56,
+          "perm_drop": 0.0,
+          "cover_pct": 2.77,
+          "composite_score": 2.01
         },
         {
           "rank": 6,
-          "feature": "trainerWinRate",
-          "gain_pct": 4.29,
-          "perm_drop": -1.0,
-          "cover_pct": 6.07,
-          "composite_score": 3.82
+          "feature": "grade_encoded",
+          "gain_pct": 2.3,
+          "perm_drop": 0.0,
+          "cover_pct": 3.12,
+          "composite_score": 1.95
         },
         {
           "rank": 7,
-          "feature": "popularity",
-          "gain_pct": 5.03,
+          "feature": "avgMarginWhenLosing",
+          "gain_pct": 1.88,
           "perm_drop": 0.0,
-          "cover_pct": 3.91,
-          "composite_score": 2.96
+          "cover_pct": 3.54,
+          "composite_score": 1.6
         },
         {
           "rank": 8,
-          "feature": "sireAptitude",
-          "gain_pct": 3.67,
-          "perm_drop": -0.666667,
-          "cover_pct": 4.66,
-          "composite_score": 2.91
+          "feature": "ageXdistance",
+          "gain_pct": 2.14,
+          "perm_drop": 0.0,
+          "cover_pct": 1.86,
+          "composite_score": 1.44
         },
         {
           "rank": 9,
-          "feature": "rotation",
-          "gain_pct": 4.05,
+          "feature": "winStreak",
+          "gain_pct": 1.67,
           "perm_drop": 0.0,
-          "cover_pct": 5.27,
-          "composite_score": 2.7
+          "cover_pct": 3.41,
+          "composite_score": 1.36
         },
         {
           "rank": 10,
-          "feature": "popularityRatio",
-          "gain_pct": 3.23,
-          "perm_drop": -1.0,
-          "cover_pct": 3.86,
-          "composite_score": 2.54
+          "feature": "seasonalPattern",
+          "gain_pct": 1.62,
+          "perm_drop": 0.0,
+          "cover_pct": 3.35,
+          "composite_score": 1.34
         },
         {
           "rank": 11,
-          "feature": "jockeyAbility",
-          "gain_pct": 2.55,
-          "perm_drop": -0.888889,
-          "cover_pct": 3.9,
-          "composite_score": 2.4
+          "feature": "lastThreeFurlongs",
+          "gain_pct": 1.84,
+          "perm_drop": 0.0,
+          "cover_pct": 1.61,
+          "composite_score": 1.32
         },
         {
           "rank": 12,
-          "feature": "age",
-          "gain_pct": 2.76,
+          "feature": "avgMarginWhenWinning",
+          "gain_pct": 1.69,
           "perm_drop": 0.0,
-          "cover_pct": 4.87,
-          "composite_score": 2.3
+          "cover_pct": 2.74,
+          "composite_score": 1.27
         },
         {
           "rank": 13,
-          "feature": "postPosition",
-          "gain_pct": 2.64,
-          "perm_drop": -0.444444,
-          "cover_pct": 4.45,
-          "composite_score": 2.16
+          "feature": "rotationXform",
+          "gain_pct": 1.97,
+          "perm_drop": 0.0,
+          "cover_pct": 1.5,
+          "composite_score": 1.25
         },
         {
           "rank": 14,
-          "feature": "trainerAbility",
-          "gain_pct": 2.21,
+          "feature": "rotation",
+          "gain_pct": 2.0,
           "perm_drop": 0.0,
-          "cover_pct": 2.22,
-          "composite_score": 2.1
+          "cover_pct": 1.75,
+          "composite_score": 1.24
         },
         {
           "rank": 15,
           "feature": "handicapAdvantage",
-          "gain_pct": 2.04,
+          "gain_pct": 1.39,
           "perm_drop": 0.0,
-          "cover_pct": 1.96,
-          "composite_score": 1.92
-        },
-        {
-          "rank": 16,
-          "feature": "speedRating",
-          "gain_pct": 2.56,
-          "perm_drop": 0.0,
-          "cover_pct": 3.64,
-          "composite_score": 1.84
-        },
-        {
-          "rank": 17,
-          "feature": "trainerPlaceRate",
-          "gain_pct": 2.25,
-          "perm_drop": -0.333333,
-          "cover_pct": 1.82,
-          "composite_score": 1.78
-        },
-        {
-          "rank": 18,
-          "feature": "lastThreeFurlongs",
-          "gain_pct": 2.56,
-          "perm_drop": -0.333333,
-          "cover_pct": 2.1,
-          "composite_score": 1.72
-        },
-        {
-          "rank": 19,
-          "feature": "weather_encoded",
-          "gain_pct": 2.39,
-          "perm_drop": 0.0,
-          "cover_pct": 1.22,
-          "composite_score": 1.26
-        },
-        {
-          "rank": 20,
-          "feature": "recentForm",
-          "gain_pct": 1.83,
-          "perm_drop": 0.0,
-          "cover_pct": 1.63,
+          "cover_pct": 1.27,
           "composite_score": 1.23
         },
         {
-          "rank": 21,
-          "feature": "fieldSize",
-          "gain_pct": 1.88,
+          "rank": 16,
+          "feature": "cornerDelta",
+          "gain_pct": 1.61,
           "perm_drop": 0.0,
-          "cover_pct": 1.26,
-          "composite_score": 1.1
+          "cover_pct": 1.48,
+          "composite_score": 1.21
+        },
+        {
+          "rank": 17,
+          "feature": "courseDistPaceAvg",
+          "gain_pct": 1.48,
+          "perm_drop": 0.0,
+          "cover_pct": 1.47,
+          "composite_score": 1.21
+        },
+        {
+          "rank": 18,
+          "feature": "postPosition",
+          "gain_pct": 1.49,
+          "perm_drop": 0.0,
+          "cover_pct": 1.94,
+          "composite_score": 1.2
+        },
+        {
+          "rank": 19,
+          "feature": "runningStyle",
+          "gain_pct": 1.79,
+          "perm_drop": 0.0,
+          "cover_pct": 1.81,
+          "composite_score": 1.2
+        },
+        {
+          "rank": 20,
+          "feature": "careerWinRate",
+          "gain_pct": 2.12,
+          "perm_drop": 0.0,
+          "cover_pct": 1.23,
+          "composite_score": 1.18
+        },
+        {
+          "rank": 21,
+          "feature": "marginCompetitiveness",
+          "gain_pct": 1.67,
+          "perm_drop": 0.0,
+          "cover_pct": 1.79,
+          "composite_score": 1.13
         },
         {
           "rank": 22,
-          "feature": "runningStyle",
-          "gain_pct": 1.88,
+          "feature": "jockeyCourseWinRate",
+          "gain_pct": 1.24,
           "perm_drop": 0.0,
-          "cover_pct": 1.25,
-          "composite_score": 1.1
+          "cover_pct": 1.15,
+          "composite_score": 1.08
         },
         {
           "rank": 23,
-          "feature": "handicapWeight",
-          "gain_pct": 1.79,
-          "perm_drop": -0.333333,
-          "cover_pct": 1.29,
+          "feature": "age",
+          "gain_pct": 1.69,
+          "perm_drop": 0.0,
+          "cover_pct": 1.72,
           "composite_score": 1.07
         },
         {
           "rank": 24,
-          "feature": "consistency",
-          "gain_pct": 1.59,
+          "feature": "popularity",
+          "gain_pct": 1.57,
           "perm_drop": 0.0,
-          "cover_pct": 1.12,
-          "composite_score": 0.99
+          "cover_pct": 1.47,
+          "composite_score": 1.07
         },
         {
           "rank": 25,
-          "feature": "sex_encoded",
-          "gain_pct": 1.18,
+          "feature": "upsetRate",
+          "gain_pct": 1.37,
           "perm_drop": 0.0,
-          "cover_pct": 1.79,
-          "composite_score": 0.87
+          "cover_pct": 2.28,
+          "composite_score": 1.06
         },
         {
           "rank": 26,
-          "feature": "trackConditionAptitude",
-          "gain_pct": 1.61,
+          "feature": "trainerDistCatWinRate",
+          "gain_pct": 1.29,
           "perm_drop": 0.0,
-          "cover_pct": 0.62,
-          "composite_score": 0.86
+          "cover_pct": 1.4,
+          "composite_score": 1.04
         },
         {
           "rank": 27,
-          "feature": "trackCondition_encoded",
-          "gain_pct": 1.67,
+          "feature": "trainerPlaceRate",
+          "gain_pct": 1.21,
           "perm_drop": 0.0,
-          "cover_pct": 0.37,
-          "composite_score": 0.83
+          "cover_pct": 1.08,
+          "composite_score": 1.03
         },
         {
           "rank": 28,
-          "feature": "postPositionBias",
-          "gain_pct": 1.51,
+          "feature": "trackConditionAptitude",
+          "gain_pct": 1.5,
           "perm_drop": 0.0,
-          "cover_pct": 0.85,
-          "composite_score": 0.82
+          "cover_pct": 1.65,
+          "composite_score": 1.02
         },
         {
           "rank": 29,
           "feature": "distanceAptitude",
-          "gain_pct": 1.24,
+          "gain_pct": 1.27,
           "perm_drop": 0.0,
-          "cover_pct": 0.83,
-          "composite_score": 0.81
+          "cover_pct": 2.02,
+          "composite_score": 1.02
         },
         {
           "rank": 30,
-          "feature": "distance",
-          "gain_pct": 1.04,
+          "feature": "fieldSizeXpost",
+          "gain_pct": 1.32,
           "perm_drop": 0.0,
-          "cover_pct": 0.79,
-          "composite_score": 0.67
+          "cover_pct": 2.05,
+          "composite_score": 1.01
         },
         {
           "rank": 31,
-          "feature": "grade_encoded",
-          "gain_pct": 1.33,
+          "feature": "jockeyDistanceWinRate",
+          "gain_pct": 1.29,
           "perm_drop": 0.0,
-          "cover_pct": 0.22,
-          "composite_score": 0.62
+          "cover_pct": 1.21,
+          "composite_score": 1.0
         },
         {
           "rank": 32,
-          "feature": "seasonalPattern",
-          "gain_pct": 1.12,
+          "feature": "handicapWeight",
+          "gain_pct": 1.51,
           "perm_drop": 0.0,
-          "cover_pct": 0.4,
-          "composite_score": 0.56
+          "cover_pct": 1.38,
+          "composite_score": 1.0
         },
         {
           "rank": 33,
-          "feature": "courseAptitude",
-          "gain_pct": 0.0,
+          "feature": "trainerAbility",
+          "gain_pct": 1.28,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 1.09,
+          "composite_score": 1.0
         },
         {
           "rank": 34,
-          "feature": "classPerformance",
-          "gain_pct": 0.0,
+          "feature": "relativePosition",
+          "gain_pct": 1.28,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 1.58,
+          "composite_score": 0.99
         },
         {
           "rank": 35,
-          "feature": "jockeyTrainerCombo",
-          "gain_pct": 0.0,
+          "feature": "trainerWinRate",
+          "gain_pct": 1.25,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 0.92,
+          "composite_score": 0.98
         },
         {
           "rank": 36,
-          "feature": "historicalPostBias",
-          "gain_pct": 0.0,
+          "feature": "paceStyleMatch",
+          "gain_pct": 1.26,
           "perm_drop": 0.0,
-          "cover_pct": 0.0,
-          "composite_score": 0.0
+          "cover_pct": 1.52,
+          "composite_score": 0.96
         },
         {
           "rank": 37,
-          "feature": "trackType_encoded",
+          "feature": "daysSinceLastRace",
+          "gain_pct": 1.15,
+          "perm_drop": 0.0,
+          "cover_pct": 1.56,
+          "composite_score": 0.92
+        },
+        {
+          "rank": 38,
+          "feature": "jockeySwitchQuality",
+          "gain_pct": 1.66,
+          "perm_drop": 0.0,
+          "cover_pct": 0.87,
+          "composite_score": 0.9
+        },
+        {
+          "rank": 39,
+          "feature": "jockeyXform",
+          "gain_pct": 1.2,
+          "perm_drop": 0.0,
+          "cover_pct": 0.83,
+          "composite_score": 0.9
+        },
+        {
+          "rank": 40,
+          "feature": "fieldSize",
+          "gain_pct": 1.34,
+          "perm_drop": 0.0,
+          "cover_pct": 1.03,
+          "composite_score": 0.89
+        },
+        {
+          "rank": 41,
+          "feature": "weather_encoded",
+          "gain_pct": 1.32,
+          "perm_drop": 0.0,
+          "cover_pct": 1.2,
+          "composite_score": 0.87
+        },
+        {
+          "rank": 42,
+          "feature": "conditionXsire",
+          "gain_pct": 1.3,
+          "perm_drop": 0.0,
+          "cover_pct": 1.1,
+          "composite_score": 0.84
+        },
+        {
+          "rank": 43,
+          "feature": "recentForm",
+          "gain_pct": 1.34,
+          "perm_drop": 0.0,
+          "cover_pct": 1.14,
+          "composite_score": 0.82
+        },
+        {
+          "rank": 44,
+          "feature": "trainerGradeWinRate",
+          "gain_pct": 1.59,
+          "perm_drop": 0.0,
+          "cover_pct": 0.9,
+          "composite_score": 0.82
+        },
+        {
+          "rank": 45,
+          "feature": "speedRating",
+          "gain_pct": 1.34,
+          "perm_drop": 0.0,
+          "cover_pct": 1.08,
+          "composite_score": 0.82
+        },
+        {
+          "rank": 46,
+          "feature": "weightXspeed",
+          "gain_pct": 1.38,
+          "perm_drop": 0.0,
+          "cover_pct": 0.77,
+          "composite_score": 0.82
+        },
+        {
+          "rank": 47,
+          "feature": "last3WinRate",
+          "gain_pct": 0.78,
+          "perm_drop": 0.0,
+          "cover_pct": 2.33,
+          "composite_score": 0.8
+        },
+        {
+          "rank": 48,
+          "feature": "lastRacePosition",
+          "gain_pct": 1.14,
+          "perm_drop": 0.0,
+          "cover_pct": 1.56,
+          "composite_score": 0.8
+        },
+        {
+          "rank": 49,
+          "feature": "jockeyAbility",
+          "gain_pct": 1.19,
+          "perm_drop": 0.0,
+          "cover_pct": 0.51,
+          "composite_score": 0.8
+        },
+        {
+          "rank": 50,
+          "feature": "trainerCondWinRate",
+          "gain_pct": 1.05,
+          "perm_drop": 0.0,
+          "cover_pct": 0.85,
+          "composite_score": 0.8
+        },
+        {
+          "rank": 51,
+          "feature": "consistency",
+          "gain_pct": 1.51,
+          "perm_drop": 0.0,
+          "cover_pct": 0.63,
+          "composite_score": 0.76
+        },
+        {
+          "rank": 52,
+          "feature": "avgPastOdds",
+          "gain_pct": 1.09,
+          "perm_drop": 0.0,
+          "cover_pct": 1.2,
+          "composite_score": 0.76
+        },
+        {
+          "rank": 53,
+          "feature": "postPositionBias",
+          "gain_pct": 1.5,
+          "perm_drop": 0.0,
+          "cover_pct": 0.44,
+          "composite_score": 0.72
+        },
+        {
+          "rank": 54,
+          "feature": "meetDay",
+          "gain_pct": 1.19,
+          "perm_drop": 0.0,
+          "cover_pct": 0.74,
+          "composite_score": 0.72
+        },
+        {
+          "rank": 55,
+          "feature": "distance",
+          "gain_pct": 1.22,
+          "perm_drop": 0.0,
+          "cover_pct": 0.77,
+          "composite_score": 0.7
+        },
+        {
+          "rank": 56,
+          "feature": "sex_encoded",
+          "gain_pct": 1.27,
+          "perm_drop": 0.0,
+          "cover_pct": 0.7,
+          "composite_score": 0.69
+        },
+        {
+          "rank": 57,
+          "feature": "trackCondition_encoded",
+          "gain_pct": 0.53,
+          "perm_drop": 0.0,
+          "cover_pct": 0.09,
+          "composite_score": 0.26
+        },
+        {
+          "rank": 58,
+          "feature": "weatherAptitude",
           "gain_pct": 0.0,
           "perm_drop": 0.0,
           "cover_pct": 0.0,
           "composite_score": 0.0
         },
         {
-          "rank": 38,
-          "feature": "weightChange",
+          "rank": 59,
+          "feature": "weightStability",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 60,
+          "feature": "weightTrendSlope",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 61,
+          "feature": "weightOptimalDelta",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 62,
+          "feature": "horsePacePreference",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 63,
+          "feature": "horseHaiPaceRate",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 64,
+          "feature": "last3PlaceRate",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 65,
+          "feature": "classChange",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 66,
+          "feature": "trackTypeChange",
+          "gain_pct": 0.0,
+          "perm_drop": 0.0,
+          "cover_pct": 0.0,
+          "composite_score": 0.0
+        },
+        {
+          "rank": 67,
+          "feature": "totalEarningsLog",
           "gain_pct": 0.0,
           "perm_drop": 0.0,
           "cover_pct": 0.0,
@@ -2261,29 +3856,60 @@
     }
   },
   "dead_features": [
-    "classPerformance",
-    "courseAptitude",
+    "avgMarginWhenWinning",
+    "avgPastOdds",
+    "classChange",
+    "conditionXsire",
+    "consistency",
+    "courseDistPaceAvg",
+    "daysSinceLastRace",
     "distance",
+    "distanceAptitude",
     "fieldSize",
+    "fieldSizeXpost",
+    "handicapAdvantage",
     "handicapWeight",
-    "historicalPostBias",
-    "jockeyTrainerCombo",
+    "horseHaiPaceRate",
+    "horsePacePreference",
+    "jockeyAbility",
+    "jockeyCourseWinRate",
+    "jockeyDistanceWinRate",
+    "jockeySwitchQuality",
+    "jockeyXform",
+    "last3WinRate",
+    "lastRacePosition",
+    "lastThreeFurlongs",
+    "marginCompetitiveness",
+    "meetDay",
+    "paceStyleMatch",
     "postPosition",
     "postPositionBias",
     "recentForm",
+    "relativePosition",
+    "rotation",
+    "rotationXform",
     "runningStyle",
     "sex_encoded",
+    "totalEarningsLog",
     "trackConditionAptitude",
     "trackCondition_encoded",
-    "trackType_encoded",
+    "trackTypeChange",
+    "trainerCondWinRate",
+    "trainerDistCatWinRate",
+    "trainerGradeWinRate",
+    "trainerWinRate",
+    "weatherAptitude",
     "weather_encoded",
-    "weightChange"
+    "weightOptimalDelta",
+    "weightStability",
+    "weightTrendSlope",
+    "weightXspeed"
   ],
   "top5_features": [
-    "odds",
-    "oddsLogTransform",
     "sireTrackWinRate",
-    "jockeyDistanceWinRate",
-    "trainerWinRate"
+    "oddsLogTransform",
+    "relativeOdds",
+    "popularityRatio",
+    "grade_encoded"
   ]
 }

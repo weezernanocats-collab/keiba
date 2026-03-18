@@ -321,10 +321,9 @@ def main():
     }
 
     # === Category Models ===
-    track_idx = feature_names.index('trackType_encoded')
-    dist_idx = feature_names.index('distance')
+    # trackType_encoded/distance はモデル特徴量に含まれない場合があるので行メタデータから取得
     sample_cats = np.array([
-        categorize_race(X[i, track_idx], X[i, dist_idx]) for i in range(len(rows))
+        categorize_race(r.get('track_type_encoded', -1), r.get('distance_val', 0)) for r in rows
     ], dtype=object)
 
     report['category_analysis'] = {}

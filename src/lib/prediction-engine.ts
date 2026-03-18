@@ -263,10 +263,6 @@ export async function generatePrediction(
           sireTrackWinRate: input?.sireTrackWinRate,
           jockeyDistanceWinRate: input?.jockeyDistanceWinRate,
           jockeyCourseWinRate: input?.jockeyCourseWinRate,
-          // v5.1: 馬体重トレンド特徴量
-          weightStability: sh.scores._weightStability,
-          weightTrendSlope: sh.scores._weightTrendSlope,
-          weightOptimalDelta: sh.scores._weightOptimalDelta,
           // v6.0: 新特徴量
           jockeySwitchQuality,
           cornerDelta,

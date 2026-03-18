@@ -110,9 +110,6 @@ interface ContextualFeatures {
   sireTrackWinRate?: number | undefined;
   jockeyDistanceWinRate?: number | undefined;
   jockeyCourseWinRate?: number | undefined;
-  weightStability?: number | undefined;
-  weightTrendSlope?: number | undefined;
-  weightOptimalDelta?: number | undefined;
   jockeySwitchQuality?: number | undefined;
   cornerDelta?: number | undefined;
   avgMarginWhenWinning?: number | undefined;
@@ -174,9 +171,6 @@ export function buildMLFeatures(
     sireTrackWinRate: ctx.sireTrackWinRate ?? 0.07,
     jockeyDistanceWinRate: ctx.jockeyDistanceWinRate ?? 0.08,
     jockeyCourseWinRate: ctx.jockeyCourseWinRate ?? 0.08,
-    weightStability: ctx.weightStability ?? 50,
-    weightTrendSlope: ctx.weightTrendSlope ?? 0,
-    weightOptimalDelta: ctx.weightOptimalDelta ?? 0,
     jockeySwitchQuality: ctx.jockeySwitchQuality ?? 0,
     cornerDelta: ctx.cornerDelta ?? 0,
     avgMarginWhenWinning: ctx.avgMarginWhenWinning ?? 0,

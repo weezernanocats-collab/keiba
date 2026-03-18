@@ -40,7 +40,7 @@ const FEATURE_NAMES = [
   'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
   'sireAptitude', 'trainerAbility',
   'seasonalPattern', 'handicapAdvantage',
-  'marginCompetitiveness', 'weatherAptitude',
+  'marginCompetitiveness',
   // コンテキスト特徴量
   'fieldSize', 'popularity', 'age', 'sex_encoded',
   'handicapWeight', 'postPosition', 'grade_encoded',
@@ -49,8 +49,6 @@ const FEATURE_NAMES = [
   'weather_encoded',
   'trainerWinRate', 'trainerPlaceRate',
   'sireTrackWinRate', 'jockeyDistanceWinRate', 'jockeyCourseWinRate',
-  // v5.1: 馬体重トレンド
-  'weightStability', 'weightTrendSlope', 'weightOptimalDelta',
   // v6.0: 新特徴量
   'jockeySwitchQuality',     // 騎手乗替の質（WR差）
   'cornerDelta',              // コーナー通過順位差（加速指標）
@@ -99,6 +97,20 @@ const GRADE_ENCODE: Record<string, number> = {
   '3勝クラス': 4, 'リステッド': 5, 'オープン': 5,
   'G3': 6, 'G2': 7, 'G1': 8,
 };
+
+/**
+ * レース名からグレードを推定（past_performances.race_id がNULLでJOINできない場合のフォールバック）
+ */
+function inferGradeFromRaceName(raceName: string | null): string | null {
+  if (!raceName) return null;
+  if (raceName.includes('新馬')) return '新馬';
+  if (raceName.includes('未勝利')) return '未勝利';
+  if (raceName.includes('1勝')) return '1勝クラス';
+  if (raceName.includes('2勝')) return '2勝クラス';
+  if (raceName.includes('3勝')) return '3勝クラス';
+  // GI/GII/GIII はレース名自体からは判別しにくいが、重賞名はDBにある
+  return null;
+}
 
 // 着差テキスト → 秒数の変換
 function marginToSeconds(margin: string | null): number {
@@ -163,6 +175,8 @@ interface PastPerfRow {
   corner_positions: string | null;
   grade: string | null;
   track_type: string | null;
+  race_name: string | null;
+  prize: number;
   // v9.0: 新特徴量用
   entries: number | null;
   odds: number | null;
@@ -200,8 +214,8 @@ async function main() {
   const [ppResult, racePaceResult, horseResult] = await Promise.all([
     db.execute(`
       SELECT pp.horse_id, pp.race_id, pp.date, pp.position, pp.jockey_name, pp.margin, pp.corner_positions,
-             pp.entries, pp.odds, pp.popularity,
-             r.grade, r.track_type
+             pp.entries, pp.odds, pp.popularity, pp.race_name, pp.prize,
+             r.grade, COALESCE(r.track_type, pp.track_type) as track_type
       FROM past_performances pp
       LEFT JOIN races r ON r.id = pp.race_id
       ORDER BY pp.horse_id, pp.date DESC
@@ -582,11 +596,15 @@ async function main() {
         ? last3.filter(pp => pp.position <= 3).length / last3.length : 0;
 
       // クラス変動 (今走グレード - 前走グレード)
+      // LEFT JOIN失敗時はrace_nameからグレードを推定
       let classChange = 0;
-      if (horsePerfs.length > 0 && horsePerfs[0].grade) {
-        const prevGrade = GRADE_ENCODE[horsePerfs[0].grade] ?? 3;
-        const curGrade = GRADE_ENCODE[pred.grade ?? ''] ?? 3;
-        classChange = curGrade - prevGrade;
+      if (horsePerfs.length > 0) {
+        const prevGradeStr = horsePerfs[0].grade ?? inferGradeFromRaceName(horsePerfs[0].race_name);
+        if (prevGradeStr) {
+          const prevGrade = GRADE_ENCODE[prevGradeStr] ?? 3;
+          const curGrade = GRADE_ENCODE[pred.grade ?? ''] ?? 3;
+          classChange = curGrade - prevGrade;
+        }
       }
 
       // 芝↔ダート替わり
@@ -638,7 +656,8 @@ async function main() {
         : Math.log(10);
 
       // 通算賞金 (log1p変換)
-      const totalEarnings = entry.horse_id ? (horseTotalEarningsMap.get(entry.horse_id) ?? 0) : 0;
+      // horses.total_earningsは未取得(全0)のため、past_performancesのprize合計で代替
+      const totalEarnings = horsePerfs.reduce((s, pp) => s + (pp.prize ?? 0), 0);
       const totalEarningsLog = Math.log1p(totalEarnings);
 
       // 交互作用特徴量
