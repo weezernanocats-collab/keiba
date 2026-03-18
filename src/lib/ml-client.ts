@@ -135,6 +135,11 @@ interface ContextualFeatures {
   careerWinRate?: number | undefined;
   relativeOdds?: number | undefined;
   winStreak?: number | undefined;
+  // v9.0: 新特徴量
+  relativePosition?: number | undefined;
+  upsetRate?: number | undefined;
+  avgPastOdds?: number | undefined;
+  totalEarningsLog?: number | undefined;
 }
 
 /**
@@ -205,6 +210,11 @@ export function buildMLFeatures(
     careerWinRate: ctx.careerWinRate ?? 0,
     relativeOdds: ctx.relativeOdds ?? 0,
     winStreak: ctx.winStreak ?? 0,
+    // v9.0: 新特徴量
+    relativePosition: ctx.relativePosition ?? 0.5,
+    upsetRate: ctx.upsetRate ?? 0.1,
+    avgPastOdds: ctx.avgPastOdds ?? Math.log(10),
+    totalEarningsLog: ctx.totalEarningsLog ?? 0,
   };
 }
 

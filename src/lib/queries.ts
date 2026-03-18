@@ -462,6 +462,8 @@ export function mapPastPerformance(row: any): PastPerformance {
     odds: row.odds ?? 0,
     popularity: row.popularity ?? 0,
     prize: row.prize ?? 0,
+    // v9.0: JOINで取得したレースグレード（存在する場合のみ）
+    grade: row.race_grade ?? undefined,
   };
 }
 
@@ -946,10 +948,13 @@ export async function getHorsePastPerformancesBatch(
   const placeholders = uniqueIds.map(() => '?').join(',');
 
   // ROW_NUMBER で各馬ごとに limit 件に絞る
+  // v9.0: LEFT JOIN races で grade を取得（classChange 計算用）
   const rows = await dbAll(`
     SELECT * FROM (
-      SELECT pp.*, ROW_NUMBER() OVER (PARTITION BY pp.horse_id ORDER BY pp.date DESC) as rn
+      SELECT pp.*, r.grade AS race_grade,
+             ROW_NUMBER() OVER (PARTITION BY pp.horse_id ORDER BY pp.date DESC) as rn
       FROM past_performances pp
+      LEFT JOIN races r ON r.id = pp.race_id
       WHERE pp.horse_id IN (${placeholders}) AND pp.date < ?
     ) sub
     WHERE sub.rn <= ?

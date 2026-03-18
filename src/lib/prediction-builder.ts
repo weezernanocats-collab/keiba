@@ -89,12 +89,16 @@ export async function buildAndPredict(
     const jockeyStats = jockeyStatsMap.get(re.jockeyId) || { winRate: 0.08, placeRate: 0.20 };
     const fatherName = (horseData as Record<string, unknown> | undefined)?.father_name as string || '';
 
+    // v9.0: totalEarnings を horses テーブルから取得
+    const totalEarnings = (horseData as Record<string, unknown> | undefined)?.total_earnings as number | undefined;
+
     const base: HorseAnalysisInput = {
       entry: re,
       pastPerformances: pastPerfs,
       jockeyWinRate: jockeyStats.winRate,
       jockeyPlaceRate: jockeyStats.placeRate,
       fatherName,
+      totalEarnings: totalEarnings ?? 0,
     };
 
     if (!includeTrainer || !trainerStatsMap || !sireTrackWRMap || !jockeyDistWRMap || !jockeyCourseWRMap) {

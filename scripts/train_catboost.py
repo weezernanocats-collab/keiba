@@ -333,8 +333,11 @@ def fit_catboost_calibration(model, X_cal, positions_cal, groups_cal):
 # ==================== アンサンブル重み学習 ====================
 
 def learn_ensemble_weights(xgb_model_path, catboost_model, X_cal, positions_cal, groups_cal, feature_names):
-    """検証セットでXGBoost + CatBoostの最適ブレンド重みを学習"""
+    """検証セットでXGBoost + CatBoostの最適ブレンド重みを学習
+    最低重みフロア(0.2)を設け、どちらかのモデルが完全に無視されることを防ぐ"""
     import xgboost as xgb
+
+    MIN_WEIGHT = 0.2  # 最低重みフロア（どちらのモデルも最低20%は使う）
 
     xgb_model = xgb.XGBRanker()
     xgb_model.load_model(xgb_model_path)
@@ -344,11 +347,12 @@ def learn_ensemble_weights(xgb_model_path, catboost_model, X_cal, positions_cal,
     pool = Pool(data=X_cal, group_id=query_ids)
     cb_scores = catboost_model.predict(pool)
 
-    # グリッドサーチで最適重みを探索
+    # グリッドサーチで最適重みを探索（フロア付き）
     best_weight = 0.5
     best_ndcg = 0.0
 
-    for w in np.arange(0.0, 1.05, 0.05):
+    for w_int in range(int(MIN_WEIGHT * 100), int((1.0 - MIN_WEIGHT) * 100) + 1, 5):
+        w = w_int / 100.0
         blended = w * xgb_scores + (1 - w) * cb_scores
         y_true_groups = split_by_groups(
             np.array([position_to_relevance(int(p)) for p in positions_cal[np.array(range(len(positions_cal)))]]),
@@ -364,6 +368,39 @@ def learn_ensemble_weights(xgb_model_path, catboost_model, X_cal, positions_cal,
     print(f"最適NDCG@1: {best_ndcg:.4f}")
 
     return best_weight, round(1 - best_weight, 2)
+
+
+def learn_category_ensemble_weights(xgb_model_path, catboost_model, X_cal, positions_cal, groups_cal, feature_names):
+    """カテゴリ別のアンサンブル重みを学習"""
+    import xgboost as xgb
+
+    MIN_WEIGHT = 0.2
+
+    xgb_model = xgb.XGBRanker()
+    xgb_model.load_model(xgb_model_path)
+    xgb_scores = xgb_model.predict(X_cal)
+
+    query_ids = groups_to_query_ids(groups_cal)
+    pool = Pool(data=X_cal, group_id=query_ids)
+    cb_scores = catboost_model.predict(pool)
+
+    best_weight = 0.5
+    best_ndcg = 0.0
+
+    for w_int in range(int(MIN_WEIGHT * 100), int((1.0 - MIN_WEIGHT) * 100) + 1, 5):
+        w = w_int / 100.0
+        blended = w * xgb_scores + (1 - w) * cb_scores
+        y_true_groups = split_by_groups(
+            np.array([position_to_relevance(int(p)) for p in positions_cal]),
+            groups_cal,
+        )
+        y_pred_groups = split_by_groups(blended, groups_cal)
+        ndcg = calc_ndcg_at_k(y_true_groups, y_pred_groups, k=1)
+        if ndcg > best_ndcg:
+            best_ndcg = ndcg
+            best_weight = round(w, 2)
+
+    return best_weight, round(1 - best_weight, 2), best_ndcg
 
 
 # ==================== メイン ====================
@@ -531,24 +568,32 @@ def main():
             )
             ensemble_weights = {'xgb': xgb_w, 'catboost': cb_w}
 
-            # カテゴリ別重みも学習
+            # カテゴリ別重みも学習（各カテゴリのXGBとCBグローバルモデルで重みを求める）
             cat_ensemble_weights = {}
             for cat_name in category_metrics:
                 cat_mask = sample_categories == cat_name
                 cat_cal_idx_list = [i for i in cal_idx if cat_mask[i]]
                 if len(cat_cal_idx_list) < 200:
-                    cat_ensemble_weights[cat_name] = ensemble_weights.copy()
+                    cat_ensemble_weights[cat_name] = {'xgb': ensemble_weights['xgb'], 'catboost': ensemble_weights['catboost']}
                     continue
 
                 cat_cal_ordered_e, cat_groups_cal_e = build_race_groups(race_ids, cat_cal_idx_list)
 
                 cat_xgb_model_path = os.path.join(MODEL_DIR, f"xgb_ranker_{cat_name}.json")
-                cat_cb_model_path = os.path.join(MODEL_DIR, f"catboost_ranker_{cat_name}.json")
 
                 if os.path.exists(cat_xgb_model_path):
-                    # CatBoostカテゴリモデルを再読み込みは不要（メモリ上のモデルを使う）
-                    # XGBは使えないので global weights を使用
-                    cat_ensemble_weights[cat_name] = ensemble_weights.copy()
+                    try:
+                        cat_xgb_w, cat_cb_w, cat_ndcg = learn_category_ensemble_weights(
+                            cat_xgb_model_path, model,
+                            X[cat_cal_ordered_e], positions[cat_cal_ordered_e], cat_groups_cal_e, feature_names,
+                        )
+                        cat_ensemble_weights[cat_name] = {'xgb': cat_xgb_w, 'catboost': cat_cb_w}
+                        print(f"  {cat_name}: XGB={cat_xgb_w}, CB={cat_cb_w} (NDCG@1={cat_ndcg:.4f})")
+                    except Exception as e:
+                        print(f"  {cat_name}: カテゴリ別重み学習エラー: {e}")
+                        cat_ensemble_weights[cat_name] = {'xgb': ensemble_weights['xgb'], 'catboost': ensemble_weights['catboost']}
+                else:
+                    cat_ensemble_weights[cat_name] = {'xgb': ensemble_weights['xgb'], 'catboost': ensemble_weights['catboost']}
 
             ensemble_weights['per_category'] = cat_ensemble_weights
 

@@ -230,6 +230,8 @@ export interface PastPerformance {
   odds: number;
   popularity: number;
   prize: number;
+  // v9.0: レースのグレード（races テーブルから JOIN）
+  grade?: string;
 }
 
 // フロントエンド共通型

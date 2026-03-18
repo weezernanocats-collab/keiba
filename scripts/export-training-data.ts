@@ -83,6 +83,11 @@ const FEATURE_NAMES = [
   'careerWinRate',            // 通算勝率 (0-1)
   'relativeOdds',             // レース内相対オッズ (log(odds/中央値))
   'winStreak',                // 連勝数 (0-N)
+  // v9.0: 新特徴量
+  'relativePosition',         // 相対着順 (前走着順/前走出走頭数)
+  'upsetRate',                // 穴馬力 (人気5番以下好走率)
+  'avgPastOdds',              // 好走時平均オッズ (log変換)
+  'totalEarningsLog',         // 通算賞金 (log1p変換)
 ];
 
 const SEX_ENCODE: Record<string, number> = { '牡': 0, '牝': 1, 'セ': 2 };
@@ -158,6 +163,10 @@ interface PastPerfRow {
   corner_positions: string | null;
   grade: string | null;
   track_type: string | null;
+  // v9.0: 新特徴量用
+  entries: number | null;
+  odds: number | null;
+  popularity: number | null;
 }
 
 async function main() {
@@ -191,6 +200,7 @@ async function main() {
   const [ppResult, racePaceResult, horseResult] = await Promise.all([
     db.execute(`
       SELECT pp.horse_id, pp.race_id, pp.date, pp.position, pp.jockey_name, pp.margin, pp.corner_positions,
+             pp.entries, pp.odds, pp.popularity,
              r.grade, r.track_type
       FROM past_performances pp
       LEFT JOIN races r ON r.id = pp.race_id
@@ -203,7 +213,7 @@ async function main() {
       WHERE pace_type IS NOT NULL
     `),
     db.execute(
-      `SELECT id, father_name FROM horses WHERE father_name IS NOT NULL`
+      `SELECT id, father_name, total_earnings FROM horses WHERE father_name IS NOT NULL`
     ),
   ]);
   console.log(`過去成績: ${ppResult.rows.length}件`);
@@ -221,8 +231,10 @@ async function main() {
   }
 
   const horseFatherMap = new Map<string, string>();
+  const horseTotalEarningsMap = new Map<string, number>();
   for (const row of horseResult.rows) {
     horseFatherMap.set(row.id as string, row.father_name as string);
+    horseTotalEarningsMap.set(row.id as string, (row.total_earnings as number) ?? 0);
   }
 
   const entries = entryResult.rows as unknown as EntryRow[];
@@ -609,6 +621,26 @@ async function main() {
         else break;
       }
 
+      // === v9.0 新特徴量 ===
+      // 相対着順 (前走着順 / 前走出走頭数)
+      const relativePosition = horsePerfs.length > 0 && (horsePerfs[0].entries ?? 0) > 0
+        ? horsePerfs[0].position / horsePerfs[0].entries! : 0.5;
+
+      // 穴馬力 (人気5番以下かつ3着以内の率)
+      const longshotPerfs = horsePerfs.filter(pp => (pp.popularity ?? 0) >= 5);
+      const upsetRate = longshotPerfs.length > 0
+        ? longshotPerfs.filter(pp => pp.position <= 3).length / longshotPerfs.length : 0.1;
+
+      // 好走時平均オッズ (log変換)
+      const placedPerfsWithOdds = horsePerfs.filter(pp => pp.position <= 3 && (pp.odds ?? 0) > 0);
+      const avgPastOdds = placedPerfsWithOdds.length > 0
+        ? Math.log(placedPerfsWithOdds.reduce((s, pp) => s + pp.odds!, 0) / placedPerfsWithOdds.length)
+        : Math.log(10);
+
+      // 通算賞金 (log1p変換)
+      const totalEarnings = entry.horse_id ? (horseTotalEarningsMap.get(entry.horse_id) ?? 0) : 0;
+      const totalEarningsLog = Math.log1p(totalEarnings);
+
       // 交互作用特徴量
       const weightXspeed = (entry.handicap_weight ?? 54) * ((scores.speedRating ?? 50) / 100);
       const ageXdistance = (entry.age ?? 3) * (pred.distance / 1000);
@@ -670,6 +702,11 @@ async function main() {
           case 'careerWinRate': return careerWinRate;
           case 'relativeOdds': return relativeOdds;
           case 'winStreak': return winStreak;
+          // v9.0 新特徴量
+          case 'relativePosition': return relativePosition;
+          case 'upsetRate': return upsetRate;
+          case 'avgPastOdds': return avgPastOdds;
+          case 'totalEarningsLog': return totalEarningsLog;
           default: return scores[name] ?? 50;
         }
       });

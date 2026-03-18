@@ -61,5 +61,9 @@
   "trackTypeChange",
   "careerWinRate",
   "relativeOdds",
-  "winStreak"
+  "winStreak",
+  "relativePosition",
+  "upsetRate",
+  "avgPastOdds",
+  "totalEarningsLog"
 ]

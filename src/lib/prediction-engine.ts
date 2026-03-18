@@ -80,6 +80,14 @@ function parseCornerDelta(cornerStr: string | undefined): number {
   if (parts.length < 2) return 0;
   return parts[parts.length - 2] - parts[parts.length - 1];
 }
+
+// v9.0: classChange 計算用グレードエンコード
+const GRADE_ENCODE: Record<string, number> = {
+  '新馬': 0, '未勝利': 1, '1勝クラス': 2, '2勝クラス': 3,
+  '3勝クラス': 4, 'リステッド': 5, 'オープン': 5,
+  'G3': 6, 'G2': 7, 'G1': 8,
+};
+
 import { dbAll } from './database';
 import {
   oddsToImpliedProbabilities,
@@ -121,6 +129,8 @@ interface HorseAnalysisInput {
   trainerDistCatWinRate?: number;
   trainerCondWinRate?: number;
   trainerGradeWinRate?: number;
+  // v9.0: 通算賞金
+  totalEarnings?: number;
 }
 
 export async function generatePrediction(
@@ -277,7 +287,14 @@ export async function generatePrediction(
             ? pp.slice(0, 3).filter(p => p.position === 1).length / Math.min(pp.length, 3) : 0,
           last3PlaceRate: pp.length > 0
             ? pp.slice(0, 3).filter(p => p.position <= 3).length / Math.min(pp.length, 3) : 0,
-          classChange: 0, // 推論時にはpast_performancesにgradeなし → エクスポート時のみ計算
+          // v9.0: classChange 推論修正（前走グレードと今走グレードの差）
+          classChange: (() => {
+            if (pp.length === 0) return 0;
+            const prevGrade = GRADE_ENCODE[pp[0].grade ?? ''] ?? 3;
+            const curGrade = GRADE_ENCODE[grade ?? ''] ?? 3;
+            return curGrade - prevGrade;
+          })(),
+          // v9.0: trackTypeChange 推論修正（過去走データから計算）
           trackTypeChange: (() => {
             if (pp.length === 0) return 0;
             const prevTrackType = pp[0].trackType;
@@ -300,6 +317,21 @@ export async function generatePrediction(
             for (const p of pp) { if (p.position === 1) streak++; else break; }
             return streak;
           })(),
+          // v9.0: 新特徴量4つ
+          relativePosition: pp.length > 0 && pp[0].entries > 0
+            ? pp[0].position / pp[0].entries : 0.5,
+          upsetRate: (() => {
+            const longshots = pp.filter(p => p.popularity >= 5);
+            if (longshots.length === 0) return 0.1;
+            return longshots.filter(p => p.position <= 3).length / longshots.length;
+          })(),
+          avgPastOdds: (() => {
+            const placed = pp.filter(p => p.position <= 3 && p.odds > 0);
+            if (placed.length === 0) return Math.log(10);
+            const avg = placed.reduce((s, p) => s + p.odds, 0) / placed.length;
+            return Math.log(avg > 0 ? avg : 10);
+          })(),
+          totalEarningsLog: Math.log1p(input?.totalEarnings ?? 0),
         },
       ),
     };
