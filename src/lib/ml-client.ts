@@ -224,7 +224,7 @@ export function buildMLFeatures(
     // Phase 3 追加交互作用特徴量 (#17)
     gradeXtrainer: (GRADE_ENCODE[ctx.grade ?? ''] ?? 3) * ((factorScores.trainerAbility ?? 50) / 100),
     jockeyXdistance: (ctx.jockeyDistanceWinRate ?? 0.08) * (ctx.distance / 1000),
-    formXclassChange: ((factorScores.recentForm ?? 50) / 100) * ((factorScores.recentForm ?? 50) / 100),
+    formXclassChange: ((factorScores.recentForm ?? 50) / 100) * ((factorScores.classPerformance ?? 50) / 100),
   };
 
   // NaN/Infinity ガード: 初出走馬やデータ欠損で特徴量が壊れるのを防止

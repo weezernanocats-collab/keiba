@@ -61,5 +61,13 @@
   "relativePosition",
   "upsetRate",
   "avgPastOdds",
-  "totalEarningsLog"
+  "totalEarningsLog",
+  "bodyWeightTrend",
+  "distanceChange",
+  "jockeyTrainerWinRate",
+  "horseCourseWinRate",
+  "escaperCount",
+  "gradeXtrainer",
+  "jockeyXdistance",
+  "formXclassChange"
 ]

@@ -346,6 +346,7 @@ const SCHEMA_STATEMENTS: InStatement[] = [
   // インデックス
   `CREATE INDEX IF NOT EXISTS idx_races_date ON races(date)`,
   `CREATE INDEX IF NOT EXISTS idx_races_racecourse ON races(racecourse_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_race_entries_unique ON race_entries(race_id, horse_number)`,
   `CREATE INDEX IF NOT EXISTS idx_race_entries_race ON race_entries(race_id)`,
   `CREATE INDEX IF NOT EXISTS idx_race_entries_horse ON race_entries(horse_id)`,
   `CREATE INDEX IF NOT EXISTS idx_past_performances_horse ON past_performances(horse_id)`,
@@ -363,6 +364,7 @@ const SCHEMA_STATEMENTS: InStatement[] = [
   `CREATE INDEX IF NOT EXISTS idx_races_status ON races(status, date)`,
   `CREATE INDEX IF NOT EXISTS idx_prediction_results_race ON prediction_results(race_id)`,
   `CREATE INDEX IF NOT EXISTS idx_scheduler_runs_date ON scheduler_runs(target_date, job_type)`,
+  `CREATE INDEX IF NOT EXISTS idx_race_entries_trainer ON race_entries(trainer_name)`,
 
   // オッズ時系列スナップショットテーブル
   `CREATE TABLE IF NOT EXISTS odds_snapshots (

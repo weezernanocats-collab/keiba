@@ -23,7 +23,8 @@ export async function seedRacecourses(racecourses: typeof RACECOURSES) {
 
 export async function getRacesByDate(date: string) {
   const rows = await dbAll<Record<string, unknown>>(`
-    SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence
+    SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence,
+      (SELECT MIN(re2.odds) FROM race_entries re2 WHERE re2.race_id = r.id AND re2.odds > 0) as top_odds
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
     LEFT JOIN predictions p ON r.id = p.race_id
@@ -35,12 +36,14 @@ export async function getRacesByDate(date: string) {
     ...mapRace(r),
     entryCount: (r.entry_count ?? 0) as number,
     confidence: r.prediction_confidence != null ? Number(r.prediction_confidence) : null,
+    topOdds: r.top_odds != null ? Number(r.top_odds) : null,
   }));
 }
 
 export async function getRacesByDateRange(startDate: string, endDate: string) {
   const rows = await dbAll<Record<string, unknown>>(`
-    SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence
+    SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence,
+      (SELECT MIN(re2.odds) FROM race_entries re2 WHERE re2.race_id = r.id AND re2.odds > 0) as top_odds
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
     LEFT JOIN predictions p ON r.id = p.race_id
@@ -52,6 +55,7 @@ export async function getRacesByDateRange(startDate: string, endDate: string) {
     ...mapRace(r),
     entryCount: (r.entry_count ?? 0) as number,
     confidence: r.prediction_confidence != null ? Number(r.prediction_confidence) : null,
+    topOdds: r.top_odds != null ? Number(r.top_odds) : null,
   }));
 }
 
@@ -121,7 +125,8 @@ export async function getUpcomingRaces(limit: number = 50) {
   const jstToday = new Date(now.getTime() + jstOffset).toISOString().split('T')[0];
 
   const rows = await dbAll<Record<string, unknown>>(`
-    SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence
+    SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence,
+      (SELECT MIN(re2.odds) FROM race_entries re2 WHERE re2.race_id = r.id AND re2.odds > 0) as top_odds
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
     LEFT JOIN predictions p ON r.id = p.race_id
@@ -135,12 +140,14 @@ export async function getUpcomingRaces(limit: number = 50) {
     ...mapRace(r),
     entryCount: (r.entry_count ?? 0) as number,
     confidence: r.prediction_confidence != null ? Number(r.prediction_confidence) : null,
+    topOdds: r.top_odds != null ? Number(r.top_odds) : null,
   }));
 }
 
 export async function getRecentResults(limit: number = 50) {
   const rows = await dbAll<Record<string, unknown>>(`
-    SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence
+    SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence,
+      (SELECT MIN(re2.odds) FROM race_entries re2 WHERE re2.race_id = r.id AND re2.odds > 0) as top_odds
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
     LEFT JOIN predictions p ON r.id = p.race_id
@@ -153,6 +160,7 @@ export async function getRecentResults(limit: number = 50) {
     ...mapRace(r),
     entryCount: (r.entry_count ?? 0) as number,
     confidence: r.prediction_confidence != null ? Number(r.prediction_confidence) : null,
+    topOdds: r.top_odds != null ? Number(r.top_odds) : null,
   }));
 }
 
@@ -219,12 +227,6 @@ export async function upsertRaceEntry(raceId: string, entry: Partial<RaceEntry>)
     );
   }
 
-  // まず既存エントリを確認
-  const existing = await dbGet<{ id: number }>(
-    'SELECT id FROM race_entries WHERE race_id = ? AND horse_number = ?',
-    [raceId, entry.horseNumber]
-  );
-
   // undefined → null 変換（Turso/libsql は undefined を受け付けない）
   const postPosition = entry.postPosition ?? null;
   const horseId = entry.horseId ?? null;
@@ -244,52 +246,39 @@ export async function upsertRaceEntry(raceId: string, entry: Partial<RaceEntry>)
   const resultWeight = entry.result?.weight ?? null;
   const resultWeightChange = entry.result?.weightChange ?? null;
 
-  if (existing) {
-    // COALESCE + NULLIF で非結果フィールドは既存値を保持（結果保存時に上書きしない）
-    await dbRun(`
-      UPDATE race_entries SET
-        post_position = COALESCE(?, post_position),
-        horse_id = COALESCE(NULLIF(?, ''), horse_id),
-        horse_name = COALESCE(NULLIF(?, ''), horse_name),
-        age = COALESCE(?, age),
-        sex = COALESCE(?, sex),
-        weight = COALESCE(?, weight),
-        jockey_id = COALESCE(NULLIF(?, ''), jockey_id),
-        jockey_name = COALESCE(NULLIF(?, ''), jockey_name),
-        trainer_name = COALESCE(NULLIF(?, ''), trainer_name),
-        handicap_weight = COALESCE(?, handicap_weight),
-        result_position = COALESCE(?, result_position),
-        result_time = COALESCE(?, result_time),
-        result_margin = COALESCE(?, result_margin),
-        result_last_three_furlongs = COALESCE(?, result_last_three_furlongs),
-        result_corner_positions = COALESCE(?, result_corner_positions),
-        result_weight = COALESCE(?, result_weight),
-        result_weight_change = COALESCE(?, result_weight_change)
-      WHERE race_id = ? AND horse_number = ?
-    `, [
-      postPosition, horseId, horseName, age, sex,
-      weight, jockeyId, jockeyName, trainerName,
-      handicapWeight, resultPosition, resultTime,
-      resultMargin, resultLastThreeFurlongs,
-      resultCornerPositions, resultWeight, resultWeightChange,
-      raceId, entry.horseNumber,
-    ]);
-  } else {
-    await dbRun(`
-      INSERT INTO race_entries (
-        race_id, post_position, horse_number, horse_id, horse_name, age, sex,
-        weight, jockey_id, jockey_name, trainer_name, handicap_weight,
-        result_position, result_time, result_margin, result_last_three_furlongs,
-        result_corner_positions, result_weight, result_weight_change
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      raceId, postPosition, entry.horseNumber, horseId, horseName,
-      age, sex, weight, jockeyId, jockeyName,
-      trainerName, handicapWeight, resultPosition,
-      resultTime, resultMargin, resultLastThreeFurlongs,
-      resultCornerPositions, resultWeight, resultWeightChange,
-    ]);
-  }
+  // INSERT...ON CONFLICT DO UPDATE（SELECT不要）
+  await dbRun(`
+    INSERT INTO race_entries (
+      race_id, post_position, horse_number, horse_id, horse_name, age, sex,
+      weight, jockey_id, jockey_name, trainer_name, handicap_weight,
+      result_position, result_time, result_margin, result_last_three_furlongs,
+      result_corner_positions, result_weight, result_weight_change
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(race_id, horse_number) DO UPDATE SET
+      post_position = COALESCE(excluded.post_position, post_position),
+      horse_id = COALESCE(NULLIF(excluded.horse_id, ''), horse_id),
+      horse_name = COALESCE(NULLIF(excluded.horse_name, ''), horse_name),
+      age = COALESCE(excluded.age, age),
+      sex = COALESCE(excluded.sex, sex),
+      weight = COALESCE(excluded.weight, weight),
+      jockey_id = COALESCE(NULLIF(excluded.jockey_id, ''), jockey_id),
+      jockey_name = COALESCE(NULLIF(excluded.jockey_name, ''), jockey_name),
+      trainer_name = COALESCE(NULLIF(excluded.trainer_name, ''), trainer_name),
+      handicap_weight = COALESCE(excluded.handicap_weight, handicap_weight),
+      result_position = COALESCE(excluded.result_position, result_position),
+      result_time = COALESCE(excluded.result_time, result_time),
+      result_margin = COALESCE(excluded.result_margin, result_margin),
+      result_last_three_furlongs = COALESCE(excluded.result_last_three_furlongs, result_last_three_furlongs),
+      result_corner_positions = COALESCE(excluded.result_corner_positions, result_corner_positions),
+      result_weight = COALESCE(excluded.result_weight, result_weight),
+      result_weight_change = COALESCE(excluded.result_weight_change, result_weight_change)
+  `, [
+    raceId, postPosition, entry.horseNumber, horseId, horseName,
+    age, sex, weight, jockeyId, jockeyName,
+    trainerName, handicapWeight, resultPosition,
+    resultTime, resultMargin, resultLastThreeFurlongs,
+    resultCornerPositions, resultWeight, resultWeightChange,
+  ]);
 }
 
 // ==================== 馬 ====================
@@ -520,6 +509,50 @@ export async function upsertRaceEntryOdds(raceId: string, horseNumber: number, o
   `, [odds, popularity, raceId, horseNumber]);
 }
 
+/**
+ * 1レース分のオッズデータを一括バッチ保存（単勝・複勝・race_entries・スナップショット）
+ */
+export async function batchUpsertOddsForRace(
+  raceId: string,
+  winOdds: { horseNumber: number; odds: number }[],
+  placeOdds: { horseNumber: number; minOdds: number; maxOdds: number }[],
+  snapshotTime: string,
+): Promise<void> {
+  const statements: { sql: string; args: unknown[] }[] = [];
+
+  for (const w of winOdds) {
+    // upsertOdds: 単勝
+    statements.push({
+      sql: `INSERT OR REPLACE INTO odds (race_id, bet_type, horse_number1, horse_number2, horse_number3, odds, min_odds, max_odds, updated_at)
+            VALUES (?, '単勝', ?, NULL, NULL, ?, NULL, NULL, datetime('now'))`,
+      args: [raceId, w.horseNumber, w.odds],
+    });
+    // upsertRaceEntryOdds
+    statements.push({
+      sql: `UPDATE race_entries SET odds = ?, popularity = 0 WHERE race_id = ? AND horse_number = ?`,
+      args: [w.odds, raceId, w.horseNumber],
+    });
+    // insertOddsSnapshot
+    statements.push({
+      sql: `INSERT INTO odds_snapshots (race_id, horse_number, odds, snapshot_time) VALUES (?, ?, ?, ?)`,
+      args: [raceId, w.horseNumber, w.odds, snapshotTime],
+    });
+  }
+
+  for (const p of placeOdds) {
+    // upsertOdds: 複勝
+    statements.push({
+      sql: `INSERT OR REPLACE INTO odds (race_id, bet_type, horse_number1, horse_number2, horse_number3, odds, min_odds, max_odds, updated_at)
+            VALUES (?, '複勝', ?, NULL, NULL, ?, ?, ?, datetime('now'))`,
+      args: [raceId, p.horseNumber, p.minOdds, p.minOdds, p.maxOdds],
+    });
+  }
+
+  if (statements.length > 0) {
+    await dbBatch(statements);
+  }
+}
+
 // ==================== オッズ時系列 ====================
 
 export async function insertOddsSnapshot(raceId: string, horseNumber: number, odds: number, snapshotTime: string) {
@@ -653,6 +686,8 @@ export async function getPredictionByRaceId(raceId: string) {
 }
 
 export async function savePrediction(prediction: Prediction) {
+  // 同一race_idの古い予測を削除してから新規挿入
+  await dbRun(`DELETE FROM predictions WHERE race_id = ?`, [prediction.raceId]);
   await dbRun(`
     INSERT INTO predictions (race_id, generated_at, confidence, summary, analysis_json, picks_json, bets_json)
     VALUES (?, datetime('now'), ?, ?, ?, ?, ?)
@@ -1363,7 +1398,7 @@ export async function updateSchedulerRun(
 /** 特定日・ジョブタイプのスケジューラー実行が今日既に実行済みかを返す */
 export async function hasSchedulerRunToday(jobType: string, targetDate: string): Promise<boolean> {
   const row = await dbGet<{ c: number }>(
-    "SELECT COUNT(*) as c FROM scheduler_runs WHERE job_type = ? AND target_date = ? AND DATE(started_at) = DATE('now') AND status IN ('completed', 'running')",
+    "SELECT COUNT(*) as c FROM scheduler_runs WHERE job_type = ? AND target_date = ? AND DATE(started_at, '+9 hours') = DATE('now', '+9 hours') AND status IN ('completed', 'running')",
     [jobType, targetDate]
   );
   return (row?.c ?? 0) > 0;

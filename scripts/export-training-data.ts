@@ -476,6 +476,9 @@ async function main() {
     label_win: number;
     label_place: number;
     position: number;
+    odds: number | null;
+    track_type_encoded: number;
+    distance_val: number;
     recency_weight: number;
   }> = [];
 
@@ -598,10 +601,24 @@ async function main() {
           ? (ppByHorse.get(e.horse_id) || []).filter(pp => pp.date < pred.date)
           : [];
         if (ePerfs.length > 0) {
-          const corners = ePerfs[0].corner_positions;
-          if (corners) {
-            const firstCorner = parseInt(corners.split('-')[0]);
-            if (!isNaN(firstCorner) && firstCorner <= 3) escaperCount++;
+          // Use weighted average of last 3 races (more recent = higher weight)
+          const last3 = ePerfs.slice(0, 3);
+          const weights = [0.5, 0.3, 0.2];
+          let weightedEscaperScore = 0;
+          let totalWeight = 0;
+          for (let i = 0; i < last3.length; i++) {
+            const corners = last3[i].corner_positions;
+            if (corners) {
+              const firstCorner = parseInt(corners.split('-')[0]);
+              if (!isNaN(firstCorner)) {
+                const w = weights[i] ?? 0.1;
+                weightedEscaperScore += (firstCorner <= 3 ? 1 : 0) * w;
+                totalWeight += w;
+              }
+            }
+          }
+          if (totalWeight > 0 && weightedEscaperScore / totalWeight > 0.5) {
+            escaperCount++;
           }
         }
       }

@@ -9,6 +9,7 @@ interface RaceRow {
   id: string;
   name: string;
   date: string;
+  time: string | null;
   racecourseName: string;
   raceNumber: number;
   grade: string | null;
@@ -16,6 +17,7 @@ interface RaceRow {
   distance: number;
   status: string;
   entryCount: number;
+  topOdds: number | null;
 }
 
 interface HitRecord {
@@ -150,9 +152,11 @@ export default function HomePage() {
                   <th className="px-4 py-3 text-left font-medium">日付</th>
                   <th className="px-4 py-3 text-left font-medium">競馬場</th>
                   <th className="px-4 py-3 text-left font-medium">R</th>
+                  <th className="px-4 py-3 text-left font-medium">発走</th>
                   <th className="px-4 py-3 text-left font-medium">レース名</th>
                   <th className="px-4 py-3 text-left font-medium">条件</th>
                   <th className="px-4 py-3 text-center font-medium">頭数</th>
+                  <th className="px-4 py-3 text-center font-medium">1人気</th>
                   <th className="px-4 py-3 text-center font-medium">予想</th>
                 </tr>
               </thead>
@@ -162,6 +166,7 @@ export default function HomePage() {
                     <td className="px-4 py-3 whitespace-nowrap">{race.date}</td>
                     <td className="px-4 py-3 font-medium">{race.racecourseName}</td>
                     <td className="px-4 py-3">{race.raceNumber}R</td>
+                    <td className="px-4 py-3 text-muted whitespace-nowrap">{race.time || '-'}</td>
                     <td className="px-4 py-3">
                       <Link href={`/races/${race.id}`} className="text-accent hover:underline font-medium">
                         {race.name}
@@ -171,6 +176,9 @@ export default function HomePage() {
                     </td>
                     <td className="px-4 py-3 text-muted">{race.trackType}{race.distance}m</td>
                     <td className="px-4 py-3 text-center">{race.entryCount}頭</td>
+                    <td className="px-4 py-3 text-center text-muted">
+                      {race.topOdds != null ? `${race.topOdds.toFixed(1)}倍` : '-'}
+                    </td>
                     <td className="px-4 py-3 text-center">
                       <Link
                         href={`/predictions/${race.id}`}

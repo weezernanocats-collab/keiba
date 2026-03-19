@@ -11,6 +11,7 @@ interface RaceRow {
   id: string;
   name: string;
   date: string;
+  time: string | null;
   racecourseName: string;
   raceNumber: number;
   grade: string | null;
@@ -19,6 +20,7 @@ interface RaceRow {
   status: string;
   entryCount: number;
   confidence: number | null;
+  topOdds: number | null;
 }
 
 export default function RacesPage() {
@@ -57,7 +59,10 @@ export default function RacesPage() {
 
     // 「今後のレース」タブの場合、60秒ごとに自動更新
     if (filter === 'upcoming') {
-      intervalRef.current = setInterval(() => fetchRaces(false), 60_000);
+      intervalRef.current = setInterval(() => {
+        if (document.visibilityState === 'hidden') return;
+        fetchRaces(false);
+      }, 60_000);
     }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -281,9 +286,11 @@ export default function RacesPage() {
                     <tr>
                       <th className="px-4 py-3 text-left font-medium">競馬場</th>
                       <th className="px-4 py-3 text-left font-medium">R</th>
+                      <th className="px-4 py-3 text-left font-medium">発走</th>
                       <th className="px-4 py-3 text-left font-medium">レース名</th>
                       <th className="px-4 py-3 text-left font-medium">条件</th>
                       <th className="px-4 py-3 text-center font-medium">頭数</th>
+                      <th className="px-4 py-3 text-center font-medium">1人気</th>
                       <th className="px-4 py-3 text-center font-medium">状態</th>
                       <th className="px-4 py-3 text-center font-medium">信頼度</th>
                       <th className="px-4 py-3 text-center font-medium">詳細</th>
@@ -295,6 +302,7 @@ export default function RacesPage() {
                       <tr key={race.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
                         <td className="px-4 py-3 font-medium">{race.racecourseName}</td>
                         <td className="px-4 py-3">{race.raceNumber}R</td>
+                        <td className="px-4 py-3 text-muted whitespace-nowrap">{race.time || '-'}</td>
                         <td className="px-4 py-3">
                           <Link href={`/races/${race.id}`} className="text-accent hover:underline font-medium">
                             {race.name}
@@ -304,6 +312,9 @@ export default function RacesPage() {
                         </td>
                         <td className="px-4 py-3 text-muted">{race.trackType}{race.distance}m</td>
                         <td className="px-4 py-3 text-center">{race.entryCount}頭</td>
+                        <td className="px-4 py-3 text-center text-muted">
+                          {race.topOdds != null ? `${race.topOdds.toFixed(1)}倍` : '-'}
+                        </td>
                         <td className="px-4 py-3 text-center">
                           <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                             race.status === '出走確定' ? 'bg-green-100 text-green-800' :

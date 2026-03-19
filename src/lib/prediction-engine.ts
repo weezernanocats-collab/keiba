@@ -258,13 +258,29 @@ export async function generatePrediction(
       ? coursePerfs.filter(p => p.position === 1).length / coursePerfs.length
       : 0.05;
 
-    // #16: 逃げ・先行馬数（同レース内で直近走のコーナー1番手3位以内の馬）
+    // #16: 逃げ・先行馬数（同レース内で直近3走の加重平均で判定）
     let escaperCount = 0;
     for (const h of horses) {
       const hPp = h.pastPerformances;
-      if (hPp.length > 0 && hPp[0].cornerPositions) {
-        const firstCorner = parseInt(hPp[0].cornerPositions.split('-')[0]);
-        if (!isNaN(firstCorner) && firstCorner <= 3) escaperCount++;
+      if (hPp.length > 0) {
+        const last3 = hPp.slice(0, 3);
+        const weights = [0.5, 0.3, 0.2];
+        let weightedEscaperScore = 0;
+        let totalWeight = 0;
+        for (let i = 0; i < last3.length; i++) {
+          const corners = last3[i].cornerPositions;
+          if (corners) {
+            const firstCorner = parseInt(corners.split('-')[0]);
+            if (!isNaN(firstCorner)) {
+              const w = weights[i] ?? 0.1;
+              weightedEscaperScore += (firstCorner <= 3 ? 1 : 0) * w;
+              totalWeight += w;
+            }
+          }
+        }
+        if (totalWeight > 0 && weightedEscaperScore / totalWeight > 0.5) {
+          escaperCount++;
+        }
       }
     }
 

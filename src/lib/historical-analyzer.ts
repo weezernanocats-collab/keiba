@@ -15,6 +15,22 @@
 import { dbAll } from './database';
 import { computePaceProfile, type HistoricalPaceProfile } from './pace-analyzer';
 
+// ==================== インメモリキャッシュ (Task 1-6) ====================
+
+const courseStatsCache = new Map<string, { data: unknown; expires: number }>();
+const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+function getCached<T>(key: string): T | undefined {
+  const entry = courseStatsCache.get(key);
+  if (entry && entry.expires > Date.now()) return entry.data as T;
+  if (entry) courseStatsCache.delete(key);
+  return undefined;
+}
+
+function setCache(key: string, data: unknown): void {
+  courseStatsCache.set(key, { data, expires: Date.now() + CACHE_TTL });
+}
+
 // ==================== 型定義 ====================
 
 export interface CourseDistanceStats {
@@ -117,55 +133,42 @@ export async function buildRaceContext(
 
   const uniqueHorseIds = [...new Set(horses.map(h => h.horseId).filter(Boolean))];
 
-  // 独立したクエリを全て並列実行
+  // JTペアを構築
+  const jtPairs = horses
+    .filter(h => h.jockeyId && h.trainerName)
+    .map(h => ({ jockeyId: h.jockeyId, trainerName: h.trainerName }));
+  const uniqueJTPairs = jtPairs.filter((p, i, arr) =>
+    arr.findIndex(q => q.jockeyId === p.jockeyId && q.trainerName === p.trainerName) === i
+  );
+
+  // 独立したクエリを全て並列実行（バッチ版で N+1 を排除）
   const [
     courseDistStats,
-    sireResults,
-    jtResults,
-    trainerResults,
-    seasonalResults,
-    secondStartResults,
+    sireStatsMap,
+    jockeyTrainerMap,
+    trainerStatsMap,
+    seasonalMap,
+    secondStartMap,
     dynamicStdTime,
-    jockeyFormResults,
+    jockeyFormMap,
     paceProfile,
     coursePaceRows,
     horsePaceRows,
   ] = await Promise.all([
     getCourseDistanceStats(racecourseName, trackType, distance, raceDate),
-    Promise.all(uniqueSires.map(async s => [s, await getSireStats(s, raceDate)] as const)),
-    Promise.all(uniqueJTKeys.map(async key => {
-      const [jid, tname] = key.split('__');
-      return [key, await getJockeyTrainerCombo(jid, tname, raceDate)] as const;
-    })),
-    Promise.all(uniqueTrainers.map(async t => [t, await getTrainerStats(t, raceDate)] as const)),
-    Promise.all(horses.map(async h => [h.horseId, await getHorseSeasonalStats(h.horseId, raceDate)] as const)),
-    Promise.all(horses.map(async h => [h.horseId, await getSecondStartBonus(h.horseId, raceDate)] as const)),
+    getSireStatsBatch(uniqueSires, raceDate),
+    getJockeyTrainerComboBatch(uniqueJTPairs, raceDate),
+    getTrainerStatsBatch(uniqueTrainers, raceDate),
+    getHorseSeasonalStatsBatch(uniqueHorseIds, raceDate),
+    getSecondStartBonusBatch(uniqueHorseIds, raceDate),
     getDynamicStandardTimes(racecourseName, trackType, distance, '良', raceDate),
-    Promise.all(uniqueJockeys.map(async jid => [jid, await getJockeyRecentForm(jid, raceDate)] as const)),
+    getJockeyRecentFormBatch(uniqueJockeys, raceDate),
     getPaceProfile(racecourseName, trackType, distance, raceDate),
     // v7.0: コース×距離のペース分布
     getCoursePaceAvg(racecourseName, distance, raceDate),
     // v7.0: 各馬の過去レースペース履歴
     getHorsePaceHistory(uniqueHorseIds, raceDate),
   ]);
-
-  const sireStatsMap = new Map<string, SireStats>();
-  for (const [name, stats] of sireResults) { if (stats) sireStatsMap.set(name, stats); }
-
-  const jockeyTrainerMap = new Map<string, JockeyTrainerCombo>();
-  for (const [key, combo] of jtResults) { if (combo) jockeyTrainerMap.set(key, combo); }
-
-  const trainerStatsMap = new Map<string, TrainerStats>();
-  for (const [name, stats] of trainerResults) { if (stats) trainerStatsMap.set(name, stats); }
-
-  const seasonalMap = new Map<string, SeasonalStats[]>();
-  for (const [id, stats] of seasonalResults) { if (stats.length > 0) seasonalMap.set(id, stats); }
-
-  const secondStartMap = new Map<string, SecondStartBonus | null>();
-  for (const [id, bonus] of secondStartResults) { secondStartMap.set(id, bonus); }
-
-  const jockeyFormMap = new Map<string, JockeyRecentForm>();
-  for (const [jid, form] of jockeyFormResults) { if (form) jockeyFormMap.set(jid, form); }
 
   return { courseDistStats, sireStatsMap, jockeyTrainerMap, trainerStatsMap, seasonalMap, secondStartMap, dynamicStdTime, jockeyFormMap, paceProfile, courseDistPaceAvg: coursePaceRows, horsePaceMap: horsePaceRows };
 }
@@ -178,6 +181,11 @@ async function getCourseDistanceStats(
   distance: number,
   raceDate?: string,
 ): Promise<CourseDistanceStats | null> {
+  // キャッシュチェック
+  const cacheKey = `getCourseDistanceStats_${racecourseName}_${trackType}_${distance}_${raceDate || 'now'}`;
+  const cached = getCached<CourseDistanceStats | null>(cacheKey);
+  if (cached !== undefined) return cached;
+
   const tolerance = 100;
 
   const dateFilter = raceDate ? ' AND date < ?' : '';
@@ -194,7 +202,7 @@ async function getCourseDistanceStats(
   `, args);
 
   // v4: 閾値を10→3に緩和（少ないデータでも部分的に活用、重み調整はエンジン側で行う）
-  if (rows.length < 3) return null;
+  if (rows.length < 3) { setCache(cacheKey, null); return null; }
 
   // 枠番別勝率
   const postMap: Record<number, { races: number; wins: number }> = {};
@@ -237,7 +245,7 @@ async function getCourseDistanceStats(
     postPositionWinRate[Number(p)] = { races: data.races, wins: data.wins, rate };
   }
 
-  return {
+  const statsResult: CourseDistanceStats = {
     totalRaces: rows.length,
     postPositionWinRate,
     innerFrameWinRate: innerTotal > 0 ? innerWins / innerTotal : 0,
@@ -245,6 +253,8 @@ async function getCourseDistanceStats(
     avgWinLast3F: winLast3Fs.length > 0 ? winLast3Fs.reduce((a, b) => a + b, 0) / winLast3Fs.length : 0,
     frontRunnerRate: totalWins > 0 ? frontRunnerWins / totalWins : 0.5,
   };
+  setCache(cacheKey, statsResult);
+  return statsResult;
 }
 
 async function getSireStats(sireName: string, raceDate?: string): Promise<SireStats | null> {
@@ -494,6 +504,426 @@ async function getSecondStartBonus(horseId: string, raceDate?: string): Promise<
   };
 }
 
+// ==================== バッチ版統計関数 (Task 1-1) ====================
+
+/**
+ * 種牡馬統計を一括取得（N+1排除）
+ */
+async function getSireStatsBatch(sireNames: string[], raceDate?: string): Promise<Map<string, SireStats>> {
+  const result = new Map<string, SireStats>();
+  if (sireNames.length === 0) return result;
+
+  const dateFilter = raceDate ? ' AND pp.date < ?' : '';
+  const placeholders = sireNames.map(() => '?').join(',');
+  const args = [...sireNames, ...(raceDate ? [raceDate] : [])];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: any[] = await dbAll(`
+    SELECT h.father_name, pp.track_type, pp.distance, pp.track_condition, pp.position, pp.entries
+    FROM past_performances pp
+    JOIN horses h ON pp.horse_id = h.id
+    WHERE h.father_name IN (${placeholders})
+    AND pp.entries > 0${dateFilter}
+  `, args);
+
+  // 種牡馬ごとに集計
+  const bySire = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const name = r.father_name as string;
+    const arr = bySire.get(name) || [];
+    arr.push(r);
+    bySire.set(name, arr);
+  }
+
+  for (const [sireName, sireRows] of bySire) {
+    if (sireRows.length < 2) continue;
+
+    let wins = 0, places = 0;
+    const turfR = { races: 0, wins: 0 };
+    const dirtR = { races: 0, wins: 0 };
+    const sprintR = { races: 0, wins: 0 };
+    const mileR = { races: 0, wins: 0 };
+    const middleR = { races: 0, wins: 0 };
+    const stayerR = { races: 0, wins: 0 };
+    const heavyR = { races: 0, wins: 0 };
+
+    for (const r of sireRows) {
+      const isWin = r.position === 1;
+      const isPlace = r.position <= 3;
+      if (isWin) wins++;
+      if (isPlace) places++;
+
+      if (r.track_type === '芝') { turfR.races++; if (isWin) turfR.wins++; }
+      if (r.track_type === 'ダート') { dirtR.races++; if (isWin) dirtR.wins++; }
+
+      const d = r.distance as number;
+      if (d <= 1400) { sprintR.races++; if (isWin) sprintR.wins++; }
+      else if (d <= 1800) { mileR.races++; if (isWin) mileR.wins++; }
+      else if (d <= 2200) { middleR.races++; if (isWin) middleR.wins++; }
+      else { stayerR.races++; if (isWin) stayerR.wins++; }
+
+      if (r.track_condition === '重' || r.track_condition === '不良') {
+        heavyR.races++; if (isWin) heavyR.wins++;
+      }
+    }
+
+    const rate = (s: { races: number; wins: number }) => ({
+      ...s, winRate: s.races > 0 ? s.wins / s.races : 0,
+    });
+
+    result.set(sireName, {
+      sireName,
+      totalRaces: sireRows.length,
+      wins,
+      winRate: sireRows.length > 0 ? wins / sireRows.length : 0,
+      placeRate: sireRows.length > 0 ? places / sireRows.length : 0,
+      turfStats: rate(turfR),
+      dirtStats: rate(dirtR),
+      sprintStats: rate(sprintR),
+      mileStats: rate(mileR),
+      middleStats: rate(middleR),
+      stayerStats: rate(stayerR),
+      heavyStats: rate(heavyR),
+    });
+  }
+
+  return result;
+}
+
+/**
+ * 調教師統計を一括取得（N+1排除）
+ */
+async function getTrainerStatsBatch(trainerNames: string[], raceDate?: string): Promise<Map<string, TrainerStats>> {
+  const result = new Map<string, TrainerStats>();
+  if (trainerNames.length === 0) return result;
+
+  const dateFilter = raceDate ? ' AND r.date < ?' : '';
+  const placeholders = trainerNames.map(() => '?').join(',');
+  const args = [...trainerNames, ...(raceDate ? [raceDate] : [])];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: any[] = await dbAll(`
+    SELECT re.trainer_name, re.result_position, r.track_type, r.date
+    FROM race_entries re
+    JOIN races r ON r.id = re.race_id
+    WHERE r.status = '結果確定'
+      AND re.trainer_name IN (${placeholders})
+      AND re.result_position IS NOT NULL${dateFilter}
+  `, args);
+
+  // 調教師ごとに集計
+  const byTrainer = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const name = r.trainer_name as string;
+    const arr = byTrainer.get(name) || [];
+    arr.push(r);
+    byTrainer.set(name, arr);
+  }
+
+  for (const [trainerName, trainerRows] of byTrainer) {
+    if (trainerRows.length < 5) continue;
+
+    let wins = 0, places = 0;
+    let turfWins = 0, turfRaces = 0;
+    let dirtWins = 0, dirtRaces = 0;
+    let recentWins = 0, recentRaces = 0;
+
+    const baseDate = raceDate ? new Date(raceDate) : new Date();
+    const oneYearAgo = new Date(baseDate);
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+    const oneYearAgoStr = oneYearAgo.toISOString().slice(0, 10);
+
+    for (const r of trainerRows) {
+      const isWin = r.result_position === 1;
+      const isPlace = r.result_position <= 3;
+      if (isWin) wins++;
+      if (isPlace) places++;
+
+      if (r.track_type === '芝') { turfRaces++; if (isWin) turfWins++; }
+      if (r.track_type === 'ダート') { dirtRaces++; if (isWin) dirtWins++; }
+
+      if (r.date >= oneYearAgoStr) {
+        recentRaces++;
+        if (isWin) recentWins++;
+      }
+    }
+
+    result.set(trainerName, {
+      trainerName,
+      totalRaces: trainerRows.length,
+      wins,
+      places,
+      winRate: wins / trainerRows.length,
+      placeRate: places / trainerRows.length,
+      turfWinRate: turfRaces > 0 ? turfWins / turfRaces : 0,
+      dirtWinRate: dirtRaces > 0 ? dirtWins / dirtRaces : 0,
+      recentWinRate: recentRaces > 0 ? recentWins / recentRaces : 0,
+      recentRaces,
+    });
+  }
+
+  return result;
+}
+
+/**
+ * 馬の季節別成績を一括取得（N+1排除）
+ */
+async function getHorseSeasonalStatsBatch(horseIds: string[], raceDate?: string): Promise<Map<string, SeasonalStats[]>> {
+  const result = new Map<string, SeasonalStats[]>();
+  if (horseIds.length === 0) return result;
+
+  const dateFilter = raceDate ? ' AND date < ?' : '';
+  const placeholders = horseIds.map(() => '?').join(',');
+  const args = [...horseIds, ...(raceDate ? [raceDate] : [])];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: any[] = await dbAll(`
+    SELECT
+      horse_id,
+      CAST(substr(date, 6, 2) AS INTEGER) as month,
+      position, entries
+    FROM past_performances
+    WHERE horse_id IN (${placeholders})
+    AND date IS NOT NULL
+    AND entries > 0${dateFilter}
+  `, args);
+
+  if (rows.length < 1) return result;
+
+  // 馬×月ごとに集計
+  const byHorse = new Map<string, Map<number, { races: number; wins: number; places: number }>>();
+  for (const r of rows) {
+    const hid = r.horse_id as string;
+    const m = r.month as number;
+    if (m < 1 || m > 12) continue;
+
+    if (!byHorse.has(hid)) byHorse.set(hid, new Map());
+    const monthMap = byHorse.get(hid)!;
+    if (!monthMap.has(m)) monthMap.set(m, { races: 0, wins: 0, places: 0 });
+    const data = monthMap.get(m)!;
+    data.races++;
+    if (r.position === 1) data.wins++;
+    if (r.position <= 3) data.places++;
+  }
+
+  for (const [hid, monthMap] of byHorse) {
+    const stats: SeasonalStats[] = [];
+    for (const [m, d] of monthMap) {
+      stats.push({
+        month: m,
+        races: d.races,
+        wins: d.wins,
+        places: d.places,
+        winRate: d.races > 0 ? d.wins / d.races : 0,
+        placeRate: d.races > 0 ? d.places / d.races : 0,
+      });
+    }
+    if (stats.length > 0) result.set(hid, stats);
+  }
+
+  return result;
+}
+
+/**
+ * 叩き良化パターンを一括取得（N+1排除）
+ */
+async function getSecondStartBonusBatch(horseIds: string[], raceDate?: string): Promise<Map<string, SecondStartBonus | null>> {
+  const result = new Map<string, SecondStartBonus | null>();
+  if (horseIds.length === 0) return result;
+
+  const dateFilter = raceDate ? ' AND date < ?' : '';
+  const placeholders = horseIds.map(() => '?').join(',');
+  const args = [...horseIds, ...(raceDate ? [raceDate] : [])];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: any[] = await dbAll(`
+    SELECT horse_id, date, position, entries
+    FROM past_performances
+    WHERE horse_id IN (${placeholders})
+    AND entries > 0${dateFilter}
+    ORDER BY horse_id, date ASC
+  `, args);
+
+  // 馬ごとにグループ化
+  const byHorse = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const hid = r.horse_id as string;
+    const arr = byHorse.get(hid) || [];
+    arr.push(r);
+    byHorse.set(hid, arr);
+  }
+
+  // 各馬のIDを結果マップに初期化
+  for (const hid of horseIds) {
+    result.set(hid, null);
+  }
+
+  for (const [hid, horseRows] of byHorse) {
+    if (horseRows.length < 4) continue;
+
+    const firstStarts: number[] = [];
+    const secondStarts: number[] = [];
+
+    for (let i = 1; i < horseRows.length; i++) {
+      const prev = new Date(horseRows[i - 1].date);
+      const curr = new Date(horseRows[i].date);
+      const daysBetween = (curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24);
+
+      if (daysBetween >= 60) {
+        const entries = horseRows[i].entries || 16;
+        firstStarts.push(horseRows[i].position / entries);
+        if (i + 1 < horseRows.length) {
+          const nextEntries = horseRows[i + 1].entries || 16;
+          secondStarts.push(horseRows[i + 1].position / nextEntries);
+        }
+      }
+    }
+
+    if (firstStarts.length < 2 || secondStarts.length < 2) continue;
+
+    const avg = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / arr.length;
+    const firstAvg = avg(firstStarts);
+    const secondAvg = avg(secondStarts);
+
+    result.set(hid, {
+      firstStartAvgPos: firstAvg,
+      secondStartAvgPos: secondAvg,
+      improvement: firstAvg - secondAvg,
+      sampleSize: Math.min(firstStarts.length, secondStarts.length),
+    });
+  }
+
+  return result;
+}
+
+/**
+ * 騎手直近フォームを一括取得（N+1排除）
+ */
+async function getJockeyRecentFormBatch(jockeyIds: string[], raceDate?: string): Promise<Map<string, JockeyRecentForm>> {
+  const result = new Map<string, JockeyRecentForm>();
+  if (jockeyIds.length === 0) return result;
+
+  const baseDate = raceDate ? new Date(raceDate) : new Date();
+  const d30 = new Date(baseDate);
+  d30.setDate(d30.getDate() - 30);
+  const d30Str = d30.toISOString().slice(0, 10);
+  const d365 = new Date(baseDate);
+  d365.setFullYear(d365.getFullYear() - 1);
+  const d365Str = d365.toISOString().slice(0, 10);
+
+  const dateFilter = raceDate ? ' AND r.date < ?' : '';
+  const placeholders = jockeyIds.map(() => '?').join(',');
+  const args = [...jockeyIds, ...(raceDate ? [raceDate] : [])];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: any[] = await dbAll(`
+    SELECT re.jockey_id, re.result_position, r.date
+    FROM race_entries re
+    JOIN races r ON r.id = re.race_id
+    WHERE re.jockey_id IN (${placeholders})
+    AND r.status = '結果確定'
+    AND re.result_position IS NOT NULL${dateFilter}
+  `, args);
+
+  // 騎手ごとに集計
+  const byJockey = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const jid = r.jockey_id as string;
+    const arr = byJockey.get(jid) || [];
+    arr.push(r);
+    byJockey.set(jid, arr);
+  }
+
+  for (const [jockeyId, jockeyRows] of byJockey) {
+    if (jockeyRows.length < 5) continue;
+
+    let r30 = 0, w30 = 0, rYear = 0, wYear = 0;
+    for (const r of jockeyRows) {
+      if (r.date >= d30Str) { r30++; if (r.result_position === 1) w30++; }
+      if (r.date >= d365Str) { rYear++; if (r.result_position === 1) wYear++; }
+    }
+
+    const careerWinRate = jockeyRows.filter(r => r.result_position === 1).length / jockeyRows.length;
+    const yearWinRate = rYear > 0 ? wYear / rYear : careerWinRate;
+    const recent30DayWinRate = r30 >= 3 ? w30 / r30 : yearWinRate;
+
+    let trend: 'improving' | 'stable' | 'declining' = 'stable';
+    if (r30 >= 5) {
+      if (recent30DayWinRate > yearWinRate * 1.3) trend = 'improving';
+      else if (recent30DayWinRate < yearWinRate * 0.7) trend = 'declining';
+    }
+
+    result.set(jockeyId, {
+      jockeyId,
+      recent30DayWinRate,
+      recent30DayRaces: r30,
+      yearWinRate,
+      yearRaces: rYear,
+      careerWinRate,
+      trend,
+    });
+  }
+
+  return result;
+}
+
+/**
+ * 騎手×調教師コンボを一括取得（N+1排除）
+ * ペアごとにクエリするのではなく、全騎手の結果を一括取得しJSでフィルタ
+ */
+async function getJockeyTrainerComboBatch(
+  pairs: { jockeyId: string; trainerName: string }[],
+  raceDate?: string,
+): Promise<Map<string, JockeyTrainerCombo>> {
+  const result = new Map<string, JockeyTrainerCombo>();
+  if (pairs.length === 0) return result;
+
+  const uniqueJockeyIds = [...new Set(pairs.map(p => p.jockeyId))];
+  const dateFilter = raceDate ? ' AND r.date < ?' : '';
+  const placeholders = uniqueJockeyIds.map(() => '?').join(',');
+  const args = [...uniqueJockeyIds, ...(raceDate ? [raceDate] : [])];
+
+  // 全騎手の結果を一括取得（trainer_nameも含む）
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: any[] = await dbAll(`
+    SELECT re.jockey_id, h.trainer_name, re.result_position
+    FROM race_entries re
+    JOIN races r ON r.id = re.race_id
+    JOIN horses h ON re.horse_id = h.id
+    WHERE re.jockey_id IN (${placeholders})
+    AND r.status = '結果確定'
+    AND re.result_position IS NOT NULL${dateFilter}
+  `, args);
+
+  // 騎手×調教師ペアごとに集計
+  const pairData = new Map<string, { total: number; wins: number; places: number }>();
+  for (const r of rows) {
+    const key = `${r.jockey_id}__${r.trainer_name}`;
+    if (!pairData.has(key)) pairData.set(key, { total: 0, wins: 0, places: 0 });
+    const data = pairData.get(key)!;
+    data.total++;
+    if (r.result_position === 1) data.wins++;
+    if (r.result_position <= 3) data.places++;
+  }
+
+  // 対象ペアの結果を構築
+  for (const pair of pairs) {
+    const key = `${pair.jockeyId}__${pair.trainerName}`;
+    const data = pairData.get(key);
+    if (!data || data.total < 1) continue;
+
+    result.set(key, {
+      totalRaces: data.total,
+      wins: data.wins,
+      places: data.places,
+      winRate: data.wins / data.total,
+      placeRate: data.places / data.total,
+    });
+  }
+
+  return result;
+}
+
 // ==================== ペースプロファイル ====================
 
 /**
@@ -710,6 +1140,11 @@ export async function getDynamicStandardTimes(
   trackCondition: string,
   raceDate?: string,
 ): Promise<DynamicStandardTime | null> {
+  // キャッシュチェック
+  const cacheKey = `getDynamicStandardTimes_${racecourseName}_${trackType}_${distance}_${raceDate || 'now'}`;
+  const cached = getCached<DynamicStandardTime | null>(cacheKey);
+  if (cached !== undefined) return cached;
+
   const tolerance = 50; // ±50m（より厳密にマッチ）
   const condGroup = (trackCondition === '重' || trackCondition === '不良')
     ? ['重', '不良']
@@ -748,12 +1183,16 @@ export async function getDynamicStandardTimes(
       LIMIT 300
     `, [trackType, distance - tolerance, distance + tolerance, ...condGroup, ...dateArgs]);
 
-    if (fallbackRows.length < 5) return null;
+    if (fallbackRows.length < 5) { setCache(cacheKey, null); return null; }
 
-    return buildTimeStats(fallbackRows, '', trackType, distance, trackCondition);
+    const fallbackResult = buildTimeStats(fallbackRows, '', trackType, distance, trackCondition);
+    setCache(cacheKey, fallbackResult);
+    return fallbackResult;
   }
 
-  return buildTimeStats(rows, racecourseName, trackType, distance, trackCondition);
+  const stdTimeResult = buildTimeStats(rows, racecourseName, trackType, distance, trackCondition);
+  setCache(cacheKey, stdTimeResult);
+  return stdTimeResult;
 }
 
 function buildTimeStats(
@@ -877,6 +1316,11 @@ async function getCoursePaceAvg(
   distance: number,
   raceDate?: string,
 ): Promise<number> {
+  // キャッシュチェック
+  const cacheKey = `getCoursePaceAvg_${racecourseName}_${distance}_${raceDate || 'now'}`;
+  const cached = getCached<number>(cacheKey);
+  if (cached !== undefined) return cached;
+
   const tolerance = 200;
   const dateFilter = raceDate ? ' AND date < ?' : '';
   const args = [racecourseName, distance - tolerance, distance + tolerance, ...(raceDate ? [raceDate] : [])];
@@ -891,7 +1335,7 @@ async function getCoursePaceAvg(
     GROUP BY pace_type
   `, args);
 
-  if (rows.length === 0) return 0.5;
+  if (rows.length === 0) { setCache(cacheKey, 0.5); return 0.5; }
 
   let total = 0;
   let sum = 0;
@@ -902,7 +1346,9 @@ async function getCoursePaceAvg(
     sum += val * cnt;
   }
 
-  return total > 0 ? sum / total : 0.5;
+  const paceAvg = total > 0 ? sum / total : 0.5;
+  setCache(cacheKey, paceAvg);
+  return paceAvg;
 }
 
 /**

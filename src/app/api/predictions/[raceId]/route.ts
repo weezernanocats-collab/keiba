@@ -182,17 +182,9 @@ export async function GET(
         const actualTop3 = actualTop3Detailed.map(h => h.horseNumber);
         const actualWinner = actualTop3[0];
 
-        // 実オッズ取得（単勝・複勝のみ）
-        const oddsRows = await dbAll<{
-          bet_type: string; horse_number1: number;
-          odds: number; min_odds: number | null;
-        }>(
-          `SELECT bet_type, horse_number1, odds, min_odds
-           FROM odds WHERE race_id = ? AND bet_type IN ('単勝', '複勝')`,
-          [raceId],
-        );
+        // 実オッズ取得（liveOddsRowsを再利用、重複クエリ排除）
         const oddsMap = new Map<string, { odds: number; minOdds: number | null }>();
-        for (const o of oddsRows) {
+        for (const o of liveOddsRows) {
           oddsMap.set(`${o.bet_type}-${o.horse_number1}`, { odds: o.odds, minOdds: o.min_odds });
         }
 

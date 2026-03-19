@@ -27,6 +27,7 @@ import {
   upsertOdds,
   upsertRaceEntryOdds,
   insertOddsSnapshot,
+  batchUpsertOddsForRace,
   upsertHorse,
   insertPastPerformance,
   getHorsePastPerformances,
@@ -345,6 +346,23 @@ async function executeMorningFetch(date: string): Promise<void> {
     for (const d of raceDetails) {
       for (const e of d.entries) horseIds.add(e.horseId);
     }
+
+    // バッチで全馬の既存戦績キーを一括取得（N+1排除）
+    const allHorseIds = [...horseIds];
+    const existingKeysMap = new Map<string, Set<string>>();
+    if (allHorseIds.length > 0) {
+      const placeholders = allHorseIds.map(() => '?').join(',');
+      const existingRows = await dbAll<{ horse_id: string; date: string; race_name: string }>(
+        `SELECT horse_id, date, race_name FROM past_performances WHERE horse_id IN (${placeholders})`,
+        allHorseIds,
+      );
+      for (const row of existingRows) {
+        const key = `${row.date}_${row.race_name}`;
+        if (!existingKeysMap.has(row.horse_id)) existingKeysMap.set(row.horse_id, new Set());
+        existingKeysMap.get(row.horse_id)!.add(key);
+      }
+    }
+
     let horseCount = 0;
     let newPerfCount = 0;
     for (const hid of horseIds) {
@@ -357,8 +375,7 @@ async function executeMorningFetch(date: string): Promise<void> {
             fatherName: horse.fatherName, motherName: horse.motherName,
             trainerName: horse.trainerName, ownerName: horse.ownerName,
           });
-          const existingPerfs = await getHorsePastPerformances(horse.id, undefined, 200);
-          const existingKeys = new Set(existingPerfs.map((p: PastPerformance) => `${p.date}_${p.raceName}`));
+          const existingKeys = existingKeysMap.get(horse.id) || new Set<string>();
           for (const perf of horse.pastPerformances.slice(0, 50)) {
             const key = `${perf.date}_${perf.raceName}`;
             if (existingKeys.has(key)) continue;
@@ -563,15 +580,13 @@ async function executeOddsFetch(date: string): Promise<void> {
       try {
         const odds = await scrapeOdds(race.id);
         const snapshotTime = new Date().toISOString();
-        for (const w of odds.win) {
-          await upsertOdds(race.id, '単勝', [w.horseNumber], w.odds);
-          await upsertRaceEntryOdds(race.id, w.horseNumber, w.odds, 0);
-          // 時系列スナップショット保存
-          await insertOddsSnapshot(race.id, w.horseNumber, w.odds, snapshotTime);
-        }
-        for (const p of odds.place) {
-          await upsertOdds(race.id, '複勝', [p.horseNumber], p.minOdds, p.minOdds, p.maxOdds);
-        }
+        // バッチ保存（1レース分のオッズを一括でDB書き込み）
+        await batchUpsertOddsForRace(
+          race.id,
+          odds.win.map(w => ({ horseNumber: w.horseNumber, odds: w.odds })),
+          odds.place.map(p => ({ horseNumber: p.horseNumber, minOdds: p.minOdds, maxOdds: p.maxOdds })),
+          snapshotTime,
+        );
         count++;
       } catch (error) {
         addLog('オッズ取得失敗', `${race.id}: ${errMsg(error)}`, false);

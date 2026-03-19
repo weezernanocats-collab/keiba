@@ -61,6 +61,7 @@ export default function SyncStatusBanner() {
     // 同期実行中は5秒、通常時は30秒でポーリング
     const interval = syncInfo?.isRunning ? 5000 : 30000;
     const id = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
       fetchSyncStatus();
       setNow(Date.now());
     }, interval);
@@ -68,9 +69,17 @@ export default function SyncStatusBanner() {
     const initId = setTimeout(() => {
       fetchSyncStatus();
     }, 0);
+    // タブが再表示されたら即座にフェッチ
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchSyncStatus();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       clearInterval(id);
       clearTimeout(initId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [fetchSyncStatus, syncInfo?.isRunning]);
 

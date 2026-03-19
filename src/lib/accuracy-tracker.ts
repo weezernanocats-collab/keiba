@@ -825,41 +825,51 @@ export async function calibrateCategoryWeights(): Promise<CategoryCalibrationRes
 // ==================== コンセプトドリフト検出 ====================
 
 /**
- * 直近30レースのROIと全体ROIを比較し、コンセプトドリフトを検出する。
- * 直近ROIが全体ROIの70%以下に低下した場合にアラートを発する。
+ * 直近30レースのROIと基準ROIを比較し、コンセプトドリフトを検出する。
+ * 直近を基準から除外して比較。ROIに加え勝率も監視する。
  */
 export async function checkConceptDrift(): Promise<{
   isDrifting: boolean;
   recentROI: number;
   overallROI: number;
   ratio: number;
+  recentWinRate: number;
+  baselineWinRate: number;
   alert: string | null;
 }> {
-  const recent = await dbAll<{ bet_roi: number }>(`
-    SELECT bet_roi FROM prediction_results
+  const allRows = await dbAll<{ bet_roi: number; win_hit: number }>(`
+    SELECT bet_roi, win_hit FROM prediction_results
     WHERE bet_roi IS NOT NULL
-    ORDER BY evaluated_at DESC LIMIT 30
+    ORDER BY evaluated_at DESC
   `);
 
-  const overall = await dbAll<{ bet_roi: number }>(`
-    SELECT bet_roi FROM prediction_results
-    WHERE bet_roi IS NOT NULL
-  `);
+  if (allRows.length < 50) {
+    return { isDrifting: false, recentROI: 0, overallROI: 0, ratio: 1, recentWinRate: 0, baselineWinRate: 0, alert: null };
+  }
 
-  if (recent.length < 10 || overall.length < 50) {
-    return { isDrifting: false, recentROI: 0, overallROI: 0, ratio: 1, alert: null };
+  const recentCount = 30;
+  const recent = allRows.slice(0, recentCount);
+  const baseline = allRows.slice(recentCount); // Exclude recent from baseline
+
+  if (baseline.length < 20) {
+    return { isDrifting: false, recentROI: 0, overallROI: 0, ratio: 1, recentWinRate: 0, baselineWinRate: 0, alert: null };
   }
 
   const recentROI = recent.reduce((s, r) => s + (r.bet_roi || 0), 0) / recent.length;
-  const overallROI = overall.reduce((s, r) => s + (r.bet_roi || 0), 0) / overall.length;
+  const overallROI = baseline.reduce((s, r) => s + (r.bet_roi || 0), 0) / baseline.length;
   const ratio = overallROI > 0 ? recentROI / overallROI : 1;
 
-  const isDrifting = ratio < 0.7;
+  const recentWinRate = recent.filter(r => r.win_hit === 1).length / recent.length;
+  const baselineWinRate = baseline.filter(r => r.win_hit === 1).length / baseline.length;
+  const winRateRatio = baselineWinRate > 0 ? recentWinRate / baselineWinRate : 1;
+
+  // Drift if EITHER ROI drops to 70% of baseline OR win rate drops to 70%
+  const isDrifting = ratio < 0.7 || winRateRatio < 0.7;
   const alert = isDrifting
-    ? `コンセプトドリフト検出: 直近30レースROI (${(recentROI * 100).toFixed(1)}%) が全体 (${(overallROI * 100).toFixed(1)}%) の${(ratio * 100).toFixed(0)}%に低下。再学習を推奨。`
+    ? `コンセプトドリフト検出: 直近${recentCount}レース ROI=${(recentROI * 100).toFixed(1)}% (基準${(overallROI * 100).toFixed(1)}%の${(ratio * 100).toFixed(0)}%), 勝率=${(recentWinRate * 100).toFixed(1)}% (基準${(baselineWinRate * 100).toFixed(1)}%の${(winRateRatio * 100).toFixed(0)}%)。再学習を推奨。`
     : null;
 
-  return { isDrifting, recentROI, overallROI, ratio, alert };
+  return { isDrifting, recentROI, overallROI, ratio, recentWinRate, baselineWinRate, alert };
 }
 
 // ==================== bets_json オッズ修復 ====================

@@ -20,14 +20,18 @@ export const maxDuration = 60;
 export async function GET(request: NextRequest) {
   // Vercel Cron からのリクエスト認証
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = request.headers.get('authorization');
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json(
-        { error: '認証エラー: 無効なCRON_SECRET' },
-        { status: 401 }
-      );
-    }
+  if (!cronSecret) {
+    return NextResponse.json(
+      { error: '認証エラー: CRON_SECRET未設定' },
+      { status: 401 }
+    );
+  }
+  const authHeader = request.headers.get('authorization');
+  if (authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json(
+      { error: '認証エラー: 無効なCRON_SECRET' },
+      { status: 401 }
+    );
   }
 
   try {
