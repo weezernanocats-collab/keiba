@@ -58,6 +58,7 @@ import { applyEnhancedPaceBonus } from './pace-analyzer';
 import { calcMarginScore } from './margin-score';
 import { calcWeatherScore } from './weather-score';
 import { applyVenueMultipliers } from './racecourse-profiles';
+import { calcTimeFeatures, calcPaceFeatures, calcL3fRelative } from './time-features';
 
 // v6.0: ML特徴量用ヘルパー
 function marginToSeconds(margin: string | undefined): number {
@@ -322,8 +323,6 @@ export async function generatePrediction(
           trainerCondWinRate: input?.trainerCondWinRate,
           trainerGradeWinRate: input?.trainerGradeWinRate,
           // v7.0: ラップタイム基盤特徴量
-          horsePacePreference: ctx.horsePaceMap.get(sh.entry.horseId)?.preference,
-          horseHaiPaceRate: ctx.horsePaceMap.get(sh.entry.horseId)?.haiRate,
           courseDistPaceAvg: ctx.courseDistPaceAvg,
           // v8.0: 直近フォーム + キャリア特徴量
           lastRacePosition: pp.length > 0 ? pp[0].position : 9,
@@ -331,20 +330,6 @@ export async function generatePrediction(
             ? pp.slice(0, 3).filter(p => p.position === 1).length / Math.min(pp.length, 3) : 0,
           last3PlaceRate: pp.length > 0
             ? pp.slice(0, 3).filter(p => p.position <= 3).length / Math.min(pp.length, 3) : 0,
-          // v9.0: classChange 推論修正（前走グレードと今走グレードの差）
-          classChange: (() => {
-            if (pp.length === 0) return 0;
-            const prevGrade = GRADE_ENCODE[pp[0].grade ?? ''] ?? 3;
-            const curGrade = GRADE_ENCODE[grade ?? ''] ?? 3;
-            return curGrade - prevGrade;
-          })(),
-          // v9.0: trackTypeChange 推論修正（過去走データから計算）
-          trackTypeChange: (() => {
-            if (pp.length === 0) return 0;
-            const prevTrackType = pp[0].trackType;
-            return (prevTrackType === '芝' && trackType !== '芝') ||
-                   (prevTrackType !== '芝' && trackType === '芝') ? 1 : 0;
-          })(),
           careerWinRate: pp.length > 0
             ? pp.filter(p => p.position === 1).length / pp.length : 0,
           relativeOdds: (() => {
@@ -375,7 +360,31 @@ export async function generatePrediction(
             const avg = placed.reduce((s, p) => s + p.odds, 0) / placed.length;
             return Math.log(avg > 0 ? avg : 10);
           })(),
-          totalEarningsLog: Math.log1p(input?.totalEarnings ?? 0),
+          // v10.0: 走破タイム標準化 + ペース + L3F
+          ...(() => {
+            const ppForTime = pp.map(p => ({
+              time: p.time ?? null,
+              trackType: p.trackType,
+              distance: p.distance,
+              trackCondition: p.trackCondition ?? null,
+              position: p.position,
+            }));
+            return calcTimeFeatures(ppForTime);
+          })(),
+          ...(() => {
+            const ppForPace = pp.map(p => ({
+              cornerPositions: p.cornerPositions ?? null,
+              entries: p.entries,
+              position: p.position,
+            }));
+            return calcPaceFeatures(ppForPace);
+          })(),
+          l3fRelativeAvg: calcL3fRelative(pp.map(p => ({
+            lastThreeFurlongs: p.lastThreeFurlongs ?? null,
+            distance: p.distance,
+            trackType: p.trackType,
+            position: p.position,
+          }))),
           // Phase 3 新特徴量 (#12-#16)
           bodyWeightTrend,
           distanceChange,
@@ -600,9 +609,9 @@ function scoreHorse(
   scores.recentForm = calcRecentFormScoreV5(pp);
   const weightTrend = calcWeightTrendBonus(pp);
   scores.recentForm = Math.max(0, Math.min(100, scores.recentForm + weightTrend.bonus));
-  scores._weightStability = weightTrend.stability;
-  scores._weightTrendSlope = weightTrend.trendSlope;
-  scores._weightOptimalDelta = weightTrend.optimalDelta;
+  scores.weightStability = weightTrend.stability;
+  scores.weightTrendSlope = weightTrend.trendSlope;
+  scores.weightOptimalDelta = weightTrend.optimalDelta;
   if (weightTrend.bonus >= 3) reasons.push(`馬体重安定・好調（${weightTrend.signal}）`);
   else if (weightTrend.bonus <= -3) reasons.push(`馬体重に不安（${weightTrend.signal}）`);
   if (scores.recentForm >= 75) reasons.push(`直近成績が優秀（スコア${Math.round(scores.recentForm)}）`);

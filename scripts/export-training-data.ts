@@ -24,6 +24,7 @@ for (const line of envContent.split('\n')) {
 }
 
 import { createClient } from '@libsql/client';
+import { calcTimeFeatures, calcPaceFeatures, calcL3fRelative } from '../src/lib/time-features';
 
 const db = createClient({
   url: process.env.TURSO_DATABASE_URL!,
@@ -68,16 +69,12 @@ const FEATURE_NAMES = [
   'rotationXform',            // ローテーション×直近成績
   'conditionXsire',           // 馬場状態×血統適性
   // v7.0: ラップタイム基盤特徴量
-  'horsePacePreference',      // 馬のペース適性 (ハイ=1, ミドル=0.5, スロー=0)
-  'horseHaiPaceRate',         // ハイペース経験率
   'courseDistPaceAvg',        // コース×距離の典型ペース
   'paceStyleMatch',           // 脚質×ペース相性 (追込×ハイ=高, 逃げ×スロー=高)
   // v8.0: 直近フォーム + キャリア特徴量
   'lastRacePosition',        // 前走着順 (1-18, デフォルト9)
   'last3WinRate',             // 直近3走の勝率 (0-1)
   'last3PlaceRate',           // 直近3走の複勝率 (0-1)
-  'classChange',              // クラス変動 (今走グレード - 前走グレード)
-  'trackTypeChange',          // 芝↔ダート替わり (0 or 1)
   'careerWinRate',            // 通算勝率 (0-1)
   'relativeOdds',             // レース内相対オッズ (log(odds/中央値))
   'winStreak',                // 連勝数 (0-N)
@@ -85,7 +82,16 @@ const FEATURE_NAMES = [
   'relativePosition',         // 相対着順 (前走着順/前走出走頭数)
   'upsetRate',                // 穴馬力 (人気5番以下好走率)
   'avgPastOdds',              // 好走時平均オッズ (log変換)
-  'totalEarningsLog',         // 通算賞金 (log1p変換)
+  // v10.0: 走破タイム標準化 + ペース再設計 + L3F + weight復活
+  'standardTimeDev',          // 走破タイム標準化偏差（直近5走加重平均）
+  'bestTimeDev',              // 過去最高標準化タイム偏差
+  'timeConsistency',          // タイム偏差の標準偏差（安定性の逆数）
+  'earlyPositionRatio',       // 第1コーナー相対位置（0=先頭, 1=最後方）
+  'positionGainAvg',          // コーナー位置上昇量（正=差してくる）
+  'l3fRelativeAvg',           // 上がり3F相対速さ（正=速い）
+  'weightStability',          // 馬体重安定性
+  'weightTrendSlope',         // 馬体重トレンド傾き
+  'weightOptimalDelta',       // 最適体重との差
   // Phase 3: 新特徴量 (#12-#17)
   'bodyWeightTrend',          // #12: 馬体重トレンド（3-5走移動平均傾き）
   'distanceChange',           // #13: 前走比距離変化（連続値）
@@ -193,6 +199,10 @@ interface PastPerfRow {
   weight: number | null;
   racecourse_name: string | null;
   distance: number | null;
+  // v10.0: 走破タイム + L3F + 馬場
+  time: string | null;
+  last_three_furlongs: string | null;
+  track_condition: string | null;
 }
 
 async function main() {
@@ -228,6 +238,7 @@ async function main() {
       SELECT pp.horse_id, pp.race_id, pp.date, pp.position, pp.jockey_name, pp.margin, pp.corner_positions,
              pp.entries, pp.odds, pp.popularity, pp.race_name, pp.prize,
              pp.weight, pp.racecourse_name, pp.distance,
+             pp.time, pp.last_three_furlongs, pp.track_condition,
              r.grade, COALESCE(r.track_type, pp.track_type) as track_type
       FROM past_performances pp
       LEFT JOIN races r ON r.id = pp.race_id
@@ -634,19 +645,6 @@ async function main() {
       const trainerGradeWR = (entry.trainer_name && isGrade)
         ? (tgStats.get(`${entry.trainer_name}__grade`) ?? 0.08) : 0.08;
 
-      // === v7.0 ラップタイム基盤特徴量 ===
-      // 馬の過去レースのペース傾向
-      let horsePacePreference = 0.5; // デフォルト: ミドル
-      let horseHaiPaceRate = 0.0;
-      const perfRaceIds = horsePerfs
-        .filter(pp => pp.race_id)
-        .map(pp => ({ raceId: pp.race_id!, pace: racePaceMap.get(pp.race_id!) }))
-        .filter(x => x.pace !== undefined);
-      if (perfRaceIds.length > 0) {
-        horsePacePreference = perfRaceIds.reduce((s, x) => s + x.pace!, 0) / perfRaceIds.length;
-        horseHaiPaceRate = perfRaceIds.filter(x => x.pace! >= 0.9).length / perfRaceIds.length;
-      }
-
       // コース×距離の典型ペース
       const cpKey = `${pred.racecourse_name}__${distBucket}`;
       const courseDistPaceAvg = cpStats.get(cpKey) ?? 0.5;
@@ -666,29 +664,6 @@ async function main() {
         ? last3.filter(pp => pp.position === 1).length / last3.length : 0;
       const last3PlaceRate = last3.length > 0
         ? last3.filter(pp => pp.position <= 3).length / last3.length : 0;
-
-      // クラス変動 (今走グレード - 前走グレード)
-      // LEFT JOIN失敗時はrace_nameからグレードを推定
-      let classChange = 0;
-      if (horsePerfs.length > 0) {
-        const prevGradeStr = horsePerfs[0].grade ?? inferGradeFromRaceName(horsePerfs[0].race_name);
-        if (prevGradeStr) {
-          const prevGrade = GRADE_ENCODE[prevGradeStr] ?? 3;
-          const curGrade = GRADE_ENCODE[pred.grade ?? ''] ?? 3;
-          classChange = curGrade - prevGrade;
-        }
-      }
-
-      // 芝↔ダート替わり
-      let trackTypeChange = 0;
-      if (horsePerfs.length > 0 && horsePerfs[0].track_type) {
-        const prevTrackType = horsePerfs[0].track_type;
-        // 前走と今走のトラックタイプが異なる場合
-        if ((prevTrackType === '芝' && pred.track_type !== '芝') ||
-            (prevTrackType !== '芝' && pred.track_type === '芝')) {
-          trackTypeChange = 1;
-        }
-      }
 
       // 通算勝率
       const careerWinRate = horsePerfs.length > 0
@@ -727,10 +702,49 @@ async function main() {
         ? Math.log(placedPerfsWithOdds.reduce((s, pp) => s + pp.odds!, 0) / placedPerfsWithOdds.length)
         : Math.log(10);
 
-      // 通算賞金 (log1p変換)
-      // horses.total_earningsは未取得(全0)のため、past_performancesのprize合計で代替
-      const totalEarnings = horsePerfs.reduce((s, pp) => s + (pp.prize ?? 0), 0);
-      const totalEarningsLog = Math.log1p(totalEarnings);
+      // === v10.0 走破タイム標準化 + ペース再設計 + L3F ===
+      const ppForTimeFeatures = horsePerfs.map(pp => ({
+        time: pp.time,
+        trackType: pp.track_type || 'ダート',
+        distance: pp.distance || 0,
+        trackCondition: pp.track_condition || '良',
+        position: pp.position,
+      }));
+      const timeFeats = calcTimeFeatures(ppForTimeFeatures);
+
+      const ppForPaceFeatures = horsePerfs.map(pp => ({
+        cornerPositions: pp.corner_positions,
+        entries: pp.entries || 0,
+        position: pp.position,
+      }));
+      const paceFeats = calcPaceFeatures(ppForPaceFeatures);
+
+      const l3fRelativeAvg = calcL3fRelative(horsePerfs.map(pp => ({
+        lastThreeFurlongs: pp.last_three_furlongs,
+        distance: pp.distance || 0,
+        trackType: pp.track_type || 'ダート',
+        position: pp.position,
+      })));
+
+      // weight特徴量（weight-trend.tsのロジック簡易版）
+      const weightsArr = horsePerfs.slice(0, 10).map(pp => pp.weight).filter((w): w is number => w != null && w > 0);
+      let weightStability = 50;
+      let weightTrendSlope = 0;
+      let weightOptimalDelta = 0;
+      if (weightsArr.length >= 2) {
+        const mean = weightsArr.reduce((s, w) => s + w, 0) / weightsArr.length;
+        const variance = weightsArr.reduce((s, w) => s + (w - mean) ** 2, 0) / weightsArr.length;
+        const stdDev = Math.sqrt(variance);
+        weightStability = Math.max(0, Math.min(100, 100 - stdDev * 10));
+        // 傾き: 直近 - 最古
+        weightTrendSlope = (weightsArr[0] - weightsArr[weightsArr.length - 1]) / weightsArr.length;
+        // 最適体重との差: ベストレース時体重 vs 現在
+        const bestPerf = horsePerfs.slice(0, 10).filter(pp => pp.position <= 3 && pp.weight != null && pp.weight > 0);
+        if (bestPerf.length > 0) {
+          const optWeight = bestPerf.reduce((s, pp) => s + pp.weight!, 0) / bestPerf.length;
+          weightOptimalDelta = weightsArr[0] - optWeight;
+        }
+      }
 
       // 交互作用特徴量
       const weightXspeed = (entry.handicap_weight ?? 54) * ((scores.speedRating ?? 50) / 100);
@@ -785,16 +799,12 @@ async function main() {
           case 'rotationXform': return rotationXform;
           case 'conditionXsire': return conditionXsire;
           // v7.0 ラップタイム基盤
-          case 'horsePacePreference': return horsePacePreference;
-          case 'horseHaiPaceRate': return horseHaiPaceRate;
           case 'courseDistPaceAvg': return courseDistPaceAvg;
           case 'paceStyleMatch': return paceStyleMatch;
           // v8.0 直近フォーム + キャリア特徴量
           case 'lastRacePosition': return lastRacePosition;
           case 'last3WinRate': return last3WinRate;
           case 'last3PlaceRate': return last3PlaceRate;
-          case 'classChange': return classChange;
-          case 'trackTypeChange': return trackTypeChange;
           case 'careerWinRate': return careerWinRate;
           case 'relativeOdds': return relativeOdds;
           case 'winStreak': return winStreak;
@@ -802,7 +812,16 @@ async function main() {
           case 'relativePosition': return relativePosition;
           case 'upsetRate': return upsetRate;
           case 'avgPastOdds': return avgPastOdds;
-          case 'totalEarningsLog': return totalEarningsLog;
+          // v10.0 走破タイム + ペース + L3F + weight
+          case 'standardTimeDev': return timeFeats.standardTimeDev;
+          case 'bestTimeDev': return timeFeats.bestTimeDev;
+          case 'timeConsistency': return timeFeats.timeConsistency;
+          case 'earlyPositionRatio': return paceFeats.earlyPositionRatio;
+          case 'positionGainAvg': return paceFeats.positionGainAvg;
+          case 'l3fRelativeAvg': return l3fRelativeAvg;
+          case 'weightStability': return weightStability;
+          case 'weightTrendSlope': return weightTrendSlope;
+          case 'weightOptimalDelta': return weightOptimalDelta;
           // Phase 3 新特徴量 (#12-#17)
           case 'bodyWeightTrend': return bodyWeightTrend;
           case 'distanceChange': return distanceChange;

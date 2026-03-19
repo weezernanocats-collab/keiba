@@ -120,15 +120,11 @@ interface ContextualFeatures {
   trainerCondWinRate?: number | undefined;
   trainerGradeWinRate?: number | undefined;
   // v7.0: ラップタイム基盤特徴量
-  horsePacePreference?: number | undefined;
-  horseHaiPaceRate?: number | undefined;
   courseDistPaceAvg?: number | undefined;
   // v8.0: 直近フォーム + キャリア特徴量
   lastRacePosition?: number | undefined;
   last3WinRate?: number | undefined;
   last3PlaceRate?: number | undefined;
-  classChange?: number | undefined;
-  trackTypeChange?: number | undefined;
   careerWinRate?: number | undefined;
   relativeOdds?: number | undefined;
   winStreak?: number | undefined;
@@ -136,7 +132,13 @@ interface ContextualFeatures {
   relativePosition?: number | undefined;
   upsetRate?: number | undefined;
   avgPastOdds?: number | undefined;
-  totalEarningsLog?: number | undefined;
+  // v10.0: 走破タイム標準化 + ペース + L3F
+  standardTimeDev?: number | undefined;
+  bestTimeDev?: number | undefined;
+  timeConsistency?: number | undefined;
+  earlyPositionRatio?: number | undefined;
+  positionGainAvg?: number | undefined;
+  l3fRelativeAvg?: number | undefined;
   // Phase 3 新特徴量 (#12-#16)
   bodyWeightTrend?: number | undefined;
   distanceChange?: number | undefined;
@@ -193,8 +195,6 @@ export function buildMLFeatures(
     rotationXform: ((factorScores.rotation ?? 50) / 100) * ((factorScores.recentForm ?? 50) / 100),
     conditionXsire: condEncoded * ((factorScores.sireAptitude ?? 50) / 100),
     // v7.0: ラップタイム基盤特徴量
-    horsePacePreference: ctx.horsePacePreference ?? 0.5,
-    horseHaiPaceRate: ctx.horseHaiPaceRate ?? 0.0,
     courseDistPaceAvg: ctx.courseDistPaceAvg ?? 0.5,
     paceStyleMatch: (() => {
       const runStyleNorm = (factorScores.runningStyle ?? 50) / 100;
@@ -205,8 +205,6 @@ export function buildMLFeatures(
     lastRacePosition: ctx.lastRacePosition ?? 9,
     last3WinRate: ctx.last3WinRate ?? 0,
     last3PlaceRate: ctx.last3PlaceRate ?? 0,
-    classChange: ctx.classChange ?? 0,
-    trackTypeChange: ctx.trackTypeChange ?? 0,
     careerWinRate: ctx.careerWinRate ?? 0,
     relativeOdds: ctx.relativeOdds ?? 0,
     winStreak: ctx.winStreak ?? 0,
@@ -214,7 +212,13 @@ export function buildMLFeatures(
     relativePosition: ctx.relativePosition ?? 0.5,
     upsetRate: ctx.upsetRate ?? 0.1,
     avgPastOdds: ctx.avgPastOdds ?? Math.log(10),
-    totalEarningsLog: ctx.totalEarningsLog ?? 0,
+    // v10.0: 走破タイム標準化 + ペース + L3F
+    standardTimeDev: ctx.standardTimeDev ?? 0,
+    bestTimeDev: ctx.bestTimeDev ?? 0,
+    timeConsistency: ctx.timeConsistency ?? 0,
+    earlyPositionRatio: ctx.earlyPositionRatio ?? 0.5,
+    positionGainAvg: ctx.positionGainAvg ?? 0,
+    l3fRelativeAvg: ctx.l3fRelativeAvg ?? 0,
     // Phase 3 新特徴量 (#12-#16)
     bodyWeightTrend: ctx.bodyWeightTrend ?? 0,
     distanceChange: ctx.distanceChange ?? 0,
