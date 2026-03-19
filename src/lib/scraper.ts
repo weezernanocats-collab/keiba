@@ -328,6 +328,16 @@ export async function scrapeRaceCard(raceId: string): Promise<ScrapedRaceDetail>
     });
   }
 
+  // 馬番未確定（枠順発表前）の場合、全馬がhorseNumber=0になる。
+  // ON CONFLICT(race_id, horse_number) で全馬が上書きされるのを防ぐため、
+  // 仮馬番（1-indexed）を割り当てる。枠順確定後の再スクレイプで正式番号に更新される。
+  const allZero = entries.length > 1 && entries.every(e => e.horseNumber === 0);
+  if (allZero) {
+    for (let i = 0; i < entries.length; i++) {
+      entries[i] = { ...entries[i], horseNumber: i + 1, postPosition: 0 };
+    }
+  }
+
   // 競馬場ID推定
   const racecourseId = inferRacecourseId(raceId);
 

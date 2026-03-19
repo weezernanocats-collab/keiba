@@ -325,6 +325,11 @@ async function executeMorningFetch(date: string): Promise<void> {
           grade: detail.grade as import('@/types').Race['grade'],
           status: '出走確定',
         });
+        // 枠順確定後の再取り込み時、仮馬番エントリを削除してから正式データを挿入
+        const hasRealNumbers = detail.entries.length > 1 && detail.entries.some(e => e.postPosition > 0);
+        if (hasRealNumbers) {
+          await dbRun('DELETE FROM race_entries WHERE race_id = ? AND result_position IS NULL', [race.id]);
+        }
         for (const e of detail.entries) {
           await upsertRaceEntry(race.id, {
             postPosition: e.postPosition, horseNumber: e.horseNumber,
