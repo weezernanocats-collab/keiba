@@ -86,6 +86,15 @@ const FEATURE_NAMES = [
   'upsetRate',                // 穴馬力 (人気5番以下好走率)
   'avgPastOdds',              // 好走時平均オッズ (log変換)
   'totalEarningsLog',         // 通算賞金 (log1p変換)
+  // Phase 3: 新特徴量 (#12-#17)
+  'bodyWeightTrend',          // #12: 馬体重トレンド（3-5走移動平均傾き）
+  'distanceChange',           // #13: 前走比距離変化（連続値）
+  'jockeyTrainerWinRate',     // #14: 騎手×調教師コンボ勝率
+  'horseCourseWinRate',       // #15: 競走馬×競馬場勝率
+  'escaperCount',             // #16: 逃げ・先行馬数（先頭3番手以内）
+  'gradeXtrainer',            // #17: グレード×調教師勝率
+  'jockeyXdistance',          // #17: 騎手距離別WR×距離
+  'formXclassChange',         // #17: 直近成績×クラス変化
 ];
 
 const SEX_ENCODE: Record<string, number> = { '牡': 0, '牝': 1, 'セ': 2 };
@@ -181,6 +190,9 @@ interface PastPerfRow {
   entries: number | null;
   odds: number | null;
   popularity: number | null;
+  weight: number | null;
+  racecourse_name: string | null;
+  distance: number | null;
 }
 
 async function main() {
@@ -210,11 +222,12 @@ async function main() {
   console.log(`予測データ: ${predResult.rows.length}件`);
   console.log(`出走データ: ${entryResult.rows.length}件`);
 
-  // 過去成績データ取得（騎手乗替、コーナー、着差、休養日数、ペース特徴量用）
+  // 過去成績データ取得（騎手乗替、コーナー、着差、休養日数、ペース特徴量、馬体重、コース用）
   const [ppResult, racePaceResult, horseResult] = await Promise.all([
     db.execute(`
       SELECT pp.horse_id, pp.race_id, pp.date, pp.position, pp.jockey_name, pp.margin, pp.corner_positions,
              pp.entries, pp.odds, pp.popularity, pp.race_name, pp.prize,
+             pp.weight, pp.racecourse_name, pp.distance,
              r.grade, COALESCE(r.track_type, pp.track_type) as track_type
       FROM past_performances pp
       LEFT JOIN races r ON r.id = pp.race_id
@@ -463,7 +476,11 @@ async function main() {
     label_win: number;
     label_place: number;
     position: number;
+    recency_weight: number;
   }> = [];
+
+  // 最新レース日付（predictions は既に日付順ソート済み）
+  const maxDate = new Date(predictions[predictions.length - 1].date);
 
   let skippedNoScores = 0;
 
@@ -549,6 +566,44 @@ async function main() {
         const lastDate = new Date(horsePerfs[0].date);
         const raceDate = new Date(pred.date);
         daysSinceLastRace = Math.max(0, Math.round((raceDate.getTime() - lastDate.getTime()) / 86400000));
+      }
+
+      // === Phase 3 新特徴量 ===
+
+      // #12: 馬体重トレンド（直近5走）
+      const recentWeights = horsePerfs.slice(0, 5).map(pp => pp.weight ?? 0).filter(w => w > 0);
+      const bodyWeightTrend = recentWeights.length >= 3
+        ? (recentWeights[0] - recentWeights[recentWeights.length - 1]) / recentWeights.length
+        : 0;
+
+      // #13: 前走比距離変化
+      const distanceChange = horsePerfs.length > 0 && (horsePerfs[0].distance ?? 0) > 0
+        ? pred.distance - (horsePerfs[0].distance ?? pred.distance)
+        : 0;
+
+      // #14: 騎手×調教師コンボ勝率（過去成績で同騎手かつ同調教師のケースを近似）
+      // 訓練データでは正確なコンボが難しいため、積で近似し調整
+      const jockeyTrainerWinRate = jockeyDistWR * trainerStat.winRate * 10;
+
+      // #15: 競走馬×競馬場勝率
+      const coursePerfs = horsePerfs.filter(pp => pp.racecourse_name === pred.racecourse_name);
+      const horseCourseWinRate = coursePerfs.length >= 3
+        ? coursePerfs.filter(pp => pp.position === 1).length / coursePerfs.length
+        : 0.05;
+
+      // #16: 逃げ・先行馬数（同レース内で最初のコーナーを3番手以内通過する馬）
+      let escaperCount = 0;
+      for (const e of raceEntries) {
+        const ePerfs = e.horse_id
+          ? (ppByHorse.get(e.horse_id) || []).filter(pp => pp.date < pred.date)
+          : [];
+        if (ePerfs.length > 0) {
+          const corners = ePerfs[0].corner_positions;
+          if (corners) {
+            const firstCorner = parseInt(corners.split('-')[0]);
+            if (!isNaN(firstCorner) && firstCorner <= 3) escaperCount++;
+          }
+        }
       }
 
       // 調教師パターン特徴量
@@ -668,6 +723,11 @@ async function main() {
       const rotationXform = ((scores.rotation ?? 50) / 100) * ((scores.recentForm ?? 50) / 100);
       const conditionXsire = (TRACK_CONDITION_ENCODE[pred.track_condition ?? '良'] ?? 0) * ((scores.sireAptitude ?? 50) / 100);
 
+      // #17: Phase 3 追加交互作用特徴量
+      const gradeXtrainer = (GRADE_ENCODE[pred.grade ?? ''] ?? 3) * trainerStat.winRate;
+      const jockeyXdistance = jockeyDistWR * (pred.distance / 1000);
+      const formXclassChange = ((scores.recentForm ?? 50) / 100) * ((scores.classPerformance ?? 50) / 100);
+
       const features = FEATURE_NAMES.map(name => {
         switch (name) {
           case 'fieldSize': return fieldSize;
@@ -726,9 +786,22 @@ async function main() {
           case 'upsetRate': return upsetRate;
           case 'avgPastOdds': return avgPastOdds;
           case 'totalEarningsLog': return totalEarningsLog;
+          // Phase 3 新特徴量 (#12-#17)
+          case 'bodyWeightTrend': return bodyWeightTrend;
+          case 'distanceChange': return distanceChange;
+          case 'jockeyTrainerWinRate': return jockeyTrainerWinRate;
+          case 'horseCourseWinRate': return horseCourseWinRate;
+          case 'escaperCount': return escaperCount;
+          case 'gradeXtrainer': return gradeXtrainer;
+          case 'jockeyXdistance': return jockeyXdistance;
+          case 'formXclassChange': return formXclassChange;
           default: return scores[name] ?? 50;
         }
       });
+
+      const raceDate = new Date(pred.date);
+      const daysAgo = Math.max(0, (maxDate.getTime() - raceDate.getTime()) / 86400000);
+      const recencyWeight = Math.exp(-daysAgo / 365);
 
       rows.push({
         race_id: pred.race_id,
@@ -740,6 +813,7 @@ async function main() {
         odds: entry.odds ?? null,
         track_type_encoded: TRACK_TYPE_ENCODE[pred.track_type] ?? 0,
         distance_val: pred.distance,
+        recency_weight: recencyWeight,
       });
     }
   }

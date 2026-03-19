@@ -236,6 +236,38 @@ export async function generatePrediction(
       daysSinceLastRace = Math.max(0, Math.round((raceDate.getTime() - lastDate.getTime()) / 86400000));
     }
 
+    // Phase 3 新特徴量
+
+    // #12: 馬体重トレンド（直近5走）
+    const recentWeights = pp.slice(0, 5).map(p => p.weight).filter(w => w > 0);
+    const bodyWeightTrend = recentWeights.length >= 3
+      ? (recentWeights[0] - recentWeights[recentWeights.length - 1]) / recentWeights.length
+      : 0;
+
+    // #13: 前走比距離変化
+    const distanceChange = pp.length > 0 && pp[0].distance > 0
+      ? distance - pp[0].distance
+      : 0;
+
+    // #14: 騎手×調教師コンボ勝率（積による近似）
+    const jockeyTrainerWinRate = (input?.jockeyDistanceWinRate ?? 0.08) * (input?.trainerWinRate ?? 0.08) * 10;
+
+    // #15: 競走馬×競馬場勝率
+    const coursePerfs = pp.filter(p => p.racecourseName === racecourseName);
+    const horseCourseWinRate = coursePerfs.length >= 3
+      ? coursePerfs.filter(p => p.position === 1).length / coursePerfs.length
+      : 0.05;
+
+    // #16: 逃げ・先行馬数（同レース内で直近走のコーナー1番手3位以内の馬）
+    let escaperCount = 0;
+    for (const h of horses) {
+      const hPp = h.pastPerformances;
+      if (hPp.length > 0 && hPp[0].cornerPositions) {
+        const firstCorner = parseInt(hPp[0].cornerPositions.split('-')[0]);
+        if (!isNaN(firstCorner) && firstCorner <= 3) escaperCount++;
+      }
+    }
+
     return {
       horseNumber: sh.entry.horseNumber,
       features: buildMLFeatures(
@@ -328,6 +360,12 @@ export async function generatePrediction(
             return Math.log(avg > 0 ? avg : 10);
           })(),
           totalEarningsLog: Math.log1p(input?.totalEarnings ?? 0),
+          // Phase 3 新特徴量 (#12-#16)
+          bodyWeightTrend,
+          distanceChange,
+          jockeyTrainerWinRate,
+          horseCourseWinRate,
+          escaperCount,
         },
       ),
     };
@@ -593,7 +631,7 @@ function scoreHorse(
   else if (scores.rotation <= 30) reasons.push('間隔が空きすぎorタイトすぎ');
 
   // 11. 上がり3F (0-100)
-  scores.lastThreeFurlongs = calcLastThreeFurlongs(pp, trackType);
+  scores.lastThreeFurlongs = calcLastThreeFurlongs(pp, trackType, distance);
   if (scores.lastThreeFurlongs >= 80) reasons.push('末脚が鋭く上がり最速級');
   else if (scores.lastThreeFurlongs >= 65) reasons.push('末脚はまずまず');
 
@@ -1334,7 +1372,37 @@ function calcRotation(pp: PastPerformance[], raceDate?: string): number {
   return 20;
 }
 
-function calcLastThreeFurlongs(pp: PastPerformance[], trackType: TrackType): number {
+// 距離・馬場種別別の上がり3F基準タイム（秒）
+const LAST_3F_BASELINES: Record<string, Record<string, number>> = {
+  '芝': {
+    '1200': 34.0, '1400': 34.3, '1600': 34.5, '1800': 35.0,
+    '2000': 35.2, '2200': 35.5, '2400': 35.8, '2500': 36.0,
+    '3000': 36.5, '3200': 36.8, '3600': 37.0,
+  },
+  'ダート': {
+    '1200': 36.0, '1400': 36.3, '1600': 36.5, '1800': 37.0,
+    '2000': 37.2, '2100': 37.5,
+  },
+};
+
+/**
+ * 距離・馬場種別から上がり3F基準タイムを取得する。
+ * 最近傍の距離ブレットポイントを使用する。
+ */
+function getLast3FBaseline(trackType: TrackType, distance: number): number {
+  const trackKey = trackType === 'ダート' ? 'ダート' : trackType;
+  const baselines = LAST_3F_BASELINES[trackKey];
+  if (!baselines) return trackType === 'ダート' ? 36.5 : 34.5;
+
+  // 最近傍の距離を探す
+  const distances = Object.keys(baselines).map(Number).sort((a, b) => a - b);
+  const nearest = distances.reduce((prev, curr) =>
+    Math.abs(curr - distance) < Math.abs(prev - distance) ? curr : prev
+  );
+  return baselines[String(nearest)];
+}
+
+function calcLastThreeFurlongs(pp: PastPerformance[], trackType: TrackType, distance: number = 1600): number {
   if (pp.length === 0) return 50;
 
   const recent = pp.slice(0, 15);
@@ -1352,7 +1420,7 @@ function calcLastThreeFurlongs(pp: PastPerformance[], trackType: TrackType): num
   const best = Math.min(...times);
   const recentAvg = times.slice(0, 3).reduce((s, t) => s + t, 0) / Math.min(3, times.length);
 
-  const baseline = trackType === '芝' ? 34.5 : 36.5;
+  const baseline = getLast3FBaseline(trackType, distance);
 
   const bestDiff = baseline - best;
   const avgDiff = baseline - recentAvg;

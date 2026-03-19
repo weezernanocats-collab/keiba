@@ -34,9 +34,9 @@ MIN_CATEGORY_SAMPLES = 3000
 CATEGORIES = {
     'turf_sprint': (0, 0, 1400),
     'turf_mile': (0, 1401, 1800),
-    'turf_long': (0, 1901, 99999),
-    'dirt_sprint': (1, 0, 1400),
-    'dirt_long': (1, 1401, 99999),
+    'turf_long': (0, 1801, 99999),
+    'dirt_short': (1, 0, 1600),
+    'dirt_long': (1, 1601, 99999),
 }
 
 
@@ -440,6 +440,7 @@ def main():
     race_ids = [r["race_id"] for r in rows]
     positions = np.array([r["position"] for r in rows], dtype=np.int32)
     odds_data = np.array([r.get("odds") or 0 for r in rows], dtype=np.float32)
+    recency_data = np.array([r.get("recency_weight", 1.0) for r in rows], dtype=np.float32)
 
     has_odds = int(np.sum(odds_data > 0)) > len(odds_data) // 2
     print(f"オッズデータ: {'あり' if has_odds else 'なし'} ({int(np.sum(odds_data > 0))}/{len(odds_data)}件)")
@@ -480,7 +481,17 @@ def main():
     train_weights = None
     if has_odds:
         train_weights = compute_race_weights(positions, odds_data, train_ordered, groups_train)
-        print("オッズ加重 sample_weight 有効")
+        # オッズ重みと近接性重みを乗算（コンセプトドリフト対応）
+        recency_group_weights = []
+        offset = 0
+        for g in groups_train:
+            g = int(g)
+            group_recency = recency_data[train_ordered[offset:offset + g]]
+            recency_group_weights.append(float(np.mean(group_recency)))
+            offset += g
+        recency_group_weights = np.array(recency_group_weights, dtype=np.float32)
+        train_weights = train_weights * recency_group_weights
+        print("オッズ加重 × 近接性重み sample_weight 有効")
     else:
         print("オッズデータ不足のため均等重み使用")
 
@@ -559,6 +570,16 @@ def main():
             cat_train_weights = compute_race_weights(
                 positions, odds_data, cat_train_ordered, cat_groups_train
             )
+            # カテゴリモデルにも近接性重みを適用
+            cat_recency_group_weights = []
+            offset = 0
+            for g in cat_groups_train:
+                g = int(g)
+                group_recency = recency_data[cat_train_ordered[offset:offset + g]]
+                cat_recency_group_weights.append(float(np.mean(group_recency)))
+                offset += g
+            cat_recency_group_weights = np.array(cat_recency_group_weights, dtype=np.float32)
+            cat_train_weights = cat_train_weights * cat_recency_group_weights
 
         cat_model = train_ranker_model(
             X[cat_train_ordered], y_standard[cat_train_ordered], cat_groups_train,

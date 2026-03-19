@@ -87,8 +87,8 @@ const CATEGORY_DEFS: Record<string, [number, number, number]> = {
   'turf_sprint': [0, 0, 1400],
   'turf_mile': [0, 1401, 1800],
   'turf_long': [0, 1801, 99999],
-  'dirt_sprint': [1, 0, 1400],
-  'dirt_long': [1, 1401, 99999],
+  'dirt_short': [1, 0, 1600],
+  'dirt_long': [1, 1601, 99999],
 };
 
 interface ContextualFeatures {
@@ -137,6 +137,12 @@ interface ContextualFeatures {
   upsetRate?: number | undefined;
   avgPastOdds?: number | undefined;
   totalEarningsLog?: number | undefined;
+  // Phase 3 新特徴量 (#12-#16)
+  bodyWeightTrend?: number | undefined;
+  distanceChange?: number | undefined;
+  jockeyTrainerWinRate?: number | undefined;
+  horseCourseWinRate?: number | undefined;
+  escaperCount?: number | undefined;
 }
 
 /**
@@ -209,6 +215,16 @@ export function buildMLFeatures(
     upsetRate: ctx.upsetRate ?? 0.1,
     avgPastOdds: ctx.avgPastOdds ?? Math.log(10),
     totalEarningsLog: ctx.totalEarningsLog ?? 0,
+    // Phase 3 新特徴量 (#12-#16)
+    bodyWeightTrend: ctx.bodyWeightTrend ?? 0,
+    distanceChange: ctx.distanceChange ?? 0,
+    jockeyTrainerWinRate: ctx.jockeyTrainerWinRate ?? 0.05,
+    horseCourseWinRate: ctx.horseCourseWinRate ?? 0.05,
+    escaperCount: ctx.escaperCount ?? 0,
+    // Phase 3 追加交互作用特徴量 (#17)
+    gradeXtrainer: (GRADE_ENCODE[ctx.grade ?? ''] ?? 3) * ((factorScores.trainerAbility ?? 50) / 100),
+    jockeyXdistance: (ctx.jockeyDistanceWinRate ?? 0.08) * (ctx.distance / 1000),
+    formXclassChange: ((factorScores.recentForm ?? 50) / 100) * ((factorScores.recentForm ?? 50) / 100),
   };
 
   // NaN/Infinity ガード: 初出走馬やデータ欠損で特徴量が壊れるのを防止
@@ -260,6 +276,9 @@ let cachedCatBoostModel: CatBoostModel | null | undefined;
 let cachedCatBoostCalibration: CalibrationData | null = null;
 let cachedCatBoostCategoryModels: Record<string, CatBoostModel> = {};
 let cachedEnsembleWeights: EnsembleWeights | null = null;
+let cachedPlaceClassifier: XGBModel | null | undefined;
+let cachedPlaceCalibration: CalibrationData | null = null;
+let cachedPlaceCategoryModels: Record<string, XGBModel> = {};
 let modelMode: 'ranker' | 'classifier' | 'none' | undefined;
 
 function getModelDir(): string {
@@ -414,6 +433,25 @@ function ensureModelsLoaded(): boolean {
       }
     }
 
+    // Place classifier models (dedicated 複勝 prediction)
+    cachedPlaceClassifier = loadModel('xgb_place_classifier.json');
+    if (cachedPlaceClassifier) {
+      console.log(`[ML] 複勝モデル読み込み完了`);
+      cachedPlaceCalibration = loadCalibration('place_calibration.json');
+      if (cachedPlaceCalibration) {
+        console.log(`[ML] 複勝較正マッピング読み込み完了`);
+      }
+      for (const cat of Object.keys(CATEGORY_DEFS)) {
+        const catPlaceModel = loadModel(`xgb_place_${cat}.json`);
+        if (catPlaceModel) {
+          cachedPlaceCategoryModels[cat] = catPlaceModel;
+        }
+      }
+      if (Object.keys(cachedPlaceCategoryModels).length > 0) {
+        console.log(`[ML] 複勝カテゴリモデル: ${Object.keys(cachedPlaceCategoryModels).length}個`);
+      }
+    }
+
     modelMode = 'ranker';
     return true;
   }
@@ -489,6 +527,7 @@ function predictRawScore(model: XGBModel, features: number[]): number {
 
 function softmax(scores: number[]): number[] {
   if (scores.length === 0) return [];
+  if (scores.length === 1) return [1];
   const maxScore = Math.max(...scores);
   const exps = scores.map(s => Math.exp(s - maxScore));
   const sumExp = exps.reduce((s, e) => s + e, 0);
@@ -500,7 +539,7 @@ function featureDictToArray(
   features: Record<string, number>,
   featureNames: string[],
 ): number[] {
-  return featureNames.map(name => features[name] ?? 0);
+  return featureNames.map(name => features[name] ?? NaN);
 }
 
 // ==================== Calibration ====================
@@ -571,8 +610,8 @@ function traverseCatBoostTree(tree: CatBoostTree, features: number[]): number {
 
   for (let d = 0; d < depth; d++) {
     const split = tree.splits[d];
-    const featureVal = features[split.feature_index] ?? 0;
-    const bit = featureVal > split.threshold ? 1 : 0;
+    const featureVal = features[split.feature_index];
+    const bit = (featureVal !== undefined && !isNaN(featureVal) && featureVal > split.threshold) ? 1 : 0;
     leafIdx |= (bit << d);
   }
 
@@ -633,7 +672,7 @@ function predictWithRankerProbs(
 /**
  * 確率配列 → MLPredictions 変換
  */
-function probsToMLPredictions(probs: number[], horses: MLHorseInput[]): MLPredictions {
+function probsToMLPredictions(probs: number[], horses: MLHorseInput[], placeProbs?: number[] | null): MLPredictions {
   const indexed = probs.map((prob, i) => ({ idx: i, prob }));
   indexed.sort((a, b) => b.prob - a.prob);
 
@@ -642,9 +681,9 @@ function probsToMLPredictions(probs: number[], horses: MLHorseInput[]): MLPredic
   const result: MLPredictions = {};
   for (let i = 0; i < horses.length; i++) {
     const rank = indexed.findIndex(item => item.idx === i);
-    const placeProb = rank < 3
+    const placeProb = placeProbs?.[i] ?? (rank < 3
       ? Math.min(0.95, probs[i] / top3Sum + 0.3)
-      : Math.min(0.80, probs[i] * 3);
+      : Math.min(0.80, probs[i] * 3));
 
     result[horses[i].horseNumber] = {
       winProb: Math.round(probs[i] * 1_000_000) / 1_000_000,
@@ -693,6 +732,46 @@ function predictWithRanker(model: XGBModel, horses: MLHorseInput[], featureNames
   }
 
   return result;
+}
+
+// ==================== Place classifier ====================
+
+/**
+ * 専用複勝モデルでtop-3確率を推論
+ * Race-level正規化: 合計≈3.0になるようスケーリング
+ */
+function predictPlaceProbs(
+  horses: MLHorseInput[],
+  featureNames: string[],
+  raceContext?: RaceContext,
+): number[] | null {
+  if (!cachedPlaceClassifier) return null;
+
+  const cat = raceContext ? categorizeRace(raceContext.trackType, raceContext.distance) : null;
+  let selectedModel = cachedPlaceClassifier;
+  if (cat && cachedPlaceCategoryModels[cat]) {
+    selectedModel = cachedPlaceCategoryModels[cat];
+  }
+
+  const rawProbs = horses.map(h => {
+    const featureArray = featureDictToArray(h.features, featureNames);
+    return predictProba(selectedModel, featureArray);
+  });
+
+  // Isotonic Regression calibration
+  let calibratedProbs = rawProbs;
+  if (cachedPlaceCalibration) {
+    calibratedProbs = rawProbs.map(p => interpolateCalibration(p, cachedPlaceCalibration!));
+  }
+
+  // Race-level normalization: scale so sum ≈ 3.0
+  const sum = calibratedProbs.reduce((s, p) => s + p, 0);
+  if (sum > 0) {
+    const scale = 3.0 / sum;
+    calibratedProbs = calibratedProbs.map(p => Math.min(0.95, p * scale));
+  }
+
+  return calibratedProbs;
 }
 
 // ==================== Public API ====================
@@ -749,15 +828,27 @@ export async function callMLPredict(
         const probSum = blendedProbs.reduce((s, v) => s + v, 0);
         const normalizedProbs = probSum > 0 ? blendedProbs.map(v => v / probSum) : blendedProbs;
 
-        const result = probsToMLPredictions(normalizedProbs, horses);
-        console.log(`[ML] アンサンブル推論完了: ${horses.length}頭 (${modelLabel}, XGB=${xgbWeight} CB=${cbWeight}${cachedCalibration ? ', 較正済' : ''})`);
+        const placeProbs = predictPlaceProbs(horses, cachedFeatureNames!, raceContext);
+        const result = probsToMLPredictions(normalizedProbs, horses, placeProbs);
+        console.log(`[ML] アンサンブル推論完了: ${horses.length}頭 (${modelLabel}, XGB=${xgbWeight} CB=${cbWeight}${cachedCalibration ? ', 較正済' : ''}${placeProbs ? ', 複勝モデル使用' : ''})`);
         return result;
       }
 
       // XGBoostのみ
-      const result = predictWithRanker(selectedXgbModel, horses, cachedFeatureNames);
-      console.log(`[ML] ランキング推論完了: ${horses.length}頭 (${modelLabel}${cachedCalibration ? ', 較正済' : ''})`);
-      return result;
+      {
+        const rawScores = horses.map(h => {
+          const featureArray = featureDictToArray(h.features, cachedFeatureNames!);
+          return predictRawScore(selectedXgbModel, featureArray);
+        });
+        let probs = softmax(rawScores);
+        if (cachedCalibration) {
+          probs = applyCalibration(probs, cachedCalibration);
+        }
+        const placeProbs = predictPlaceProbs(horses, cachedFeatureNames!, raceContext);
+        const result = probsToMLPredictions(probs, horses, placeProbs);
+        console.log(`[ML] ランキング推論完了: ${horses.length}頭 (${modelLabel}${cachedCalibration ? ', 較正済' : ''}${placeProbs ? ', 複勝モデル使用' : ''})`);
+        return result;
+      }
     }
 
     // 分類モデルフォールバック

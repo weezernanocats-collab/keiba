@@ -75,6 +75,7 @@ interface EntryRow {
   result_weight_change: number | null;
   trainer_name: string | null;
   jockey_id: string | null;
+  jockey_name: string | null;
   horse_id: string | null;
 }
 
@@ -87,7 +88,7 @@ function computeTrainerStats(entries: EntryRow[]): Map<string, { winRate: number
     const s = agg.get(e.trainer_name) || { total: 0, wins: 0, places: 0 };
     s.total++;
     if (e.result_position === 1) s.wins++;
-    if (e.result_position <= 2) s.places++;
+    if (e.result_position <= 3) s.places++;
     agg.set(e.trainer_name, s);
   }
   const m = new Map<string, { winRate: number; placeRate: number }>();
@@ -167,6 +168,36 @@ function computeSireTrackStats(
   return agg;
 }
 
+interface PastPerfRow {
+  horse_id: string;
+  date: string;
+  position: number;
+  jockey_name: string | null;
+  margin: string | null;
+  corner_positions: string | null;
+}
+
+function marginToSeconds(margin: string | null): number {
+  if (!margin) return 0;
+  const m = margin.trim();
+  if (m === '' || m === '同着') return 0;
+  if (m === 'クビ') return 0.1;
+  if (m === 'ハナ') return 0.05;
+  if (m === 'アタマ') return 0.15;
+  if (m.includes('1/2')) return 0.3;
+  if (m.includes('3/4')) return 0.45;
+  if (m === '大差') return 5.0;
+  const num = parseFloat(m);
+  return isNaN(num) ? 0 : num * 0.6;
+}
+
+function parseCornerDelta(cornerStr: string | null): number {
+  if (!cornerStr) return 0;
+  const parts = cornerStr.split('-').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+  if (parts.length < 2) return 0;
+  return parts[parts.length - 2] - parts[parts.length - 1];
+}
+
 export async function GET(request: NextRequest) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -189,7 +220,7 @@ export async function GET(request: NextRequest) {
     dbAll<EntryRow>(`
       SELECT re.race_id, re.horse_number, re.post_position, re.age, re.sex,
              re.handicap_weight, re.result_position, re.odds, re.popularity,
-             re.result_weight_change, re.trainer_name, re.jockey_id, re.horse_id
+             re.result_weight_change, re.trainer_name, re.jockey_id, re.jockey_name, re.horse_id
       FROM race_entries re
       JOIN races r ON r.id = re.race_id
       WHERE r.status = '結果確定'
@@ -231,6 +262,35 @@ export async function GET(request: NextRequest) {
       for (const h of horses) {
         horseFatherMap.set(h.id, h.father_name);
       }
+    }
+  }
+
+  // 過去成績データ取得（騎手乗替、コーナー、着差、休養日数用）
+  const pastPerfs = await dbAll<PastPerfRow>(`
+    SELECT horse_id, date, position, jockey_name, margin, corner_positions
+    FROM past_performances
+    WHERE horse_id IN (${horseIds.map(() => '?').join(',')})
+    ORDER BY horse_id, date DESC
+  `, horseIds);
+
+  const ppByHorse = new Map<string, PastPerfRow[]>();
+  for (const pp of pastPerfs) {
+    const arr = ppByHorse.get(pp.horse_id) || [];
+    arr.push(pp);
+    ppByHorse.set(pp.horse_id, arr);
+  }
+
+  // 調教師パターン統計
+  const trainerDistCatMap = new Map<string, { total: number; wins: number }>();
+  for (const e of allEntries) {
+    if (!e.trainer_name) continue;
+    const dist = raceDistanceMap.get(e.race_id);
+    if (dist !== undefined) {
+      const dCat = dist <= 1400 ? 'sprint' : dist <= 1800 ? 'mile' : 'long';
+      const dcKey = `${e.trainer_name}__${dCat}`;
+      const dc = trainerDistCatMap.get(dcKey) || { total: 0, wins: 0 };
+      dc.total++; if (e.result_position === 1) dc.wins++;
+      trainerDistCatMap.set(dcKey, dc);
     }
   }
 
@@ -277,7 +337,6 @@ export async function GET(request: NextRequest) {
       const scores = horseScores[String(entry.horse_number)];
       if (!scores) continue;
 
-      const odds = entry.odds ?? 10;
       const popularity = entry.popularity ?? Math.ceil(fieldSize / 2);
 
       // 新特徴量の統計ルックアップ（インメモリ計算済み）
@@ -291,10 +350,45 @@ export async function GET(request: NextRequest) {
       const jcEntry = entry.jockey_id ? jockeyCourseMap.get(`${entry.jockey_id}__${pred.racecourse_name}`) : undefined;
       const jockeyCourseWR = jcEntry ? jcEntry.wins / jcEntry.total : 0.08;
 
+      // v6.0 新特徴量
+      const horsePerfs = entry.horse_id
+        ? (ppByHorse.get(entry.horse_id) || [])
+        : [];
+
+      let jockeySwitchQuality = 0;
+      if (horsePerfs.length > 0) {
+        const lastJockey = horsePerfs[0].jockey_name;
+        if (lastJockey && lastJockey !== entry.jockey_name) {
+          jockeySwitchQuality = (scores.jockeyAbility ?? 50) - 50;
+        }
+      }
+
+      let cornerDelta = 0;
+      const cornerPerfs = horsePerfs.slice(0, 5).filter(pp => pp.corner_positions);
+      if (cornerPerfs.length > 0) {
+        const deltas = cornerPerfs.map(pp => parseCornerDelta(pp.corner_positions));
+        cornerDelta = deltas.reduce((s, d) => s + d, 0) / deltas.length;
+      }
+
+      let avgMarginWin = 0;
+      let avgMarginLose = 0;
+      const winPerfs = horsePerfs.filter(pp => pp.position === 1 && pp.margin);
+      const losePerfs = horsePerfs.filter(pp => pp.position > 1 && pp.margin);
+      if (winPerfs.length > 0) avgMarginWin = winPerfs.reduce((s, pp) => s + marginToSeconds(pp.margin), 0) / winPerfs.length;
+      if (losePerfs.length > 0) avgMarginLose = losePerfs.reduce((s, pp) => s + marginToSeconds(pp.margin), 0) / losePerfs.length;
+
+      let daysSinceLastRace = 30;
+      if (horsePerfs.length > 0) {
+        const lastDate = new Date(horsePerfs[0].date);
+        const now = new Date();
+        daysSinceLastRace = Math.max(0, Math.round((now.getTime() - lastDate.getTime()) / 86400000));
+      }
+
+      const meetDay = pred.race_id.length >= 10 ? parseInt(pred.race_id.substring(8, 10)) || 1 : 1;
+
       const features = FEATURE_NAMES.map(name => {
         switch (name) {
           case 'fieldSize': return fieldSize;
-          case 'odds': return odds;
           case 'popularity': return popularity;
           case 'age': return entry.age ?? 3;
           case 'sex_encoded': return SEX_ENCODE[entry.sex] ?? 0;
@@ -304,9 +398,9 @@ export async function GET(request: NextRequest) {
           case 'trackType_encoded': return TRACK_TYPE_ENCODE[pred.track_type] ?? 0;
           case 'distance': return pred.distance;
           case 'trackCondition_encoded': return TRACK_CONDITION_ENCODE[pred.track_condition ?? '良'] ?? 0;
-          case 'oddsLogTransform': return odds > 0 ? Math.log(odds) : Math.log(10);
+          case 'oddsLogTransform': return entry.odds && entry.odds > 0 ? Math.log(entry.odds) : Math.log(10);
           case 'popularityRatio': return fieldSize > 0 ? popularity / fieldSize : 0.5;
-          // v4.2 新特徴量
+          // 統計特徴量
           case 'weather_encoded': return WEATHER_ENCODE[pred.weather ?? ''] ?? 0;
           case 'weightChange': return entry.result_weight_change ?? 0;
           case 'trainerWinRate': return trainerStats.winRate;
@@ -314,6 +408,33 @@ export async function GET(request: NextRequest) {
           case 'sireTrackWinRate': return sireTrackWR;
           case 'jockeyDistanceWinRate': return jockeyDistWR;
           case 'jockeyCourseWinRate': return jockeyCourseWR;
+          // v5.1: 馬体重トレンド
+          case 'weightStability': return 50; // TODO: compute from weight history
+          case 'weightTrendSlope': return 0;
+          case 'weightOptimalDelta': return 0;
+          // v6.0: 新特徴量
+          case 'jockeySwitchQuality': return jockeySwitchQuality;
+          case 'cornerDelta': return cornerDelta;
+          case 'avgMarginWhenWinning': return avgMarginWin;
+          case 'avgMarginWhenLosing': return avgMarginLose;
+          case 'daysSinceLastRace': return daysSinceLastRace;
+          // v6.1: 開催週 + 調教師パターン
+          case 'meetDay': return meetDay;
+          case 'trainerDistCatWinRate': {
+            if (!entry.trainer_name) return 0.08;
+            const dCat = pred.distance <= 1400 ? 'sprint' : pred.distance <= 1800 ? 'mile' : 'long';
+            const dc = trainerDistCatMap.get(`${entry.trainer_name}__${dCat}`);
+            return dc && dc.total >= 5 ? dc.wins / dc.total : 0.08;
+          }
+          case 'trainerCondWinRate': return 0.08; // simplified for API route
+          case 'trainerGradeWinRate': return 0.08; // simplified for API route
+          // v6.0: 交互作用特徴量
+          case 'weightXspeed': return (entry.handicap_weight ?? 54) * ((scores.speedRating ?? 50) / 100);
+          case 'ageXdistance': return (entry.age ?? 3) * (pred.distance / 1000);
+          case 'jockeyXform': return ((scores.jockeyAbility ?? 50) / 100) * ((scores.recentForm ?? 50) / 100);
+          case 'fieldSizeXpost': return fieldSize * ((entry.post_position ?? 1) / fieldSize);
+          case 'rotationXform': return ((scores.rotation ?? 50) / 100) * ((scores.recentForm ?? 50) / 100);
+          case 'conditionXsire': return (TRACK_CONDITION_ENCODE[pred.track_condition ?? '良'] ?? 0) * ((scores.sireAptitude ?? 50) / 100);
           default: return scores[name] ?? 50;
         }
       });

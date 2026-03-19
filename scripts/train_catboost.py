@@ -24,9 +24,9 @@ MIN_CATEGORY_SAMPLES = 3000
 CATEGORIES = {
     'turf_sprint': (0, 0, 1400),
     'turf_mile': (0, 1401, 1800),
-    'turf_long': (0, 1901, 99999),
-    'dirt_sprint': (1, 0, 1400),
-    'dirt_long': (1, 1401, 99999),
+    'turf_long': (0, 1801, 99999),
+    'dirt_short': (1, 0, 1600),
+    'dirt_long': (1, 1601, 99999),
 }
 
 
@@ -351,13 +351,14 @@ def learn_ensemble_weights(xgb_model_path, catboost_model, X_cal, positions_cal,
     best_weight = 0.5
     best_ndcg = 0.0
 
+    y_relevance = np.array(
+        [position_to_relevance(int(p)) for p in positions_cal], dtype=np.float32
+    )
+    y_true_groups = split_by_groups(y_relevance, groups_cal)
+
     for w_int in range(int(MIN_WEIGHT * 100), int((1.0 - MIN_WEIGHT) * 100) + 1, 5):
         w = w_int / 100.0
         blended = w * xgb_scores + (1 - w) * cb_scores
-        y_true_groups = split_by_groups(
-            np.array([position_to_relevance(int(p)) for p in positions_cal[np.array(range(len(positions_cal)))]]),
-            groups_cal,
-        )
         y_pred_groups = split_by_groups(blended, groups_cal)
         ndcg = calc_ndcg_at_k(y_true_groups, y_pred_groups, k=1)
         if ndcg > best_ndcg:
@@ -387,13 +388,13 @@ def learn_category_ensemble_weights(xgb_model_path, catboost_model, X_cal, posit
     best_weight = 0.5
     best_ndcg = 0.0
 
+    y_true_groups = split_by_groups(
+        np.array([position_to_relevance(int(p)) for p in positions_cal]),
+        groups_cal,
+    )
     for w_int in range(int(MIN_WEIGHT * 100), int((1.0 - MIN_WEIGHT) * 100) + 1, 5):
         w = w_int / 100.0
         blended = w * xgb_scores + (1 - w) * cb_scores
-        y_true_groups = split_by_groups(
-            np.array([position_to_relevance(int(p)) for p in positions_cal]),
-            groups_cal,
-        )
         y_pred_groups = split_by_groups(blended, groups_cal)
         ndcg = calc_ndcg_at_k(y_true_groups, y_pred_groups, k=1)
         if ndcg > best_ndcg:
@@ -401,6 +402,42 @@ def learn_category_ensemble_weights(xgb_model_path, catboost_model, X_cal, posit
             best_weight = round(w, 2)
 
     return best_weight, round(1 - best_weight, 2), best_ndcg
+
+
+def learn_ensemble_weights_3way(xgb_scores, cb_scores, lgb_scores,
+                                 positions_cal, groups_cal):
+    """XGBoost + CatBoost + LightGBMの3Way最適ブレンド重みをグリッドサーチで探索"""
+    y_relevance = np.array(
+        [position_to_relevance(int(p)) for p in positions_cal], dtype=np.float32
+    )
+    y_true_groups = split_by_groups(y_relevance, groups_cal)
+
+    best_weights = (0.34, 0.33, 0.33)
+    best_ndcg = 0.0
+
+    step = 0.05
+    candidates = np.arange(0.0, 1.0 + step, step)
+
+    for w_xgb in candidates:
+        for w_cb in candidates:
+            w_lgb = round(1.0 - w_xgb - w_cb, 10)
+            if w_lgb < -1e-9 or w_lgb > 1.0 + 1e-9:
+                continue
+            w_lgb = max(0.0, min(1.0, w_lgb))
+
+            blended = w_xgb * xgb_scores + w_cb * cb_scores + w_lgb * lgb_scores
+            y_pred_groups = split_by_groups(blended, groups_cal)
+            ndcg = calc_ndcg_at_k(y_true_groups, y_pred_groups, k=1)
+
+            if ndcg > best_ndcg:
+                best_ndcg = ndcg
+                best_weights = (round(w_xgb, 2), round(w_cb, 2), round(w_lgb, 2))
+
+    w_xgb, w_cb, w_lgb = best_weights
+    print(f"\n3Wayアンサンブル最適重み: XGBoost={w_xgb}, CatBoost={w_cb}, LightGBM={w_lgb}")
+    print(f"最適NDCG@1: {best_ndcg:.4f}")
+
+    return w_xgb, w_cb, w_lgb
 
 
 # ==================== メイン ====================
@@ -422,6 +459,7 @@ def main():
     race_ids = [r["race_id"] for r in rows]
     positions = np.array([r["position"] for r in rows], dtype=np.int32)
     odds_data = np.array([r.get("odds") or 0 for r in rows], dtype=np.float32)
+    recency_data = np.array([r.get("recency_weight", 1.0) for r in rows], dtype=np.float32)
     has_odds = int(np.sum(odds_data > 0)) > len(odds_data) // 2
 
     # 時系列分割 (XGBoostと完全同一)
@@ -457,7 +495,17 @@ def main():
     train_weights = None
     if has_odds:
         train_weights = compute_race_weights(positions, odds_data, train_ordered, groups_train)
-        print("オッズ加重有効")
+        # オッズ重みと近接性重みを乗算（コンセプトドリフト対応）
+        recency_group_weights = []
+        offset = 0
+        for g in groups_train:
+            g = int(g)
+            group_recency = recency_data[train_ordered[offset:offset + g]]
+            recency_group_weights.append(float(np.mean(group_recency)))
+            offset += g
+        recency_group_weights = np.array(recency_group_weights, dtype=np.float32)
+        train_weights = train_weights * recency_group_weights
+        print("オッズ加重 × 近接性重み有効")
 
     # ==================== グローバルモデル ====================
     print("\n=== CatBoost グローバルモデル学習 ===")
@@ -535,6 +583,16 @@ def main():
             cat_train_weights = compute_race_weights(
                 positions, odds_data, cat_train_ordered, cat_groups_train
             )
+            # カテゴリモデルにも近接性重みを適用
+            cat_recency_group_weights = []
+            offset = 0
+            for g in cat_groups_train:
+                g = int(g)
+                group_recency = recency_data[cat_train_ordered[offset:offset + g]]
+                cat_recency_group_weights.append(float(np.mean(group_recency)))
+                offset += g
+            cat_recency_group_weights = np.array(cat_recency_group_weights, dtype=np.float32)
+            cat_train_weights = cat_train_weights * cat_recency_group_weights
 
         cat_model = train_catboost_ranker(
             X[cat_train_ordered], y_standard[cat_train_ordered], cat_groups_train,
@@ -557,16 +615,46 @@ def main():
 
     # ==================== アンサンブル重み ====================
     xgb_model_path = os.path.join(MODEL_DIR, "xgb_ranker.json")
+    lgb_model_path = os.path.join(MODEL_DIR, "lgb_ranker.json")
     ensemble_weights = {'xgb': 0.5, 'catboost': 0.5}
 
     if os.path.exists(xgb_model_path):
         print("\n=== アンサンブル重み学習 ===")
         try:
-            xgb_w, cb_w = learn_ensemble_weights(
-                xgb_model_path, model,
-                X_cal, positions_cal, groups_cal, feature_names,
-            )
-            ensemble_weights = {'xgb': xgb_w, 'catboost': cb_w}
+            import xgboost as xgb_lib
+
+            xgb_model_obj = xgb_lib.XGBRanker()
+            xgb_model_obj.load_model(xgb_model_path)
+            xgb_scores = xgb_model_obj.predict(X_cal)
+
+            query_ids_cal = groups_to_query_ids(groups_cal)
+            pool_cal = Pool(data=X_cal, group_id=query_ids_cal)
+            cb_scores = model.predict(pool_cal)
+
+            # LightGBMモデルが存在する場合は3Way最適化を実施
+            if os.path.exists(lgb_model_path):
+                print("LightGBMモデル検出 → 3Wayグリッドサーチ実施")
+                import lightgbm as lgb_lib
+
+                lgb_model_obj = lgb_lib.Booster(model_file=lgb_model_path)
+                lgb_scores = lgb_model_obj.predict(X_cal)
+
+                w_xgb, w_cb, w_lgb = learn_ensemble_weights_3way(
+                    xgb_scores, cb_scores, lgb_scores,
+                    positions_cal, groups_cal,
+                )
+                ensemble_weights = {
+                    'xgb': w_xgb,
+                    'catboost': w_cb,
+                    'lightgbm': w_lgb,
+                }
+            else:
+                # 2Way: XGBoost + CatBoost（最低重みフロア付き）
+                xgb_w, cb_w = learn_ensemble_weights(
+                    xgb_model_path, model,
+                    X_cal, positions_cal, groups_cal, feature_names,
+                )
+                ensemble_weights = {'xgb': xgb_w, 'catboost': cb_w}
 
             # カテゴリ別重みも学習（各カテゴリのXGBとCBグローバルモデルで重みを求める）
             cat_ensemble_weights = {}
@@ -574,14 +662,43 @@ def main():
                 cat_mask = sample_categories == cat_name
                 cat_cal_idx_list = [i for i in cal_idx if cat_mask[i]]
                 if len(cat_cal_idx_list) < 200:
-                    cat_ensemble_weights[cat_name] = {'xgb': ensemble_weights['xgb'], 'catboost': ensemble_weights['catboost']}
+                    cat_ensemble_weights[cat_name] = {
+                        k: v for k, v in ensemble_weights.items() if k != 'per_category'
+                    }
                     continue
 
                 cat_cal_ordered_e, cat_groups_cal_e = build_race_groups(race_ids, cat_cal_idx_list)
 
                 cat_xgb_model_path = os.path.join(MODEL_DIR, f"xgb_ranker_{cat_name}.json")
+                cat_lgb_model_path = os.path.join(MODEL_DIR, f"lgb_ranker_{cat_name}.json")
 
-                if os.path.exists(cat_xgb_model_path):
+                if os.path.exists(cat_xgb_model_path) and os.path.exists(lgb_model_path):
+                    # カテゴリ別スコアで3Way最適化
+                    try:
+                        cat_xgb_model = xgb_lib.XGBRanker()
+                        cat_xgb_model.load_model(cat_xgb_model_path)
+                        cat_xgb_scores = cat_xgb_model.predict(X[cat_cal_ordered_e])
+
+                        cat_query_ids = groups_to_query_ids(cat_groups_cal_e)
+                        cat_pool = Pool(data=X[cat_cal_ordered_e], group_id=cat_query_ids)
+                        cat_cb_scores = model.predict(cat_pool)
+
+                        cat_lgb = lgb_lib.Booster(model_file=lgb_model_path) if not os.path.exists(cat_lgb_model_path) else lgb_lib.Booster(model_file=cat_lgb_model_path)
+                        cat_lgb_scores = cat_lgb.predict(X[cat_cal_ordered_e])
+
+                        cat_positions = positions[cat_cal_ordered_e]
+                        w_x, w_c, w_l = learn_ensemble_weights_3way(
+                            cat_xgb_scores, cat_cb_scores, cat_lgb_scores,
+                            cat_positions, cat_groups_cal_e,
+                        )
+                        cat_ensemble_weights[cat_name] = {'xgb': w_x, 'catboost': w_c, 'lightgbm': w_l}
+                    except Exception as ce:
+                        print(f"  {cat_name} カテゴリ重み学習エラー: {ce} → グローバル重みを使用")
+                        cat_ensemble_weights[cat_name] = {
+                            k: v for k, v in ensemble_weights.items() if k != 'per_category'
+                        }
+                elif os.path.exists(cat_xgb_model_path):
+                    # 2Wayカテゴリ別重み学習（最低重みフロア付き）
                     try:
                         cat_xgb_w, cat_cb_w, cat_ndcg = learn_category_ensemble_weights(
                             cat_xgb_model_path, model,
@@ -591,9 +708,13 @@ def main():
                         print(f"  {cat_name}: XGB={cat_xgb_w}, CB={cat_cb_w} (NDCG@1={cat_ndcg:.4f})")
                     except Exception as e:
                         print(f"  {cat_name}: カテゴリ別重み学習エラー: {e}")
-                        cat_ensemble_weights[cat_name] = {'xgb': ensemble_weights['xgb'], 'catboost': ensemble_weights['catboost']}
+                        cat_ensemble_weights[cat_name] = {
+                            k: v for k, v in ensemble_weights.items() if k != 'per_category'
+                        }
                 else:
-                    cat_ensemble_weights[cat_name] = {'xgb': ensemble_weights['xgb'], 'catboost': ensemble_weights['catboost']}
+                    cat_ensemble_weights[cat_name] = {
+                        k: v for k, v in ensemble_weights.items() if k != 'per_category'
+                    }
 
             ensemble_weights['per_category'] = cat_ensemble_weights
 

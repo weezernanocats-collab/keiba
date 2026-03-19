@@ -822,6 +822,46 @@ export async function calibrateCategoryWeights(): Promise<CategoryCalibrationRes
   return { categories: results };
 }
 
+// ==================== コンセプトドリフト検出 ====================
+
+/**
+ * 直近30レースのROIと全体ROIを比較し、コンセプトドリフトを検出する。
+ * 直近ROIが全体ROIの70%以下に低下した場合にアラートを発する。
+ */
+export async function checkConceptDrift(): Promise<{
+  isDrifting: boolean;
+  recentROI: number;
+  overallROI: number;
+  ratio: number;
+  alert: string | null;
+}> {
+  const recent = await dbAll<{ bet_roi: number }>(`
+    SELECT bet_roi FROM prediction_results
+    WHERE bet_roi IS NOT NULL
+    ORDER BY evaluated_at DESC LIMIT 30
+  `);
+
+  const overall = await dbAll<{ bet_roi: number }>(`
+    SELECT bet_roi FROM prediction_results
+    WHERE bet_roi IS NOT NULL
+  `);
+
+  if (recent.length < 10 || overall.length < 50) {
+    return { isDrifting: false, recentROI: 0, overallROI: 0, ratio: 1, alert: null };
+  }
+
+  const recentROI = recent.reduce((s, r) => s + (r.bet_roi || 0), 0) / recent.length;
+  const overallROI = overall.reduce((s, r) => s + (r.bet_roi || 0), 0) / overall.length;
+  const ratio = overallROI > 0 ? recentROI / overallROI : 1;
+
+  const isDrifting = ratio < 0.7;
+  const alert = isDrifting
+    ? `コンセプトドリフト検出: 直近30レースROI (${(recentROI * 100).toFixed(1)}%) が全体 (${(overallROI * 100).toFixed(1)}%) の${(ratio * 100).toFixed(0)}%に低下。再学習を推奨。`
+    : null;
+
+  return { isDrifting, recentROI, overallROI, ratio, alert };
+}
+
 // ==================== bets_json オッズ修復 ====================
 
 export interface RepairBetsOddsResult {
