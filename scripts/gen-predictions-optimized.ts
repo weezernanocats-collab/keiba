@@ -618,13 +618,24 @@ async function main() {
   await ensureCalibrationLoaded();
   console.log('校正済みウェイト適用完了');
 
-  // 再生成モード: 全予想と評価結果を削除
+  // 再生成モード: 対象日付の予想のみ削除（日付指定必須）
   if (REGEN_MODE) {
     const { dbRun } = await import('../src/lib/database');
-    console.log('全予想を削除中...');
-    await dbRun('DELETE FROM prediction_results', []);
-    await dbRun('DELETE FROM predictions', []);
-    console.log('削除完了\n');
+    if (DATE_FILTER) {
+      console.log(`${DATE_FILTER} の予想を削除中...`);
+      await dbRun(
+        `DELETE FROM prediction_results WHERE prediction_id IN (
+          SELECT p.id FROM predictions p JOIN races r ON p.race_id = r.id WHERE r.date = ?
+        )`, [DATE_FILTER]);
+      await dbRun(
+        `DELETE FROM predictions WHERE race_id IN (
+          SELECT id FROM races WHERE date = ?
+        )`, [DATE_FILTER]);
+      console.log('削除完了\n');
+    } else {
+      console.error('ERROR: --regen には --date が必須です（全削除防止）');
+      process.exit(1);
+    }
   }
 
   // 2. データプリロード（Tursoから一括読み込み）
