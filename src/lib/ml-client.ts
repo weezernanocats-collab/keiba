@@ -104,23 +104,13 @@ interface ContextualFeatures {
   distance: number;
   trackCondition: string;
   weather?: string | undefined;
-  weightChange?: number | undefined;
-  trainerWinRate?: number | undefined;
-  trainerPlaceRate?: number | undefined;
   sireTrackWinRate?: number | undefined;
-  jockeyDistanceWinRate?: number | undefined;
-  jockeyCourseWinRate?: number | undefined;
-  jockeySwitchQuality?: number | undefined;
+  jockeyDistanceWinRate?: number | undefined; // jockeyXdistance交互作用の計算に使用
   cornerDelta?: number | undefined;
   avgMarginWhenWinning?: number | undefined;
   avgMarginWhenLosing?: number | undefined;
   daysSinceLastRace?: number | undefined;
   meetDay?: number | undefined;
-  trainerDistCatWinRate?: number | undefined;
-  trainerCondWinRate?: number | undefined;
-  trainerGradeWinRate?: number | undefined;
-  // v7.0: ラップタイム基盤特徴量
-  courseDistPaceAvg?: number | undefined;
   // v8.0: 直近フォーム + キャリア特徴量
   lastRacePosition?: number | undefined;
   last3WinRate?: number | undefined;
@@ -132,13 +122,10 @@ interface ContextualFeatures {
   relativePosition?: number | undefined;
   upsetRate?: number | undefined;
   avgPastOdds?: number | undefined;
-  // v10.0: 走破タイム標準化 + ペース + L3F
+  // v10.0: 走破タイム標準化
   standardTimeDev?: number | undefined;
   bestTimeDev?: number | undefined;
   timeConsistency?: number | undefined;
-  earlyPositionRatio?: number | undefined;
-  positionGainAvg?: number | undefined;
-  l3fRelativeAvg?: number | undefined;
   // Phase 3 新特徴量 (#12-#16)
   bodyWeightTrend?: number | undefined;
   distanceChange?: number | undefined;
@@ -159,6 +146,12 @@ export function buildMLFeatures(
 
   const condEncoded = TRACK_CONDITION_ENCODE[ctx.trackCondition] ?? 0;
 
+  // v11.0: ablation studyでノイズ特徴量22個を削除
+  // 削除済み: jockeyAbility, trainerAbility, trainerWinRate, trainerPlaceRate,
+  //           trainerDistCatWinRate, trainerCondWinRate, trainerGradeWinRate,
+  //           jockeyDistanceWinRate, jockeyCourseWinRate, jockeySwitchQuality,
+  //           weightXspeed, ageXdistance, jockeyXform, fieldSizeXpost, rotationXform, formXclassChange,
+  //           gradeXtrainer, earlyPositionRatio, positionGainAvg, l3fRelativeAvg, courseDistPaceAvg, paceStyleMatch
   const features: Record<string, number> = {
     ...factorScores,
     fieldSize: ctx.fieldSize,
@@ -174,33 +167,13 @@ export function buildMLFeatures(
     oddsLogTransform: odds > 0 ? Math.log(odds) : Math.log(10),
     popularityRatio: ctx.fieldSize > 0 ? popularity / ctx.fieldSize : 0.5,
     weather_encoded: WEATHER_ENCODE[ctx.weather ?? ''] ?? 0,
-    trainerWinRate: ctx.trainerWinRate ?? 0.08,
-    trainerPlaceRate: ctx.trainerPlaceRate ?? 0.20,
     sireTrackWinRate: ctx.sireTrackWinRate ?? 0.07,
-    jockeyDistanceWinRate: ctx.jockeyDistanceWinRate ?? 0.08,
-    jockeyCourseWinRate: ctx.jockeyCourseWinRate ?? 0.08,
-    jockeySwitchQuality: ctx.jockeySwitchQuality ?? 0,
     cornerDelta: ctx.cornerDelta ?? 0,
     avgMarginWhenWinning: ctx.avgMarginWhenWinning ?? 0,
     avgMarginWhenLosing: ctx.avgMarginWhenLosing ?? 0,
     daysSinceLastRace: ctx.daysSinceLastRace ?? 30,
     meetDay: ctx.meetDay ?? 1,
-    trainerDistCatWinRate: ctx.trainerDistCatWinRate ?? 0.08,
-    trainerCondWinRate: ctx.trainerCondWinRate ?? 0.08,
-    trainerGradeWinRate: ctx.trainerGradeWinRate ?? 0.08,
-    weightXspeed: ctx.handicapWeight * ((factorScores.speedRating ?? 50) / 100),
-    ageXdistance: ctx.age * (ctx.distance / 1000),
-    jockeyXform: ((factorScores.jockeyAbility ?? 50) / 100) * ((factorScores.recentForm ?? 50) / 100),
-    fieldSizeXpost: ctx.fieldSize > 0 ? ctx.fieldSize * (ctx.postPosition / ctx.fieldSize) : ctx.postPosition,
-    rotationXform: ((factorScores.rotation ?? 50) / 100) * ((factorScores.recentForm ?? 50) / 100),
     conditionXsire: condEncoded * ((factorScores.sireAptitude ?? 50) / 100),
-    // v7.0: ラップタイム基盤特徴量
-    courseDistPaceAvg: ctx.courseDistPaceAvg ?? 0.5,
-    paceStyleMatch: (() => {
-      const runStyleNorm = (factorScores.runningStyle ?? 50) / 100;
-      const cdpa = ctx.courseDistPaceAvg ?? 0.5;
-      return runStyleNorm * cdpa + (1 - runStyleNorm) * (1 - cdpa);
-    })(),
     // v8.0: 直近フォーム + キャリア特徴量
     lastRacePosition: ctx.lastRacePosition ?? 9,
     last3WinRate: ctx.last3WinRate ?? 0,
@@ -212,23 +185,18 @@ export function buildMLFeatures(
     relativePosition: ctx.relativePosition ?? 0.5,
     upsetRate: ctx.upsetRate ?? 0.1,
     avgPastOdds: ctx.avgPastOdds ?? Math.log(10),
-    // v10.0: 走破タイム標準化 + ペース + L3F
+    // v10.0: 走破タイム標準化
     standardTimeDev: ctx.standardTimeDev ?? 0,
     bestTimeDev: ctx.bestTimeDev ?? 0,
     timeConsistency: ctx.timeConsistency ?? 0,
-    earlyPositionRatio: ctx.earlyPositionRatio ?? 0.5,
-    positionGainAvg: ctx.positionGainAvg ?? 0,
-    l3fRelativeAvg: ctx.l3fRelativeAvg ?? 0,
     // Phase 3 新特徴量 (#12-#16)
     bodyWeightTrend: ctx.bodyWeightTrend ?? 0,
     distanceChange: ctx.distanceChange ?? 0,
     jockeyTrainerWinRate: ctx.jockeyTrainerWinRate ?? 0.05,
     horseCourseWinRate: ctx.horseCourseWinRate ?? 0.05,
     escaperCount: ctx.escaperCount ?? 0,
-    // Phase 3 追加交互作用特徴量 (#17)
-    gradeXtrainer: (GRADE_ENCODE[ctx.grade ?? ''] ?? 3) * ((factorScores.trainerAbility ?? 50) / 100),
+    // Phase 3 交互作用特徴量 (#17, 残留)
     jockeyXdistance: (ctx.jockeyDistanceWinRate ?? 0.08) * (ctx.distance / 1000),
-    formXclassChange: ((factorScores.recentForm ?? 50) / 100) * ((factorScores.classPerformance ?? 50) / 100),
   };
 
   // NaN/Infinity ガード: 初出走馬やデータ欠損で特徴量が壊れるのを防止

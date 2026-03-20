@@ -58,7 +58,7 @@ import { applyEnhancedPaceBonus } from './pace-analyzer';
 import { calcMarginScore } from './margin-score';
 import { calcWeatherScore } from './weather-score';
 import { applyVenueMultipliers } from './racecourse-profiles';
-import { calcTimeFeatures, calcPaceFeatures, calcL3fRelative } from './time-features';
+import { calcTimeFeatures } from './time-features';
 
 // v6.0: ML特徴量用ヘルパー
 function marginToSeconds(margin: string | undefined): number {
@@ -304,26 +304,14 @@ export async function generatePrediction(
           distance,
           trackCondition: cond,
           weather,
-          weightChange: sh.entry.result?.weightChange != null
-            ? sh.entry.result.weightChange
-            : undefined,
-          trainerWinRate: input?.trainerWinRate,
-          trainerPlaceRate: input?.trainerPlaceRate,
           sireTrackWinRate: input?.sireTrackWinRate,
-          jockeyDistanceWinRate: input?.jockeyDistanceWinRate,
-          jockeyCourseWinRate: input?.jockeyCourseWinRate,
+          jockeyDistanceWinRate: input?.jockeyDistanceWinRate, // jockeyXdistance交互作用の計算用
           // v6.0: 新特徴量
-          jockeySwitchQuality,
           cornerDelta,
           avgMarginWhenWinning,
           avgMarginWhenLosing,
           daysSinceLastRace,
           meetDay: raceId.length >= 10 ? parseInt(raceId.substring(8, 10)) || 1 : 1,
-          trainerDistCatWinRate: input?.trainerDistCatWinRate,
-          trainerCondWinRate: input?.trainerCondWinRate,
-          trainerGradeWinRate: input?.trainerGradeWinRate,
-          // v7.0: ラップタイム基盤特徴量
-          courseDistPaceAvg: ctx.courseDistPaceAvg,
           // v8.0: 直近フォーム + キャリア特徴量
           lastRacePosition: pp.length > 0 ? pp[0].position : 9,
           last3WinRate: pp.length > 0
@@ -346,7 +334,7 @@ export async function generatePrediction(
             for (const p of pp) { if (p.position === 1) streak++; else break; }
             return streak;
           })(),
-          // v9.0: 新特徴量4つ
+          // v9.0: 新特徴量
           relativePosition: pp.length > 0 && pp[0].entries > 0
             ? pp[0].position / pp[0].entries : 0.5,
           upsetRate: (() => {
@@ -360,7 +348,7 @@ export async function generatePrediction(
             const avg = placed.reduce((s, p) => s + p.odds, 0) / placed.length;
             return Math.log(avg > 0 ? avg : 10);
           })(),
-          // v10.0: 走破タイム標準化 + ペース + L3F
+          // v10.0: 走破タイム標準化
           ...(() => {
             const ppForTime = pp.map(p => ({
               time: p.time ?? null,
@@ -371,20 +359,6 @@ export async function generatePrediction(
             }));
             return calcTimeFeatures(ppForTime);
           })(),
-          ...(() => {
-            const ppForPace = pp.map(p => ({
-              cornerPositions: p.cornerPositions ?? null,
-              entries: p.entries,
-              position: p.position,
-            }));
-            return calcPaceFeatures(ppForPace);
-          })(),
-          l3fRelativeAvg: calcL3fRelative(pp.map(p => ({
-            lastThreeFurlongs: p.lastThreeFurlongs ?? null,
-            distance: p.distance,
-            trackType: p.trackType,
-            position: p.position,
-          }))),
           // Phase 3 新特徴量 (#12-#16)
           bodyWeightTrend,
           distanceChange,

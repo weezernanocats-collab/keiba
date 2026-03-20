@@ -34,12 +34,19 @@ const db = createClient({
 // 特徴量名の順序定義（v7.0 SHAP分析後クリーニング）
 // 除去済み: courseAptitude, classPerformance, jockeyTrainerCombo,
 //          historicalPostBias, trackType_encoded, weightChange, odds (raw)
+// v11.0: ablation studyでノイズ特徴量22個を削除
+// 削除済み: jockeyAbility, trainerAbility (ファクタースコア)
+//           trainerWinRate, trainerPlaceRate, trainerDistCatWinRate, trainerCondWinRate, trainerGradeWinRate (trainer統計)
+//           jockeyDistanceWinRate, jockeyCourseWinRate, jockeySwitchQuality (jockey統計)
+//           weightXspeed, ageXdistance, jockeyXform, fieldSizeXpost, rotationXform, formXclassChange (交互作用)
+//           gradeXtrainer (Phase 3交互作用)
+//           earlyPositionRatio, positionGainAvg, l3fRelativeAvg, courseDistPaceAvg, paceStyleMatch (ペース)
 const FEATURE_NAMES = [
   // ファクタースコア (SHAP分析で有効確認済み)
   'recentForm', 'distanceAptitude', 'trackConditionAptitude',
-  'jockeyAbility', 'speedRating', 'runningStyle',
+  'speedRating', 'runningStyle',
   'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
-  'sireAptitude', 'trainerAbility',
+  'sireAptitude',
   'seasonalPattern', 'handicapAdvantage',
   'marginCompetitiveness',
   // コンテキスト特徴量
@@ -48,29 +55,16 @@ const FEATURE_NAMES = [
   'distance', 'trackCondition_encoded', 'oddsLogTransform', 'popularityRatio',
   // 統計特徴量
   'weather_encoded',
-  'trainerWinRate', 'trainerPlaceRate',
-  'sireTrackWinRate', 'jockeyDistanceWinRate', 'jockeyCourseWinRate',
+  'sireTrackWinRate',
   // v6.0: 新特徴量
-  'jockeySwitchQuality',     // 騎手乗替の質（WR差）
   'cornerDelta',              // コーナー通過順位差（加速指標）
   'avgMarginWhenWinning',     // 勝ち時平均着差（圧勝力）
   'avgMarginWhenLosing',      // 負け時平均着差（接戦力）
   'daysSinceLastRace',        // 休養日数（連続値）
-  // v6.1: 開催週 + 調教師パターン
+  // v6.1: 開催週
   'meetDay',                    // 開催何日目（トラック劣化）
-  'trainerDistCatWinRate',      // 調教師×距離カテゴリ勝率
-  'trainerCondWinRate',         // 調教師×馬場状態勝率
-  'trainerGradeWinRate',        // 調教師×重賞勝率
-  // v6.0: 交互作用特徴量
-  'weightXspeed',             // 斤量×スピード指数
-  'ageXdistance',             // 馬齢×距離
-  'jockeyXform',              // 騎手力×直近成績
-  'fieldSizeXpost',           // 頭数×枠順
-  'rotationXform',            // ローテーション×直近成績
+  // v6.0: 交互作用特徴量 (残留)
   'conditionXsire',           // 馬場状態×血統適性
-  // v7.0: ラップタイム基盤特徴量
-  'courseDistPaceAvg',        // コース×距離の典型ペース
-  'paceStyleMatch',           // 脚質×ペース相性 (追込×ハイ=高, 逃げ×スロー=高)
   // v8.0: 直近フォーム + キャリア特徴量
   'lastRacePosition',        // 前走着順 (1-18, デフォルト9)
   'last3WinRate',             // 直近3走の勝率 (0-1)
@@ -82,25 +76,20 @@ const FEATURE_NAMES = [
   'relativePosition',         // 相対着順 (前走着順/前走出走頭数)
   'upsetRate',                // 穴馬力 (人気5番以下好走率)
   'avgPastOdds',              // 好走時平均オッズ (log変換)
-  // v10.0: 走破タイム標準化 + ペース再設計 + L3F + weight復活
+  // v10.0: 走破タイム標準化 + weight復活
   'standardTimeDev',          // 走破タイム標準化偏差（直近5走加重平均）
   'bestTimeDev',              // 過去最高標準化タイム偏差
   'timeConsistency',          // タイム偏差の標準偏差（安定性の逆数）
-  'earlyPositionRatio',       // 第1コーナー相対位置（0=先頭, 1=最後方）
-  'positionGainAvg',          // コーナー位置上昇量（正=差してくる）
-  'l3fRelativeAvg',           // 上がり3F相対速さ（正=速い）
   'weightStability',          // 馬体重安定性
   'weightTrendSlope',         // 馬体重トレンド傾き
   'weightOptimalDelta',       // 最適体重との差
-  // Phase 3: 新特徴量 (#12-#17)
+  // Phase 3: 新特徴量 (#12-#16)
   'bodyWeightTrend',          // #12: 馬体重トレンド（3-5走移動平均傾き）
   'distanceChange',           // #13: 前走比距離変化（連続値）
   'jockeyTrainerWinRate',     // #14: 騎手×調教師コンボ勝率
   'horseCourseWinRate',       // #15: 競走馬×競馬場勝率
   'escaperCount',             // #16: 逃げ・先行馬数（先頭3番手以内）
-  'gradeXtrainer',            // #17: グレード×調教師勝率
   'jockeyXdistance',          // #17: 騎手距離別WR×距離
-  'formXclassChange',         // #17: 直近成績×クラス変化
 ];
 
 const SEX_ENCODE: Record<string, number> = { '牡': 0, '牝': 1, 'セ': 2 };

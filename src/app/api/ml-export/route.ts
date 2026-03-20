@@ -5,12 +5,19 @@ export const maxDuration = 60;
 
 // 特徴量名の順序定義（export-training-data.ts / feature_names.json と一致）
 // v7.1: SHAP重要度0のファクター除去 + odds統合
+// v11.0: ablation studyでノイズ特徴量22個を削除 + 定数特徴量2個削除
+// 削除済み: jockeyAbility, trainerAbility, trainerWinRate, trainerPlaceRate,
+//           trainerDistCatWinRate, trainerCondWinRate, trainerGradeWinRate,
+//           jockeyDistanceWinRate, jockeyCourseWinRate, jockeySwitchQuality,
+//           weightXspeed, ageXdistance, jockeyXform, fieldSizeXpost, rotationXform, formXclassChange,
+//           gradeXtrainer, earlyPositionRatio, positionGainAvg, l3fRelativeAvg, courseDistPaceAvg, paceStyleMatch
+//           horsePacePreference, horseHaiPaceRate (定数特徴量)
 const FEATURE_NAMES = [
   // ファクタースコア (SHAP分析で有効確認済み)
   'recentForm', 'distanceAptitude', 'trackConditionAptitude',
-  'jockeyAbility', 'speedRating', 'runningStyle',
+  'speedRating', 'runningStyle',
   'postPositionBias', 'rotation', 'lastThreeFurlongs', 'consistency',
-  'sireAptitude', 'trainerAbility',
+  'sireAptitude',
   'seasonalPattern', 'handicapAdvantage',
   'marginCompetitiveness',
   // コンテキスト特徴量
@@ -19,19 +26,15 @@ const FEATURE_NAMES = [
   'distance', 'trackCondition_encoded', 'oddsLogTransform', 'popularityRatio',
   // 統計特徴量
   'weather_encoded',
-  'trainerWinRate', 'trainerPlaceRate',
-  'sireTrackWinRate', 'jockeyDistanceWinRate', 'jockeyCourseWinRate',
+  'sireTrackWinRate',
   // v6.0: 新特徴量
-  'jockeySwitchQuality', 'cornerDelta',
+  'cornerDelta',
   'avgMarginWhenWinning', 'avgMarginWhenLosing',
   'daysSinceLastRace',
-  // v6.1: 開催週 + 調教師パターン
-  'meetDay', 'trainerDistCatWinRate', 'trainerCondWinRate', 'trainerGradeWinRate',
-  // v6.0: 交互作用特徴量
-  'weightXspeed', 'ageXdistance', 'jockeyXform',
-  'fieldSizeXpost', 'rotationXform', 'conditionXsire',
-  // v7.0: ラップタイム基盤特徴量
-  'horsePacePreference', 'horseHaiPaceRate', 'courseDistPaceAvg', 'paceStyleMatch',
+  // v6.1: 開催週
+  'meetDay',
+  // v6.0: 交互作用特徴量 (残留)
+  'conditionXsire',
 ];
 
 const SEX_ENCODE: Record<string, number> = { '牡': 0, '牝': 1, 'セ': 2 };
@@ -395,45 +398,21 @@ export async function GET(request: NextRequest) {
           case 'handicapWeight': return entry.handicap_weight ?? 54;
           case 'postPosition': return entry.post_position ?? 1;
           case 'grade_encoded': return GRADE_ENCODE[pred.grade ?? ''] ?? 3;
-          case 'trackType_encoded': return TRACK_TYPE_ENCODE[pred.track_type] ?? 0;
           case 'distance': return pred.distance;
           case 'trackCondition_encoded': return TRACK_CONDITION_ENCODE[pred.track_condition ?? '良'] ?? 0;
           case 'oddsLogTransform': return entry.odds && entry.odds > 0 ? Math.log(entry.odds) : Math.log(10);
           case 'popularityRatio': return fieldSize > 0 ? popularity / fieldSize : 0.5;
           // 統計特徴量
           case 'weather_encoded': return WEATHER_ENCODE[pred.weather ?? ''] ?? 0;
-          case 'weightChange': return entry.result_weight_change ?? 0;
-          case 'trainerWinRate': return trainerStats.winRate;
-          case 'trainerPlaceRate': return trainerStats.placeRate;
           case 'sireTrackWinRate': return sireTrackWR;
-          case 'jockeyDistanceWinRate': return jockeyDistWR;
-          case 'jockeyCourseWinRate': return jockeyCourseWR;
-          // v5.1: 馬体重トレンド
-          case 'weightStability': return 50; // TODO: compute from weight history
-          case 'weightTrendSlope': return 0;
-          case 'weightOptimalDelta': return 0;
           // v6.0: 新特徴量
-          case 'jockeySwitchQuality': return jockeySwitchQuality;
           case 'cornerDelta': return cornerDelta;
           case 'avgMarginWhenWinning': return avgMarginWin;
           case 'avgMarginWhenLosing': return avgMarginLose;
           case 'daysSinceLastRace': return daysSinceLastRace;
-          // v6.1: 開催週 + 調教師パターン
+          // v6.1: 開催週
           case 'meetDay': return meetDay;
-          case 'trainerDistCatWinRate': {
-            if (!entry.trainer_name) return 0.08;
-            const dCat = pred.distance <= 1400 ? 'sprint' : pred.distance <= 1800 ? 'mile' : 'long';
-            const dc = trainerDistCatMap.get(`${entry.trainer_name}__${dCat}`);
-            return dc && dc.total >= 5 ? dc.wins / dc.total : 0.08;
-          }
-          case 'trainerCondWinRate': return 0.08; // simplified for API route
-          case 'trainerGradeWinRate': return 0.08; // simplified for API route
-          // v6.0: 交互作用特徴量
-          case 'weightXspeed': return (entry.handicap_weight ?? 54) * ((scores.speedRating ?? 50) / 100);
-          case 'ageXdistance': return (entry.age ?? 3) * (pred.distance / 1000);
-          case 'jockeyXform': return ((scores.jockeyAbility ?? 50) / 100) * ((scores.recentForm ?? 50) / 100);
-          case 'fieldSizeXpost': return fieldSize * ((entry.post_position ?? 1) / fieldSize);
-          case 'rotationXform': return ((scores.rotation ?? 50) / 100) * ((scores.recentForm ?? 50) / 100);
+          // v6.0: 交互作用特徴量 (残留)
           case 'conditionXsire': return (TRACK_CONDITION_ENCODE[pred.track_condition ?? '良'] ?? 0) * ((scores.sireAptitude ?? 50) / 100);
           default: return scores[name] ?? 50;
         }

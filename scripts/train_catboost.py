@@ -334,10 +334,12 @@ def fit_catboost_calibration(model, X_cal, positions_cal, groups_cal):
 
 def learn_ensemble_weights(xgb_model_path, catboost_model, X_cal, positions_cal, groups_cal, feature_names):
     """検証セットでXGBoost + CatBoostの最適ブレンド重みを学習
-    最低重みフロア(0.2)を設け、どちらかのモデルが完全に無視されることを防ぐ"""
+    XGBの最大重みを50%に制限し、CatBoostが最低50%を保証する。
+    診断結果: CatBoostが全カテゴリでalpha正、XGBは短距離でalpha負のため。"""
     import xgboost as xgb
 
-    MIN_WEIGHT = 0.2  # 最低重みフロア（どちらのモデルも最低20%は使う）
+    MIN_XGB_WEIGHT = 0.0   # XGBは0%まで下がれる
+    MAX_XGB_WEIGHT = 0.50  # XGBは最大50%（CBが最低50%を保証）
 
     xgb_model = xgb.XGBRanker()
     xgb_model.load_model(xgb_model_path)
@@ -356,7 +358,7 @@ def learn_ensemble_weights(xgb_model_path, catboost_model, X_cal, positions_cal,
     )
     y_true_groups = split_by_groups(y_relevance, groups_cal)
 
-    for w_int in range(int(MIN_WEIGHT * 100), int((1.0 - MIN_WEIGHT) * 100) + 1, 5):
+    for w_int in range(int(MIN_XGB_WEIGHT * 100), int(MAX_XGB_WEIGHT * 100) + 1, 5):
         w = w_int / 100.0
         blended = w * xgb_scores + (1 - w) * cb_scores
         y_pred_groups = split_by_groups(blended, groups_cal)
@@ -375,7 +377,8 @@ def learn_category_ensemble_weights(xgb_model_path, catboost_model, X_cal, posit
     """カテゴリ別のアンサンブル重みを学習"""
     import xgboost as xgb
 
-    MIN_WEIGHT = 0.2
+    MIN_XGB_WEIGHT = 0.0
+    MAX_XGB_WEIGHT = 0.50
 
     xgb_model = xgb.XGBRanker()
     xgb_model.load_model(xgb_model_path)
@@ -392,7 +395,7 @@ def learn_category_ensemble_weights(xgb_model_path, catboost_model, X_cal, posit
         np.array([position_to_relevance(int(p)) for p in positions_cal]),
         groups_cal,
     )
-    for w_int in range(int(MIN_WEIGHT * 100), int((1.0 - MIN_WEIGHT) * 100) + 1, 5):
+    for w_int in range(int(MIN_XGB_WEIGHT * 100), int(MAX_XGB_WEIGHT * 100) + 1, 5):
         w = w_int / 100.0
         blended = w * xgb_scores + (1 - w) * cb_scores
         y_pred_groups = split_by_groups(blended, groups_cal)
