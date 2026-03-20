@@ -41,7 +41,15 @@ async function main() {
   console.log(`Current predictions: ${predCount.rows[0].count}`);
   console.log(`Today's races: ${raceCount.rows[0].count}`);
 
-  // Step 2: Delete prediction_results first (FK references predictions), then predictions
+  // Step 2: Safety check — 全件削除の確認
+  const currentCount = Number(predCount.rows[0].count);
+  if (currentCount > 0 && !process.argv.includes('--confirm-delete-all')) {
+    console.error(`\nERROR: ${currentCount}件の予想が削除されます。`);
+    console.error('全件削除を実行するには --confirm-delete-all フラグを付けてください。');
+    console.error('日付指定で再生成する場合は gen-predictions-optimized.ts --date YYYY-MM-DD --regen を使用してください。');
+    process.exit(1);
+  }
+
   console.log('\nDeleting prediction results (FK child)...');
   const deleteEval = await db.execute('DELETE FROM prediction_results');
   console.log(`Deleted ${deleteEval.rowsAffected} prediction results`);

@@ -40,9 +40,16 @@ interface EntryRow {
 async function main() {
   console.log('=== ROI一括修復 ===\n');
 
-  // 1. 既存のprediction_resultsを全削除
+  // 1. 既存のprediction_resultsを全削除（確認付き）
   const existing = await db.execute('SELECT COUNT(*) as c FROM prediction_results');
-  console.log(`既存prediction_results: ${existing.rows[0].c}件 → 全削除`);
+  const existingCount = Number(existing.rows[0].c);
+  console.log(`既存prediction_results: ${existingCount}件`);
+  if (existingCount > 0 && !process.argv.includes('--confirm-delete-all')) {
+    console.error(`ERROR: ${existingCount}件のprediction_resultsが削除されます。`);
+    console.error('実行するには --confirm-delete-all フラグを付けてください。');
+    process.exit(1);
+  }
+  console.log(`→ 全削除`);
   await db.execute('DELETE FROM prediction_results');
 
   // 2. 全予想を取得（1クエリ）
