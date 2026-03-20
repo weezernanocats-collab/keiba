@@ -836,6 +836,84 @@ function getNextScheduledTime(): string | null {
   return `${tomorrow}T${times[0]}:00`;
 }
 
+/**
+ * 翌日・翌々日のオッズを事前取得し、予想を再生成する。
+ * 夕方cronから呼ばれる。オッズが入ることで予想精度・信頼度が向上する。
+ */
+export async function fetchUpcomingOdds(baseDate: string): Promise<{ fetched: number; predicted: number }> {
+  let totalFetched = 0;
+  let totalPredicted = 0;
+
+  for (let daysAhead = 1; daysAhead <= 2; daysAhead++) {
+    const targetDate = new Date(new Date(baseDate).getTime() + daysAhead * 86400000)
+      .toISOString().split('T')[0];
+
+    const races = await dbAll<{ id: string; name: string }>(
+      "SELECT id, name FROM races WHERE date = ? AND status IN ('予定', '出走確定')",
+      [targetDate]
+    );
+
+    if (races.length === 0) {
+      addLog('前日オッズ取得スキップ', `${targetDate}: レースなし`, true);
+      continue;
+    }
+
+    const runId = await recordSchedulerRun('upcoming_odds', targetDate, 'running');
+    addLog('前日オッズ取得開始', `${targetDate}: ${races.length}レース`, true);
+
+    let count = 0;
+    for (const race of races) {
+      try {
+        const odds = await scrapeOdds(race.id);
+        const snapshotTime = new Date().toISOString();
+        await batchUpsertOddsForRace(
+          race.id,
+          odds.win.map(w => ({ horseNumber: w.horseNumber, odds: w.odds })),
+          odds.place.map(p => ({ horseNumber: p.horseNumber, minOdds: p.minOdds, maxOdds: p.maxOdds })),
+          snapshotTime,
+        );
+        count++;
+      } catch (error) {
+        addLog('前日オッズ取得失敗', `${race.id}: ${errMsg(error)}`, false);
+      }
+      await sleep(currentConfig.rateLimitMs);
+    }
+    totalFetched += count;
+
+    // オッズ取得後に予想を再生成（オッズ反映済みの予想に更新）
+    if (count > 0) {
+      await ensureCalibrationLoaded();
+      let predCount = 0;
+      for (const race of races) {
+        try {
+          const raceData = await getRaceById(race.id);
+          if (!raceData?.entries?.length || raceData.entries.length < 2) continue;
+          const prediction = await buildAndPredict(
+            race.id, race.name, targetDate,
+            raceData.trackType as import('@/types').TrackType,
+            raceData.distance,
+            raceData.trackCondition as import('@/types').TrackCondition | undefined,
+            raceData.racecourseName, raceData.grade,
+            raceData.entries as import('@/types').RaceEntry[],
+            raceData.weather as string | undefined,
+            { includeTrainerStats: true },
+          );
+          await savePrediction(prediction);
+          predCount++;
+        } catch (error) {
+          addLog('前日予想再生成失敗', `${race.id}: ${errMsg(error)}`, false);
+        }
+      }
+      totalPredicted += predCount;
+      addLog('前日オッズ→予想再生成', `${targetDate}: オッズ${count}件, 予想${predCount}件`, true);
+    }
+
+    await updateSchedulerRun(runId, 'completed', `${count}/${races.length}レース, 予想${totalPredicted}件`);
+  }
+
+  return { fetched: totalFetched, predicted: totalPredicted };
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

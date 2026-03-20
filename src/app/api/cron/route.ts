@@ -10,7 +10,7 @@
  *   - 夕方 (17:00 JST): 結果スクレイプ + 予想照合 + 予想補完
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { runCronJob, executeMissingPredictions, cleanupStaleRaces } from '@/lib/scheduler';
+import { runCronJob, executeMissingPredictions, cleanupStaleRaces, fetchUpcomingOdds } from '@/lib/scheduler';
 import { evaluateAllPendingRaces } from '@/lib/accuracy-tracker';
 import { dbGet } from '@/lib/database';
 
@@ -220,6 +220,16 @@ export async function GET(request: NextRequest) {
         }
       } catch (e) {
         console.error('[cron] evening predictions failed:', e);
+      }
+
+      // 翌日・翌々日のオッズ事前取得 + 予想再生成
+      try {
+        const { fetched, predicted } = await fetchUpcomingOdds(todayStr);
+        if (fetched > 0) {
+          result.executed.push(`evening: 前日オッズ ${fetched}件取得, 予想${predicted}件再生成`);
+        }
+      } catch (e) {
+        console.error('[cron] upcoming odds failed:', e);
       }
     }
 
