@@ -186,15 +186,17 @@ export function calculateConfidence(scoredHorses: ScoredHorse[], ctx: RaceHistor
   const gap1_3 = scoredHorses[0].totalScore - scoredHorses[2].totalScore;
 
   // === 予測の分離度 (最大40pt) ===
+  // v11: MLモデルのtotalScore=winProb*100 スケールに合わせた閾値
+  // 旧スケール gap12 avg=4.61 → 新スケール avg=0.21 (約1/20)
   let separation = 0;
-  if (gap1_2 > 10) separation += 20;
-  else if (gap1_2 > 7) separation += 15;
-  else if (gap1_2 > 4) separation += 8;
+  if (gap1_2 > 0.5) separation += 20;
+  else if (gap1_2 > 0.3) separation += 15;
+  else if (gap1_2 > 0.15) separation += 8;
   else separation -= 5;
 
-  if (gap1_3 > 15) separation += 15;
-  else if (gap1_3 > 10) separation += 10;
-  else if (gap1_3 > 6) separation += 5;
+  if (gap1_3 > 0.75) separation += 15;
+  else if (gap1_3 > 0.5) separation += 10;
+  else if (gap1_3 > 0.25) separation += 5;
 
   if (scoredHorses[0].scores.consistency >= 70) separation += 5;
 
