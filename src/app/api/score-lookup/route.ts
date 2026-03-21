@@ -20,31 +20,44 @@ export async function GET(_request: NextRequest) {
       return NextResponse.json(cachedResult.data, { headers: getCacheHeaders('stats') });
     }
 
-    // 1クエリでpredictions + race_entriesをJOINして取得
-    const rows = await dbAll<{
+    // predictions の picks_json を取得（結果確定レースのみ）
+    const predRows = await dbAll<{
       race_id: string;
       picks_json: string;
-      horse_number: number;
-      result_position: number;
     }>(
-      `SELECT p.race_id, p.picks_json, re.horse_number, re.result_position
+      `SELECT p.race_id, p.picks_json
        FROM predictions p
        JOIN races r ON r.id = p.race_id
-       JOIN race_entries re ON re.race_id = p.race_id
        WHERE r.status = '結果確定'
-         AND re.result_position IS NOT NULL AND re.result_position > 0
        ORDER BY r.date DESC`,
       [],
     );
 
-    // レースごとの結果マップを構築
+    // race_entries の結果を取得
+    const entryRows = await dbAll<{
+      race_id: string;
+      horse_number: number;
+      result_position: number;
+    }>(
+      `SELECT re.race_id, re.horse_number, re.result_position
+       FROM race_entries re
+       JOIN races r ON r.id = re.race_id
+       WHERE r.status = '結果確定'
+         AND re.result_position IS NOT NULL AND re.result_position > 0`,
+      [],
+    );
+
+    // 結果マップを直接構築（2クエリからMap集計、JOINの代替）
     const resultMap = new Map<string, Map<number, number>>();
-    const racePicksMap = new Map<string, string>();
-    for (const row of rows) {
+    for (const row of entryRows) {
       if (!resultMap.has(row.race_id)) {
         resultMap.set(row.race_id, new Map());
       }
       resultMap.get(row.race_id)!.set(row.horse_number, row.result_position);
+    }
+
+    const racePicksMap = new Map<string, string>();
+    for (const row of predRows) {
       if (!racePicksMap.has(row.race_id)) {
         racePicksMap.set(row.race_id, row.picks_json);
       }
