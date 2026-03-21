@@ -132,7 +132,7 @@ export async function recalculateExpectedValues(raceId: string): Promise<boolean
   if (!updated) return false;
 
   await dbRun(
-    'UPDATE predictions SET bets_json = ? WHERE id = (SELECT id FROM predictions WHERE race_id = ? ORDER BY generated_at DESC LIMIT 1)',
+    'UPDATE predictions SET bets_json = ? WHERE race_id = ?',
     [JSON.stringify(newBets), raceId],
   );
 
