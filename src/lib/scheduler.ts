@@ -914,6 +914,58 @@ export async function fetchUpcomingOdds(baseDate: string): Promise<{ fetched: nu
   return { fetched: totalFetched, predicted: totalPredicted };
 }
 
+/**
+ * 当日レースのオッズスナップショットを収集
+ *
+ * 朝・昼のcronから呼び出し、odds_snapshots に時系列データを蓄積する。
+ * 予想の再生成は行わない（スナップショット保存のみ）。
+ */
+export async function collectOddsSnapshots(
+  date: string,
+  timeBudgetMs: number = 25_000,
+): Promise<{ collected: number; total: number }> {
+  const deadline = Date.now() + timeBudgetMs;
+
+  const races = await dbAll<{ id: string; name: string }>(
+    "SELECT id, name FROM races WHERE date = ? AND status IN ('予定', '出走確定')",
+    [date]
+  );
+
+  if (races.length === 0) {
+    return { collected: 0, total: 0 };
+  }
+
+  addLog('オッズスナップショット収集', `${date}: ${races.length}レース`, true);
+
+  let collected = 0;
+  for (const race of races) {
+    if (Date.now() >= deadline) {
+      addLog('オッズスナップショット中断', `タイムバジェット到達 (${collected}/${races.length})`, true);
+      break;
+    }
+
+    try {
+      const odds = await scrapeOdds(race.id);
+      if (odds.win.length > 0) {
+        const snapshotTime = new Date().toISOString();
+        await batchUpsertOddsForRace(
+          race.id,
+          odds.win.map(w => ({ horseNumber: w.horseNumber, odds: w.odds })),
+          odds.place.map(p => ({ horseNumber: p.horseNumber, minOdds: p.minOdds, maxOdds: p.maxOdds })),
+          snapshotTime,
+        );
+        collected++;
+      }
+    } catch (error) {
+      addLog('オッズスナップショット失敗', `${race.id}: ${errMsg(error)}`, false);
+    }
+    await sleep(currentConfig.rateLimitMs);
+  }
+
+  addLog('オッズスナップショット完了', `${date}: ${collected}/${races.length}レース`, true);
+  return { collected, total: races.length };
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

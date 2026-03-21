@@ -10,7 +10,7 @@
  *   - 夕方 (17:00 JST): 結果スクレイプ + 予想照合 + 予想補完
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { runCronJob, executeMissingPredictions, cleanupStaleRaces, fetchUpcomingOdds } from '@/lib/scheduler';
+import { runCronJob, executeMissingPredictions, cleanupStaleRaces, fetchUpcomingOdds, collectOddsSnapshots } from '@/lib/scheduler';
 import { evaluateAllPendingRaces } from '@/lib/accuracy-tracker';
 import { dbGet } from '@/lib/database';
 
@@ -111,6 +111,16 @@ export async function GET(request: NextRequest) {
         console.error('[cron] morning cleanup failed:', e);
       }
 
+      // 当日レースのオッズスナップショット収集（時系列データ蓄積）
+      try {
+        const { collected, total } = await collectOddsSnapshots(todayStr, 15_000);
+        if (collected > 0) {
+          executed.push(`morning: オッズスナップショット ${collected}/${total}レース`);
+        }
+      } catch (e) {
+        console.error('[cron] morning odds snapshot failed:', e);
+      }
+
       return NextResponse.json({
         ok: true,
         timestamp: now.toISOString(),
@@ -167,6 +177,17 @@ export async function GET(request: NextRequest) {
         console.error('[cron] midday bulk_chunked resume failed:', err instanceof Error ? err.message : err);
       });
       executed.push('bulk_chunked 再開トリガー');
+
+      // 当日レースのオッズスナップショット収集（時系列データ蓄積）
+      const snapshotBudget = Math.max(5_000, 45_000 - (Date.now() - handlerStart));
+      try {
+        const { collected, total } = await collectOddsSnapshots(todayStr, snapshotBudget);
+        if (collected > 0) {
+          executed.push(`オッズスナップショット ${collected}/${total}レース`);
+        }
+      } catch (e) {
+        console.error('[cron] midday odds snapshot failed:', e);
+      }
 
       return NextResponse.json({
         ok: true,
