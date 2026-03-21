@@ -23,11 +23,11 @@ export async function seedRacecourses(racecourses: typeof RACECOURSES) {
 
 export async function getRacesByDate(date: string) {
   const rows = await dbAll<Record<string, unknown>>(`
-    SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence,
+    SELECT r.*, COUNT(e.id) as entry_count,
+      (SELECT p2.confidence FROM predictions p2 WHERE p2.race_id = r.id ORDER BY p2.generated_at DESC LIMIT 1) as prediction_confidence,
       (SELECT MIN(re2.odds) FROM race_entries re2 WHERE re2.race_id = r.id AND re2.odds > 0) as top_odds
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
-    LEFT JOIN predictions p ON r.id = p.race_id
     WHERE r.date = ?
     GROUP BY r.id
     ORDER BY r.racecourse_name, r.race_number
@@ -42,11 +42,11 @@ export async function getRacesByDate(date: string) {
 
 export async function getRacesByDateRange(startDate: string, endDate: string) {
   const rows = await dbAll<Record<string, unknown>>(`
-    SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence,
+    SELECT r.*, COUNT(e.id) as entry_count,
+      (SELECT p2.confidence FROM predictions p2 WHERE p2.race_id = r.id ORDER BY p2.generated_at DESC LIMIT 1) as prediction_confidence,
       (SELECT MIN(re2.odds) FROM race_entries re2 WHERE re2.race_id = r.id AND re2.odds > 0) as top_odds
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
-    LEFT JOIN predictions p ON r.id = p.race_id
     WHERE r.date BETWEEN ? AND ?
     GROUP BY r.id
     ORDER BY r.date, r.racecourse_name, r.race_number
@@ -125,11 +125,11 @@ export async function getUpcomingRaces(limit: number = 50) {
   const jstToday = new Date(now.getTime() + jstOffset).toISOString().split('T')[0];
 
   const rows = await dbAll<Record<string, unknown>>(`
-    SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence,
+    SELECT r.*, COUNT(e.id) as entry_count,
+      (SELECT p2.confidence FROM predictions p2 WHERE p2.race_id = r.id ORDER BY p2.generated_at DESC LIMIT 1) as prediction_confidence,
       (SELECT MIN(re2.odds) FROM race_entries re2 WHERE re2.race_id = r.id AND re2.odds > 0) as top_odds
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
-    LEFT JOIN predictions p ON r.id = p.race_id
     WHERE r.date >= ?
     AND r.status IN ('予定', '出走確定')
     GROUP BY r.id
@@ -146,11 +146,11 @@ export async function getUpcomingRaces(limit: number = 50) {
 
 export async function getRecentResults(limit: number = 50) {
   const rows = await dbAll<Record<string, unknown>>(`
-    SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence,
+    SELECT r.*, COUNT(e.id) as entry_count,
+      (SELECT p2.confidence FROM predictions p2 WHERE p2.race_id = r.id ORDER BY p2.generated_at DESC LIMIT 1) as prediction_confidence,
       (SELECT MIN(re2.odds) FROM race_entries re2 WHERE re2.race_id = r.id AND re2.odds > 0) as top_odds
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
-    LEFT JOIN predictions p ON r.id = p.race_id
     WHERE r.status = '結果確定'
     GROUP BY r.id
     ORDER BY r.date DESC, r.racecourse_name DESC, r.race_number DESC
@@ -686,8 +686,7 @@ export async function getPredictionByRaceId(raceId: string) {
 }
 
 export async function savePrediction(prediction: Prediction) {
-  // 同一race_idの古い予測を削除してから新規挿入
-  await dbRun(`DELETE FROM predictions WHERE race_id = ?`, [prediction.raceId]);
+  // 新規挿入（旧予想は履歴として保持）
   await dbRun(`
     INSERT INTO predictions (race_id, generated_at, confidence, summary, analysis_json, picks_json, bets_json)
     VALUES (?, datetime('now'), ?, ?, ?, ?, ?)
@@ -699,6 +698,14 @@ export async function savePrediction(prediction: Prediction) {
     JSON.stringify(prediction.topPicks),
     JSON.stringify(prediction.recommendedBets),
   ]);
+  // 最新3件を超える古い履歴を削除（肥大化防止）
+  await dbRun(`
+    DELETE FROM predictions
+    WHERE race_id = ? AND id NOT IN (
+      SELECT id FROM predictions WHERE race_id = ?
+      ORDER BY generated_at DESC LIMIT 3
+    )
+  `, [prediction.raceId, prediction.raceId]);
 }
 
 // ==================== 統計 ====================

@@ -33,6 +33,7 @@ export async function GET(_request: NextRequest) {
        JOIN race_entries re ON re.race_id = p.race_id
        WHERE r.status = '結果確定'
          AND re.result_position IS NOT NULL AND re.result_position > 0
+         AND p.id = (SELECT MAX(p2.id) FROM predictions p2 WHERE p2.race_id = p.race_id)
        ORDER BY r.date DESC`,
       [],
     );

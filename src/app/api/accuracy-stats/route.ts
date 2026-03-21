@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
        JOIN races r ON r.id = pr.race_id
        LEFT JOIN race_entries re ON re.race_id = pr.race_id AND re.horse_id = pr.top_pick_horse_id
        LEFT JOIN odds o ON o.race_id = pr.race_id AND o.bet_type = '複勝' AND o.horse_number1 = re.horse_number
-       LEFT JOIN predictions p ON p.race_id = pr.race_id
+       LEFT JOIN predictions p ON p.id = pr.prediction_id
        WHERE r.status = '結果確定' ${dateFilter}
        ORDER BY r.date ASC, pr.evaluated_at ASC`,
       [],
