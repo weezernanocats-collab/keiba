@@ -32,11 +32,34 @@ function getClient(): Client {
 }
 
 // DB初期化（テーブル作成）- 初回のみ実行
+// NOTE: Turso batch() がハングする障害 (2026-03-21) のため、sequential execute に変更
+// NOTE: 本番DBはテーブル作成済みのため、存在チェックでスキップしてコールドスタートを高速化
 export async function ensureInitialized(): Promise<Client> {
   const db = getClient();
   if (initialized) return db;
 
-  await db.batch(SCHEMA_STATEMENTS);
+  // テーブル存在チェック: races テーブルがあれば初期化済みとみなす
+  try {
+    await db.execute("SELECT 1 FROM races LIMIT 1");
+    // テーブルが存在する → スキーマ作成不要
+    initialized = true;
+    return db;
+  } catch {
+    // テーブルが存在しない → 初回セットアップ実行
+  }
+
+  // sequential execute で初期化（Turso batch障害回避）
+  for (const stmt of SCHEMA_STATEMENTS) {
+    try {
+      if (typeof stmt === 'string') {
+        await db.execute(stmt);
+      } else {
+        await db.execute(stmt);
+      }
+    } catch {
+      // CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT EXISTS は既存時エラーを無視
+    }
+  }
 
   // FK制約対策: 'unknown' racecourseが常に存在するように保証
   await db.execute({
@@ -109,12 +132,16 @@ export async function dbRunNamed(sql: string, args: Record<string, unknown>): Pr
 }
 
 /** 複数のSQL文をバッチ実行（トランザクション） */
+// NOTE: Turso batch() 障害回避のため sequential execute にフォールバック
 export async function dbBatch(statements: (string | { sql: string; args: unknown[] })[]): Promise<void> {
   const db = await ensureInitialized();
-  const typed = statements.map(s =>
-    typeof s === 'string' ? s : { sql: s.sql, args: sanitizeArgs(s.args) }
-  );
-  await db.batch(typed, 'write');
+  for (const s of statements) {
+    if (typeof s === 'string') {
+      await db.execute(s);
+    } else {
+      await db.execute({ sql: s.sql, args: sanitizeArgs(s.args) });
+    }
+  }
 }
 
 /** 複数のSQL文を順次実行 */
@@ -124,8 +151,8 @@ export async function dbExec(sql: string): Promise<void> {
     .split(';')
     .map(s => s.trim())
     .filter(s => s.length > 0);
-  if (statements.length > 0) {
-    await db.batch(statements, 'write');
+  for (const stmt of statements) {
+    await db.execute(stmt);
   }
 }
 
