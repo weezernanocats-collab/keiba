@@ -617,12 +617,8 @@ async function executeOddsFetch(date: string): Promise<void> {
   }
 }
 
-async function executeResultFetch(date: string): Promise<void> {
-  if (await hasSchedulerRunToday('results', date)) {
-    addLog('結果取得スキップ', `${date} は既に実行済み`, true);
-    return;
-  }
-
+export async function executeResultFetch(date: string, timeBudgetMs?: number): Promise<{ resultCount: number; totalRaces: number }> {
+  // hasSchedulerRunToday ガードを除去: status != '結果確定' クエリで自然に冪等
   const runId = await recordSchedulerRun('results', date, 'running');
   addLog('結果取得開始', date, true);
   lastRunTime = new Date().toISOString();
@@ -634,13 +630,27 @@ async function executeResultFetch(date: string): Promise<void> {
     );
     addLog('結果取得対象', `${date}: ${races.length}レース`, true);
 
-    // 結果取得はレスポンスが軽いので 500ms 間隔で十分（60秒制限対応）
+    const startTime = Date.now();
+    const hasTime = timeBudgetMs
+      ? () => (Date.now() - startTime) < timeBudgetMs
+      : () => true;
+
     const resultRateMs = 500;
     let resultCount = 0;
     let entryResultCount = 0;
+    let errorCount = 0;
+    let timedOut = false;
     for (const race of races) {
+      if (!hasTime()) {
+        addLog('結果取得中断', `タイムバジェット超過: ${resultCount}/${races.length}件取得済み`, true);
+        timedOut = true;
+        break;
+      }
       try {
         const { results, lapTimes } = await scrapeRaceResultWithLaps(race.id);
+        if (results.length === 0) {
+          addLog('結果取得空', `${race.id} (${race.name}): 結果データなし`, false);
+        }
         for (const r of results) {
           await upsertRaceEntry(race.id, {
             horseNumber: r.horseNumber, horseName: r.horseName,
@@ -650,13 +660,11 @@ async function executeResultFetch(date: string): Promise<void> {
             },
           });
           entryResultCount++;
-          // オッズ・人気も保存
           if (r.odds > 0) {
             await upsertOdds(race.id, '単勝', [r.horseNumber], r.odds);
             await upsertRaceEntryOdds(race.id, r.horseNumber, r.odds, r.popularity);
           }
         }
-        // ラップタイム保存
         if (lapTimes.length > 0) {
           const paceType = classifyPaceType(lapTimes);
           await upsertRaceLapTimes(race.id, lapTimes, paceType);
@@ -666,28 +674,35 @@ async function executeResultFetch(date: string): Promise<void> {
           resultCount++;
         }
       } catch (error) {
+        errorCount++;
         addLog('結果取得失敗', `${race.id}: ${errMsg(error)}`, false);
       }
       await sleep(resultRateMs);
     }
-    addLog('結果スクレイピング完了', `${resultCount}レース確定, ${entryResultCount}頭分`, true);
+    addLog('結果スクレイピング完了', `${resultCount}/${races.length}レース確定, ${entryResultCount}頭分, エラー${errorCount}件`, true);
 
-    // 予想 vs 実結果の自動照合
-    const evalResults = await evaluateAllPendingRaces();
-    const wins = evalResults.filter(r => r.winHit).length;
-    const places = evalResults.filter(r => r.placeHit).length;
-    addLog('予想照合', `${evalResults.length}件照合 → 単勝${wins}的中, 複勝${places}的中`, true);
+    // 全レース処理完了時のみ照合+キャリブレーション（部分完了時は呼び出し元で実行）
+    if (!timedOut) {
+      const evalResults = await evaluateAllPendingRaces();
+      const wins = evalResults.filter(r => r.winHit).length;
+      const places = evalResults.filter(r => r.placeHit).length;
+      addLog('予想照合', `${evalResults.length}件照合 → 単勝${wins}的中, 複勝${places}的中`, true);
 
-    const detail = `${date}: ${resultCount}レース確定, 照合${evalResults.length}件 (単勝${wins}的中, 複勝${places}的中)`;
+      if (resultCount > 0) {
+        const calibResult = await autoCalibrate();
+        addLog('自動キャリブレーション', calibResult.message, calibResult.applied);
+      }
+    }
+
+    const detail = `${date}: ${resultCount}/${races.length}レース確定, ${entryResultCount}頭分${timedOut ? ' (途中中断)' : ''}, エラー${errorCount}件`;
     addLog('結果取得完了', detail, true);
     await updateSchedulerRun(runId, 'completed', detail);
 
-    // 結果取得後に自動キャリブレーションを試行
-    const calibResult = await autoCalibrate();
-    addLog('自動キャリブレーション', calibResult.message, calibResult.applied);
+    return { resultCount, totalRaces: races.length };
   } catch (error) {
     addLog('結果取得失敗', errMsg(error), false);
     await updateSchedulerRun(runId, 'failed', undefined, errMsg(error));
+    return { resultCount: 0, totalRaces: 0 };
   }
 }
 

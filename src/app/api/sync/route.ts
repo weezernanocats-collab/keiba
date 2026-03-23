@@ -33,6 +33,8 @@ import type { PastPerformance } from '@/types';
 
 // Vercelのサーバーレス関数タイムアウトを60秒に設定
 export const maxDuration = 60;
+// netkeiba.com へのスクレイピングを日本リージョンから実行
+export const preferredRegion = 'hnd1';
 
 // ==================== Types ====================
 

@@ -1397,8 +1397,12 @@ export async function updateSchedulerRun(
 
 /** 特定日・ジョブタイプのスケジューラー実行が今日既に実行済みかを返す */
 export async function hasSchedulerRunToday(jobType: string, targetDate: string): Promise<boolean> {
+  // 'running' ステータスは10分後に自動失効（Vercelタイムアウトで放置された記録を無視）
   const row = await dbGet<{ c: number }>(
-    "SELECT COUNT(*) as c FROM scheduler_runs WHERE job_type = ? AND target_date = ? AND DATE(started_at, '+9 hours') = DATE('now', '+9 hours') AND status IN ('completed', 'running')",
+    `SELECT COUNT(*) as c FROM scheduler_runs
+     WHERE job_type = ? AND target_date = ?
+     AND DATE(started_at, '+9 hours') = DATE('now', '+9 hours')
+     AND (status = 'completed' OR (status = 'running' AND started_at > datetime('now', '-10 minutes')))`,
     [jobType, targetDate]
   );
   return (row?.c ?? 0) > 0;
