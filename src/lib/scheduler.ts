@@ -700,17 +700,19 @@ async function executeResultFetch(date: string): Promise<void> {
  * 3. スクレイピング失敗かつ3日以上前 → 結果確定（結果なし）として処理を進める
  *
  * 朝のcronで呼び出して、前日以前の取りこぼしを回収する。
+ * includeToday=true で当日レースも対象にする（夕方〜夜のcronで使用）。
  */
-export async function cleanupStaleRaces(timeBudgetMs?: number): Promise<{ fixed: number; total: number }> {
+export async function cleanupStaleRaces(timeBudgetMs?: number, includeToday?: boolean): Promise<{ fixed: number; total: number }> {
   // JST 今日の日付
   const now = new Date();
   const jstOffset = 9 * 60 * 60_000;
   const jstToday = new Date(now.getTime() + jstOffset).toISOString().split('T')[0];
 
-  // 今日より前の日付で「出走確定」or「予定」のレースを取得
+  // includeToday=true なら当日も含める（夕方以降、レース終了後の結果取得用）
+  const dateOp = includeToday ? '<=' : '<';
   const staleRaces = await dbAll<{ id: string; name: string; date: string; status: string }>(
     `SELECT id, name, date, status FROM races
-     WHERE date < ? AND status IN ('予定', '出走確定')
+     WHERE date ${dateOp} ? AND status IN ('予定', '出走確定')
      ORDER BY date DESC
      LIMIT 200`,
     [jstToday],
