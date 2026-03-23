@@ -618,17 +618,20 @@ async function executeOddsFetch(date: string): Promise<void> {
 }
 
 export async function executeResultFetch(date: string, timeBudgetMs?: number): Promise<{ resultCount: number; totalRaces: number }> {
-  // hasSchedulerRunToday ガードを除去: status != '結果確定' クエリで自然に冪等
+  // 対象レースを先にチェック（0件時はscheduler_runsを汚さない）
+  const races = await dbAll<{ id: string; name: string }>(
+    "SELECT id, name FROM races WHERE date = ? AND status != '結果確定'",
+    [date]
+  );
+  if (races.length === 0) {
+    return { resultCount: 0, totalRaces: 0 };
+  }
+
   const runId = await recordSchedulerRun('results', date, 'running');
-  addLog('結果取得開始', date, true);
+  addLog('結果取得開始', `${date}: ${races.length}レース`, true);
   lastRunTime = new Date().toISOString();
 
   try {
-    const races = await dbAll<{ id: string; name: string }>(
-      "SELECT id, name FROM races WHERE date = ? AND status != '結果確定'",
-      [date]
-    );
-    addLog('結果取得対象', `${date}: ${races.length}レース`, true);
 
     const startTime = Date.now();
     const hasTime = timeBudgetMs

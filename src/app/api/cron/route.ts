@@ -204,11 +204,13 @@ export async function GET(request: NextRequest) {
     if (jstHour >= 16 && jstHour <= 18) {
       const executed = [...alwaysExecuted];
 
-      // 1. 当日の結果取得（タイムバジェット35秒）
+      // 1. 当日の結果取得（タイムバジェット30秒、Phase1+後続処理分を確保）
+      let eveningPartial = false;
       try {
         const elapsed = Date.now() - handlerStart;
-        const resultBudget = Math.max(10_000, 37_000 - elapsed);
+        const resultBudget = Math.max(10_000, 35_000 - elapsed);
         const { resultCount, totalRaces } = await executeResultFetch(todayStr, resultBudget);
+        eveningPartial = totalRaces > 0 && resultCount < totalRaces;
         if (totalRaces > 0) {
           executed.push(`evening: 結果取得 ${resultCount}/${totalRaces}レース確定`);
         } else {
@@ -217,22 +219,25 @@ export async function GET(request: NextRequest) {
       } catch (e) {
         console.error('[cron] evening result fetch failed:', e);
         executed.push(`evening: 結果取得失敗: ${e instanceof Error ? e.message : String(e)}`);
+        eveningPartial = true;
       }
 
-      // 2. 照合（結果取得後に再実行）
-      try {
-        const evalResults = await evaluateAllPendingRaces();
-        if (evalResults.length > 0) {
-          const wins = evalResults.filter(r => r.winHit).length;
-          executed.push(`evening: 追加照合 ${evalResults.length}件 (単勝${wins}的中)`);
+      // 2. 照合（結果取得が部分完了 or エラー時のみ追加実行。完了時はexecuteResultFetch内で実行済み）
+      if (eveningPartial) {
+        try {
+          const evalResults = await evaluateAllPendingRaces();
+          if (evalResults.length > 0) {
+            const wins = evalResults.filter(r => r.winHit).length;
+            executed.push(`evening: 追加照合 ${evalResults.length}件 (単勝${wins}的中)`);
+          }
+        } catch (e) {
+          console.error('[cron] evening evaluate failed:', e);
         }
-      } catch (e) {
-        console.error('[cron] evening evaluate failed:', e);
       }
 
       // 3. 予想未生成レースの補完（残り時間）
       const elapsedFinal = Date.now() - handlerStart;
-      const predBudget = Math.max(3_000, 52_000 - elapsedFinal);
+      const predBudget = Math.max(3_000, 50_000 - elapsedFinal);
       try {
         const { generated, total } = await executeMissingPredictions(todayStr, predBudget);
         if (generated > 0) {
@@ -265,27 +270,31 @@ export async function GET(request: NextRequest) {
       const executed = [...alwaysExecuted];
 
       // 1. 当日の未取得結果を回収（夕方cronが部分完了の場合の安全網）
-      // includeToday=true で当日レースも対象
+      let nightPartial = false;
       try {
         const elapsed = Date.now() - handlerStart;
         const resultBudget = Math.max(10_000, 25_000 - elapsed);
         const { resultCount, totalRaces } = await executeResultFetch(todayStr, resultBudget);
+        nightPartial = totalRaces > 0 && resultCount < totalRaces;
         if (totalRaces > 0) {
           executed.push(`night: 結果安全網 ${resultCount}/${totalRaces}レース`);
         }
       } catch (e) {
         console.error('[cron] night result safety-net failed:', e);
+        nightPartial = true;
       }
 
-      // 2. 照合
-      try {
-        const evalResults = await evaluateAllPendingRaces();
-        if (evalResults.length > 0) {
-          const wins = evalResults.filter(r => r.winHit).length;
-          executed.push(`night: 照合 ${evalResults.length}件 (単勝${wins}的中)`);
+      // 2. 照合（結果取得が部分完了 or エラー時のみ追加実行。完了時はexecuteResultFetch内で実行済み）
+      if (nightPartial) {
+        try {
+          const evalResults = await evaluateAllPendingRaces();
+          if (evalResults.length > 0) {
+            const wins = evalResults.filter(r => r.winHit).length;
+            executed.push(`night: 照合 ${evalResults.length}件 (単勝${wins}的中)`);
+          }
+        } catch (e) {
+          console.error('[cron] night evaluate failed:', e);
         }
-      } catch (e) {
-        console.error('[cron] night evaluate failed:', e);
       }
 
       // 3. 翌日レース取得（runCronJob経由: nightFetchTime=22:00のisNearで実行）
