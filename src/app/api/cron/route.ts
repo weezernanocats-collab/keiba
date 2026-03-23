@@ -208,49 +208,51 @@ export async function GET(request: NextRequest) {
       result.skipped.push(`runCronJob失敗: ${msg}`);
     }
 
-    // 夕方cronでは結果照合と予想補完、ステータス修復を追加で実行
-    if (jstHour >= 16 && jstHour <= 18) {
+    // 夕方〜夜cronでは結果照合と予想補完、ステータス修復を追加で実行
+    // JST 16時以降すべてのcronで実行（17:00で取りこぼしたレースを22:00で回収）
+    if (jstHour >= 16) {
+      const periodLabel = jstHour <= 18 ? 'evening' : 'night';
+
       // 当日の結果取得が一部失敗した場合や、過去の滞留レースを修復
+      // includeToday=true: 当日の「出走確定」レースも結果取得を試行する
       try {
-        const { fixed, total } = await cleanupStaleRaces(15_000);
+        const { fixed, total } = await cleanupStaleRaces(15_000, true);
         if (fixed > 0) {
-          result.executed.push(`evening: ステータス修復 ${fixed}/${total}件`);
+          result.executed.push(`${periodLabel}: ステータス修復 ${fixed}/${total}件`);
         }
       } catch (e) {
-        console.error('[cron] evening cleanup failed:', e);
+        console.error(`[cron] ${periodLabel} cleanup failed:`, e);
       }
-      // runCronJobが失敗した場合のみ、evaluateAllPendingRacesを追加実行
-      // （成功時は executeResultFetch 内で既に呼ばれている）
-      if (result.skipped.some(s => s.includes('runCronJob失敗'))) {
-        try {
-          const evalResults = await evaluateAllPendingRaces();
-          if (evalResults.length > 0) {
-            const wins = evalResults.filter(r => r.winHit).length;
-            result.executed.push(`evening: 追加照合 ${evalResults.length}件 (単勝${wins}的中)`);
-          }
-        } catch (e) {
-          console.error('[cron] evening evaluate failed:', e);
+
+      // 結果確定後の予想照合（常に実行 — 17:00/22:00両方で未照合を回収）
+      try {
+        const evalResults = await evaluateAllPendingRaces();
+        if (evalResults.length > 0) {
+          const wins = evalResults.filter(r => r.winHit).length;
+          result.executed.push(`${periodLabel}: 照合 ${evalResults.length}件 (単勝${wins}的中)`);
         }
+      } catch (e) {
+        console.error(`[cron] ${periodLabel} evaluate failed:`, e);
       }
 
       // 予想未生成レースの補完（15秒のタイムバジェット）
       try {
         const { generated, total } = await executeMissingPredictions(todayStr, 15_000);
         if (generated > 0) {
-          result.executed.push(`evening: 予想補完 ${generated}/${total}件生成`);
+          result.executed.push(`${periodLabel}: 予想補完 ${generated}/${total}件生成`);
         }
       } catch (e) {
-        console.error('[cron] evening predictions failed:', e);
+        console.error(`[cron] ${periodLabel} predictions failed:`, e);
       }
 
       // 翌日・翌々日のオッズ事前取得 + 予想再生成
       try {
         const { fetched, predicted } = await fetchUpcomingOdds(todayStr);
         if (fetched > 0) {
-          result.executed.push(`evening: 前日オッズ ${fetched}件取得, 予想${predicted}件再生成`);
+          result.executed.push(`${periodLabel}: 前日オッズ ${fetched}件取得, 予想${predicted}件再生成`);
         }
       } catch (e) {
-        console.error('[cron] upcoming odds failed:', e);
+        console.error(`[cron] ${periodLabel} upcoming odds failed:`, e);
       }
     }
 
