@@ -106,6 +106,12 @@ interface ScoreBucket {
   placeRate: number;
 }
 
+/** 第2層: 買い方補正係数（betting-strategy.ts と同値） */
+const BET_TYPE_CALIBRATION: Record<string, number> = {
+  '単勝': 1.0, '複勝': 1.0, '馬連': 0.75, 'ワイド': 0.66,
+  '馬単': 0.69, '三連複': 0.52, '三連単': 3.4,
+};
+
 export default function PredictionDetailPage() {
   const params = useParams();
   const raceId = params.raceId as string;
@@ -787,11 +793,18 @@ export default function PredictionDetailPage() {
                       {bet.selections.join(' - ')}
                     </p>
                     <div className="flex items-center gap-3">
-                      {hasModelProb ? (
-                        <span className="text-sm text-muted">
-                          的中率 <span className="font-bold text-foreground">{betHitRate.toFixed(1)}%</span>
-                        </span>
-                      ) : typeHitRate > 0 ? (
+                      {hasModelProb ? (() => {
+                        const calib = BET_TYPE_CALIBRATION[bet.type] ?? 1.0;
+                        const baseProb = calib !== 0 ? (bet.hitProbability! * 100) / calib : betHitProb;
+                        return (
+                          <span className="text-sm text-muted">
+                            的中率 <span className="font-bold text-foreground">{betHitRate.toFixed(1)}%</span>
+                            <span className="text-xs ml-1 text-gray-400 dark:text-gray-500">
+                              (基礎{baseProb.toFixed(1)}%×補正{calib})
+                            </span>
+                          </span>
+                        );
+                      })() : typeHitRate > 0 ? (
                         <span className="text-sm text-muted">
                           的中率 <span className="font-bold text-foreground">{typeHitRate.toFixed(1)}%</span>
                           <span className="text-xs ml-0.5">({betStat?.total || 0}件)</span>
