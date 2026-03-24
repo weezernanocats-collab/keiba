@@ -811,6 +811,95 @@ export default function PredictionDetailPage() {
                   <p className="text-sm text-muted">
                     {bet.reasoning.replace(/^【(主力|バリュー|押さえ)】/, '')}
                   </p>
+                  {/* 馬力スコア（折りたたみ） */}
+                  {bet.horsePower && (
+                    <details className="mt-2 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                      <summary className="flex items-center justify-between px-3 py-2 cursor-pointer bg-gray-50 dark:bg-gray-800/40 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-colors select-none">
+                        <span className="text-sm font-bold">
+                          馬力スコア {bet.horsePower.total}/100
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-24 h-2.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${bet.horsePower.total}%`,
+                                background: bet.horsePower.total >= 70
+                                  ? 'linear-gradient(90deg, #10b981, #059669)'
+                                  : bet.horsePower.total >= 45
+                                  ? 'linear-gradient(90deg, #f59e0b, #d97706)'
+                                  : 'linear-gradient(90deg, #ef4444, #dc2626)',
+                              }}
+                            />
+                          </div>
+                          <span className="text-xs text-muted">詳細</span>
+                        </div>
+                      </summary>
+                      <div className="px-3 py-3 text-sm space-y-1.5 bg-white dark:bg-gray-900/30">
+                        {/* 馬の実力 */}
+                        <div className="flex items-center gap-2">
+                          <span className="w-20 text-muted text-xs shrink-0">馬の実力</span>
+                          <div className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-blue-400 to-blue-600"
+                              style={{ width: `${(bet.horsePower.horseAbility / 40) * 100}%` }}
+                            />
+                          </div>
+                          <span className="w-12 text-right font-mono text-xs font-bold">{bet.horsePower.horseAbility}/40</span>
+                        </div>
+                        <div className="pl-[5.5rem] text-xs text-muted">
+                          単勝率{(bet.horsePower.horseCatWinRate * 100).toFixed(1)}% 連対率{(bet.horsePower.horseCatPlaceRate * 100).toFixed(1)}%
+                        </div>
+                        {/* 騎手力 */}
+                        <div className="flex items-center gap-2">
+                          <span className="w-20 text-muted text-xs shrink-0">騎手力</span>
+                          <div className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-purple-400 to-purple-600"
+                              style={{ width: `${(bet.horsePower.jockeyAbility / 25) * 100}%` }}
+                            />
+                          </div>
+                          <span className="w-12 text-right font-mono text-xs font-bold">{bet.horsePower.jockeyAbility}/25</span>
+                        </div>
+                        <div className="pl-[5.5rem] text-xs text-muted">
+                          勝率{(bet.horsePower.jockeyWinRate * 100).toFixed(1)}%
+                        </div>
+                        {/* 相性 */}
+                        <div className="flex items-center gap-2">
+                          <span className="w-20 text-muted text-xs shrink-0">相性</span>
+                          <div className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-amber-400 to-amber-600"
+                              style={{ width: `${(bet.horsePower.compatibility / 25) * 100}%` }}
+                            />
+                          </div>
+                          <span className="w-12 text-right font-mono text-xs font-bold">{bet.horsePower.compatibility}/25</span>
+                        </div>
+                        {/* 安定性 */}
+                        <div className="flex items-center gap-2">
+                          <span className="w-20 text-muted text-xs shrink-0">安定性</span>
+                          <div className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-600"
+                              style={{ width: `${(bet.horsePower.stability / 10) * 100}%` }}
+                            />
+                          </div>
+                          <span className="w-12 text-right font-mono text-xs font-bold">{bet.horsePower.stability}/10</span>
+                        </div>
+                        {/* サンプル警告 */}
+                        {bet.horsePower.sampleWarning && (
+                          <div className={`mt-1 text-xs flex items-center gap-1 ${
+                            bet.horsePower.sampleWarning.level === 'danger'
+                              ? 'text-red-500 dark:text-red-400'
+                              : 'text-amber-500 dark:text-amber-400'
+                          }`}>
+                            <span>{bet.horsePower.sampleWarning.level === 'danger' ? '\u26A0' : '\u26A0'}</span>
+                            <span>{bet.horsePower.sampleWarning.message}</span>
+                          </div>
+                        )}
+                      </div>
+                    </details>
+                  )}
                   {(bet.kellyFraction !== undefined && bet.kellyFraction > 0) && (
                     <div className="flex flex-wrap gap-2 mt-2 text-xs">
                       {bet.valueEdge !== undefined && bet.valueEdge > 0 && (

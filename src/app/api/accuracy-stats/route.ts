@@ -146,6 +146,99 @@ export async function GET(request: NextRequest) {
       confBuckets[bucketKey].returned += r.bet_return || 0;
     }
 
+    // ==================== 高信頼度フィルタ戦略 ====================
+    // フィルタ条件: predicted_confidence >= 80 かつ bets_json内最大expectedValue > 1.0
+    const hcOverall = { total: 0, win: 0, place: 0, invested: 0, returned: 0 };
+    const hcByYear: Record<string, { total: number; win: number; place: number; invested: number; returned: number }> = {};
+    const hcByMonth: Record<string, { total: number; win: number; place: number; invested: number; returned: number }> = {};
+
+    for (const row of results) {
+      const conf = row.predicted_confidence ?? 0;
+      if (conf < 80) continue;
+
+      // bets_jsonから最大expectedValueを取得
+      let maxEv = 0;
+      if (row.bets_json && row.bets_json !== '[]') {
+        try {
+          const bets: { expectedValue?: number }[] = JSON.parse(row.bets_json);
+          if (Array.isArray(bets)) {
+            for (const b of bets) {
+              if (b.expectedValue != null && b.expectedValue > maxEv) {
+                maxEv = b.expectedValue;
+              }
+            }
+          }
+        } catch { /* ignore parse errors */ }
+      }
+      if (maxEv <= 1.0) continue;
+
+      const inv = row.bet_investment || 100;
+      const ret = row.bet_return || 0;
+
+      // overall
+      hcOverall.total++;
+      if (row.win_hit) hcOverall.win++;
+      if (row.place_hit) hcOverall.place++;
+      hcOverall.invested += inv;
+      hcOverall.returned += ret;
+
+      // byYear
+      const yyyy = (row.race_date || '').slice(0, 4);
+      if (yyyy) {
+        if (!hcByYear[yyyy]) hcByYear[yyyy] = { total: 0, win: 0, place: 0, invested: 0, returned: 0 };
+        hcByYear[yyyy].total++;
+        if (row.win_hit) hcByYear[yyyy].win++;
+        if (row.place_hit) hcByYear[yyyy].place++;
+        hcByYear[yyyy].invested += inv;
+        hcByYear[yyyy].returned += ret;
+      }
+
+      // byMonth
+      const yyyymm = (row.race_date || '').slice(0, 7);
+      if (yyyymm) {
+        if (!hcByMonth[yyyymm]) hcByMonth[yyyymm] = { total: 0, win: 0, place: 0, invested: 0, returned: 0 };
+        hcByMonth[yyyymm].total++;
+        if (row.win_hit) hcByMonth[yyyymm].win++;
+        if (row.place_hit) hcByMonth[yyyymm].place++;
+        hcByMonth[yyyymm].invested += inv;
+        hcByMonth[yyyymm].returned += ret;
+      }
+    }
+
+    const formatHcBucket = (b: { total: number; win: number; place: number; invested: number; returned: number }) => ({
+      total: b.total,
+      winRate: b.total > 0 ? Math.round(b.win / b.total * 1000) / 10 : 0,
+      placeRate: b.total > 0 ? Math.round(b.place / b.total * 1000) / 10 : 0,
+      roi: b.invested > 0 ? Math.round(b.returned / b.invested * 1000) / 10 : 0,
+      profit: Math.round(b.returned - b.invested),
+    });
+
+    // monthlyTrend: 月別に累計損益を追加
+    const sortedMonths = Object.keys(hcByMonth).sort();
+    let cumProfit = 0;
+    const hcMonthlyTrend = sortedMonths.map(month => {
+      const b = hcByMonth[month];
+      const monthProfit = Math.round(b.returned - b.invested);
+      cumProfit += monthProfit;
+      return {
+        month,
+        ...formatHcBucket(b),
+        cumProfit,
+      };
+    });
+
+    // byYear整形
+    const hcByYearFormatted: Record<string, ReturnType<typeof formatHcBucket>> = {};
+    for (const [year, b] of Object.entries(hcByYear)) {
+      hcByYearFormatted[year] = formatHcBucket(b);
+    }
+
+    const highConfEvStats = {
+      overall: formatHcBucket(hcOverall),
+      byYear: hcByYearFormatted,
+      monthlyTrend: hcMonthlyTrend,
+    };
+
     const confidenceStats = Object.entries(confBuckets)
       .map(([range, val]) => ({
         range,
@@ -324,6 +417,7 @@ export async function GET(request: NextRequest) {
       gradeStats,
       roiBreakdown,
       betTypeStats,
+      highConfEvStats,
       period: days > 0 ? `${days}日` : '全期間',
     };
 

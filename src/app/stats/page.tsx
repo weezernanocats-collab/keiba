@@ -32,6 +32,30 @@ interface ConfidenceStat {
   roi: number;
 }
 
+interface HighConfEvYearStat {
+  total: number;
+  winRate: number;
+  placeRate: number;
+  roi: number;
+  profit: number;
+}
+
+interface HighConfEvMonthly {
+  month: string;
+  total: number;
+  winRate: number;
+  placeRate: number;
+  roi: number;
+  profit: number;
+  cumProfit: number;
+}
+
+interface HighConfEvStats {
+  overall: HighConfEvYearStat;
+  byYear: Record<string, HighConfEvYearStat>;
+  monthlyTrend: HighConfEvMonthly[];
+}
+
 interface VenueStat {
   venue: string;
   total: number;
@@ -128,6 +152,7 @@ export default function StatsPage() {
   const [betTypePnl, setBetTypePnl] = useState<BetTypePnl[]>([]);
   const [venueDetails, setVenueDetails] = useState<VenueDetail[]>([]);
   const [trackDetails, setTrackDetails] = useState<TrackDetail[]>([]);
+  const [highConfEvStats, setHighConfEvStats] = useState<HighConfEvStats | null>(null);
 
   useEffect(() => {
     async function fetchData() {
@@ -151,6 +176,7 @@ export default function StatsPage() {
         setRoiBreakdown(data.roiBreakdown || null);
         setBetTypeStats(data.betTypeStats || []);
         setPeriodLabel(data.period || '全期間');
+        setHighConfEvStats(data.highConfEvStats || null);
 
         const trendJson = await trendRes.json();
         setTrendData(trendJson.trend || []);
@@ -424,6 +450,131 @@ export default function StatsPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* 高信頼度フィルタ戦略 */}
+      {highConfEvStats && highConfEvStats.overall.total > 0 && (
+        <div className="bg-card-bg border border-card-border rounded-xl p-6">
+          <h2 className="text-lg font-bold mb-1">高信頼度フィルタ戦略</h2>
+          <p className="text-xs text-muted mb-4">
+            条件: 信頼度80以上 &amp; 期待値100超（EV&gt;1.0）の馬券を含むレースのみ
+          </p>
+
+          {/* サマリーカード */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+            <div className="text-center p-3 bg-gray-50 dark:bg-gray-800/30 rounded-lg">
+              <div className="text-xs text-muted mb-1">対象レース</div>
+              <div className="text-xl font-bold">{highConfEvStats.overall.total}件</div>
+            </div>
+            <div className="text-center p-3 bg-gray-50 dark:bg-gray-800/30 rounded-lg">
+              <div className="text-xs text-muted mb-1">単勝的中率</div>
+              <div className={`text-xl font-bold ${highConfEvStats.overall.winRate >= 35 ? 'text-green-600' : ''}`}>
+                {highConfEvStats.overall.winRate}%
+              </div>
+            </div>
+            <div className="text-center p-3 bg-gray-50 dark:bg-gray-800/30 rounded-lg">
+              <div className="text-xs text-muted mb-1">複勝的中率</div>
+              <div className={`text-xl font-bold ${highConfEvStats.overall.placeRate >= 65 ? 'text-green-600' : ''}`}>
+                {highConfEvStats.overall.placeRate}%
+              </div>
+            </div>
+            <div className="text-center p-3 bg-gray-50 dark:bg-gray-800/30 rounded-lg">
+              <div className="text-xs text-muted mb-1">ROI</div>
+              <div className={`text-xl font-bold ${highConfEvStats.overall.roi >= 100 ? 'text-green-600' : 'text-red-500'}`}>
+                {highConfEvStats.overall.roi}%
+              </div>
+            </div>
+            <div className="text-center p-3 bg-gray-50 dark:bg-gray-800/30 rounded-lg">
+              <div className="text-xs text-muted mb-1">累計損益</div>
+              <div className={`text-xl font-bold ${highConfEvStats.overall.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                {highConfEvStats.overall.profit >= 0 ? '+' : ''}{highConfEvStats.overall.profit.toLocaleString()}円
+              </div>
+            </div>
+          </div>
+
+          {/* 年別テーブル */}
+          {Object.keys(highConfEvStats.byYear).length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-sm font-bold text-muted mb-3">年別実績</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b dark:border-gray-700 text-left">
+                      <th className="py-2 pr-3 font-medium">年</th>
+                      <th className="py-2 px-3 font-medium text-center">件数</th>
+                      <th className="py-2 px-3 font-medium text-center">単勝的中率</th>
+                      <th className="py-2 px-3 font-medium text-center">複勝的中率</th>
+                      <th className="py-2 px-3 font-medium text-center">ROI</th>
+                      <th className="py-2 px-3 font-medium text-right">累計損益</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(highConfEvStats.byYear)
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([year, ys]) => (
+                        <tr key={year} className="border-b dark:border-gray-800">
+                          <td className="py-2 pr-3 font-medium">{year}年</td>
+                          <td className="py-2 px-3 text-center">{ys.total}</td>
+                          <td className="py-2 px-3 text-center">
+                            <span className={ys.winRate >= 35 ? 'text-green-600 font-bold' : ''}>{ys.winRate}%</span>
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <span className={ys.placeRate >= 65 ? 'text-green-600 font-bold' : ''}>{ys.placeRate}%</span>
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <span className={`font-bold ${ys.roi >= 100 ? 'text-green-600' : 'text-red-500'}`}>{ys.roi}%</span>
+                          </td>
+                          <td className={`py-2 px-3 text-right font-bold font-mono ${ys.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                            {ys.profit >= 0 ? '+' : ''}{ys.profit.toLocaleString()}円
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* 月別推移グラフ */}
+          {highConfEvStats.monthlyTrend.length > 2 && (
+            <div>
+              <h3 className="text-sm font-bold text-muted mb-3">月別推移（累計損益 + ROI）</h3>
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={highConfEvStats.monthlyTrend}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                  <XAxis
+                    dataKey="month"
+                    tick={{ fontSize: 10 }}
+                    tickFormatter={(v) => String(v).slice(5)}
+                    interval={Math.max(1, Math.floor(highConfEvStats.monthlyTrend.length / 10))}
+                  />
+                  <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
+                  <Tooltip
+                    contentStyle={{ fontSize: 12 }}
+                    formatter={(value, name) => {
+                      const v = Number(value);
+                      const label = name === 'cumProfit' ? '累計損益' : name === 'roi' ? 'ROI' : name === 'winRate' ? '単勝的中率' : '複勝的中率';
+                      const formatted = name === 'cumProfit' ? `${v >= 0 ? '+' : ''}${v.toLocaleString()}円` : `${v}%`;
+                      return [formatted, label];
+                    }}
+                    labelFormatter={(label) => {
+                      const p = highConfEvStats.monthlyTrend.find(t => t.month === label);
+                      return p ? `${label} (${p.total}R)` : String(label);
+                    }}
+                  />
+                  <Legend formatter={(value) =>
+                    value === 'cumProfit' ? '累計損益' : value === 'roi' ? 'ROI' : value === 'winRate' ? '単勝的中率' : '複勝的中率'
+                  } />
+                  <ReferenceLine yAxisId="left" y={0} stroke="#888" strokeDasharray="3 3" />
+                  <ReferenceLine yAxisId="right" y={100} stroke="#888" strokeDasharray="3 3" />
+                  <Line yAxisId="left" type="monotone" dataKey="cumProfit" stroke="#e94560" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line yAxisId="right" type="monotone" dataKey="roi" stroke="#00b894" strokeWidth={1.5} dot={{ r: 2 }} strokeDasharray="5 5" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
       )}
 

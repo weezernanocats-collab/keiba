@@ -59,6 +59,7 @@ import { calcMarginScore } from './margin-score';
 import { calcWeatherScore } from './weather-score';
 import { applyVenueMultipliers } from './racecourse-profiles';
 import { calcTimeFeatures } from './time-features';
+import { calcHorsePower, type HorsePowerInput, type HorsePowerContext } from './horse-power';
 
 // v6.0: ML特徴量用ヘルパー
 function marginToSeconds(margin: string | undefined): number {
@@ -528,6 +529,36 @@ export async function generatePrediction(
     }
   }
   const marketAnalysisData = analysis.marketAnalysis as Record<number, { modelProb: number; marketProb: number; disagreement: number; isValue: boolean }> | undefined;
+
+  // --- 馬力スコア算出（第1層） ---
+  const horsePowerCtx: HorsePowerContext = {
+    trackType,
+    distance,
+    trackCondition,
+    racecourseName,
+  };
+  for (const sh of scoredHorses) {
+    const input = horseInputMap.get(sh.entry.horseNumber);
+    if (!input) continue;
+    const jockeyForm = ctx.jockeyFormMap?.get(sh.entry.jockeyId);
+    const jockeyTrainerCombo = ctx.jockeyTrainerMap?.get(`${sh.entry.jockeyId}__${sh.entry.trainerName}`);
+
+    const hpInput: HorsePowerInput = {
+      horseId: sh.entry.horseId,
+      horseName: sh.entry.horseName,
+      pastPerformances: input.pastPerformances,
+      jockeyWinRate: input.jockeyWinRate,
+      jockeyPlaceRate: input.jockeyPlaceRate,
+      jockeyDistWinRate: input.jockeyDistanceWinRate ?? 0.08,
+      jockeyCourseWinRate: input.jockeyCourseWinRate ?? 0.08,
+      jockeyTrainerComboWinRate: jockeyTrainerCombo?.winRate ?? null,
+      sireTrackWinRate: input.sireTrackWinRate ?? 0.07,
+      consistencyScore: sh.scores.consistency ?? 50,
+      jockeyRecentFormWinRate: jockeyForm?.recent30DayWinRate ?? 0.08,
+    };
+    sh.horsePower = calcHorsePower(hpInput, horsePowerCtx);
+  }
+
   const recommendedBets = generateBetRecommendations(scoredHorses, confidence, bettingStrategy, oddsMap, blendedProbsByNumber, trackType, distance, marketAnalysisData, placeProbsByNumber);
 
   // サマリー生成

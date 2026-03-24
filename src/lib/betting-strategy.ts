@@ -12,9 +12,11 @@ import type {
   RacePattern,
   RecommendedBet,
   RaceEntry,
+  HorsePowerDisplay,
 } from '@/types';
 
 import { estimateWinProbabilities } from './probability-estimation';
+import type { HorsePowerScore } from './horse-power';
 
 // ==================== 型定義 ====================
 
@@ -26,6 +28,8 @@ export interface ScoredHorse {
   runningStyle: string;
   escapeRate: number;
   fatherName: string;
+  /** 馬力スコア（第1層） - generatePredictionで算出後に付与 */
+  horsePower?: HorsePowerScore;
 }
 
 // ==================== 定数 ====================
@@ -278,6 +282,26 @@ export function generateBetRecommendations(
     return { isValue: inOddsRange && hasDivergence && ma?.isValue === true, divergence };
   };
 
+  // --- 馬力スコア表示用ヘルパー ---
+  const getHorsePowerDisplay = (horseNum: number): HorsePowerDisplay | undefined => {
+    const sh = scoredHorses.find(h => h.entry.horseNumber === horseNum);
+    if (!sh?.horsePower) return undefined;
+    const hp = sh.horsePower;
+    return {
+      total: hp.total,
+      horseAbility: hp.horseAbility,
+      jockeyAbility: hp.jockeyAbility,
+      compatibility: hp.compatibility,
+      stability: hp.stability,
+      horseCatWinRate: hp.breakdown.horseCategoryWinRate,
+      horseCatPlaceRate: hp.breakdown.horseCategoryPlaceRate,
+      jockeyWinRate: hp.breakdown.jockeyWinRate,
+      sampleWarning: hp.sampleWarning
+        ? { level: hp.sampleWarning.level, message: hp.sampleWarning.message }
+        : undefined,
+    };
+  };
+
   // --- 戦略ベースの馬券推奨 ---
 
   // --- 馬券ごとの的中確率計算ヘルパー ---
@@ -334,54 +358,85 @@ export function generateBetRecommendations(
     return found ? probOf(found) : 0;
   };
 
+  // --- 第1層: 馬力スコアから基礎確率を取得 ---
+  const getHorsePowerProbs = (horseNum: number) => {
+    const sh = scoredHorses.find(h => h.entry.horseNumber === horseNum);
+    if (sh?.horsePower) {
+      return {
+        win: sh.horsePower.estimatedWinProb,
+        place: sh.horsePower.estimatedPlaceRate,
+        show: sh.horsePower.estimatedShowRate,
+      };
+    }
+    // fallback: 従来のsoftmax確率
+    const wp = findProb(horseNum);
+    return {
+      win: wp,
+      place: Math.min(0.85, wp + (placeProbOf(horseNum) - wp) * 0.6),
+      show: placeProbOf(horseNum),
+    };
+  };
+
+  // --- 第2層: 買い方補正係数（実績データから算出した固定値） ---
+  // 検証結果: 予測hitProb vs 実的中率の比率
+  const BET_TYPE_CALIBRATION: Record<string, number> = {
+    '単勝': 1.0,    // 第1層の推定確率をそのまま使用
+    '複勝': 1.0,    // 第1層の推定確率をそのまま使用
+    '馬連': 0.75,   // 実績: 予測の75%程度が的中
+    'ワイド': 0.66,  // 実績: 予測の66%程度
+    '馬単': 0.69,   // 着順指定の困難さを反映
+    '三連複': 0.52, // 実績: 予測の52%程度
+    '三連単': 3.4,  // 現状過小評価のため上方修正
+  };
+
   const calcBetHitProb = (type: string, selections: number[]): number => {
-    const sel0Prob = findProb(selections[0]);
-    const sel1Prob = findProb(selections[1]);
-    const sel2Prob = findProb(selections[2]);
-    const placeProb0 = selections[0] ? placeProbOf(selections[0]) : 0;
-    const placeProb1 = selections[1] ? placeProbOf(selections[1]) : 0;
-    const placeProb2 = selections[2] ? placeProbOf(selections[2]) : 0;
-    const cons0 = selections[0] ? consistencyFactor(selections[0]) : 1;
-    const cons1 = selections[1] ? consistencyFactor(selections[1]) : 1;
+    const hp0 = getHorsePowerProbs(selections[0]);
+    const hp1 = selections[1] ? getHorsePowerProbs(selections[1]) : null;
+    const hp2 = selections[2] ? getHorsePowerProbs(selections[2]) : null;
+    const calibration = BET_TYPE_CALIBRATION[type] ?? 1.0;
 
     switch (type) {
       case '単勝':
-        // モデル推定勝率 × 安定性
-        return sel0Prob * cons0;
+        // 第1層: 馬力ベースの勝率推定
+        return hp0.win * calibration;
       case '複勝':
-        // MLの3着以内確率 × 安定性
-        return Math.min(0.95, placeProb0 * cons0);
+        // 第1層: 馬力ベースの複勝率推定
+        return Math.min(0.95, hp0.show * calibration);
       case '馬連': {
-        // 2頭が1-2着: 2着以内確率を使い、脚質相性を加味
+        // 2頭の2着以内確率 × 脚質相性 × 補正
         const compat = runningStyleCompat(selections[0], selections[1]);
-        return Math.min(0.50, top2ProbOf(selections[0]) * top2ProbOf(selections[1]) * compat);
+        const raw = hp0.place * (hp1?.place ?? 0) * compat;
+        return Math.min(0.50, raw * calibration);
       }
       case 'ワイド': {
-        // 2頭が3着以内: ML placeProb × 脚質相性
+        // 2頭の3着以内確率 × 脚質相性 × 補正
         const compat = runningStyleCompat(selections[0], selections[1]);
-        return Math.min(0.60, placeProb0 * placeProb1 * compat);
+        const raw = hp0.show * (hp1?.show ?? 0) * compat;
+        return Math.min(0.60, raw * calibration);
       }
       case '馬単': {
-        // A→Bの順で1-2着: Aの勝率 × Bの2着以内率（Aが勝つ条件下）× 脚質相性
+        // A勝利 × Bの2着以内 × 脚質相性 × 補正
         const compat = runningStyleCompat(selections[0], selections[1]);
-        // P(A wins) × P(B 2nd | A wins) ≈ P(A) × P(B top2) × compat / (1 - P(A top2) を考慮)
-        const pB2ndGivenAWins = Math.min(0.80, top2ProbOf(selections[1]) * 1.2);
-        return Math.min(0.30, sel0Prob * pB2ndGivenAWins * compat * cons0);
+        const pB2ndGivenAWins = Math.min(0.80, (hp1?.place ?? 0) * 1.2);
+        const raw = hp0.win * pB2ndGivenAWins * compat;
+        return Math.min(0.30, raw * calibration);
       }
       case '三連複': {
-        // 3頭が3着以内: placeProb × 脚質相性（3組の組み合わせ）
+        // 3頭の3着以内確率 × 脚質相性 × 補正
         const compat01 = runningStyleCompat(selections[0], selections[1]);
         const compat02 = runningStyleCompat(selections[0], selections[2]);
         const compat12 = runningStyleCompat(selections[1], selections[2]);
         const avgCompat = (compat01 + compat02 + compat12) / 3;
-        return Math.min(0.30, placeProb0 * placeProb1 * placeProb2 * avgCompat);
+        const raw = hp0.show * (hp1?.show ?? 0) * (hp2?.show ?? 0) * avgCompat;
+        return Math.min(0.30, raw * calibration);
       }
       case '三連単': {
-        // 特定順: 各順位の確率 × 脚質相性
+        // 3頭の勝率積 × 脚質相性 × 補正
         const compat01 = runningStyleCompat(selections[0], selections[1]);
         const compat02 = runningStyleCompat(selections[0], selections[2]);
         const avgCompat = (compat01 + compat02) / 2;
-        return Math.min(0.10, sel0Prob * sel1Prob * sel2Prob * avgCompat * cons0);
+        const raw = hp0.win * (hp1?.win ?? 0) * (hp2?.win ?? 0) * avgCompat;
+        return Math.min(0.10, raw * calibration);
       }
       default:
         return 0;
@@ -409,6 +464,7 @@ export function generateBetRecommendations(
       isValueBet: vb.isValue,
       divergence: vb.divergence,
       hitProbability: hitProb,
+      horsePower: getHorsePowerDisplay(top.entry.horseNumber),
     });
   }
 
@@ -432,6 +488,7 @@ export function generateBetRecommendations(
       valueEdge: placeEdge,
       recommendedStake: calcRecommendedStake(placeKelly),
       hitProbability: calcBetHitProb('複勝', [top.entry.horseNumber]),
+      horsePower: getHorsePowerDisplay(top.entry.horseNumber),
     });
     // 混戦時は○も複勝推奨
     if ((pattern === '混戦' || pattern === '大混戦' || pattern === '二強') && isMain) {
@@ -449,6 +506,7 @@ export function generateBetRecommendations(
         valueEdge: secEdge,
         recommendedStake: calcRecommendedStake(secKelly),
         hitProbability: calcBetHitProb('複勝', [second.entry.horseNumber]),
+        horsePower: getHorsePowerDisplay(second.entry.horseNumber),
       });
     }
   }
@@ -473,6 +531,7 @@ export function generateBetRecommendations(
       valueEdge: umarenEdge,
       recommendedStake: calcRecommendedStake(umarenKelly),
       hitProbability: calcBetHitProb('馬連', [top.entry.horseNumber, second.entry.horseNumber]),
+      horsePower: getHorsePowerDisplay(top.entry.horseNumber),
     });
   }
 
@@ -502,6 +561,7 @@ export function generateBetRecommendations(
           valueEdge: wideOdds ? calcValueEdge(wideProb, wideOdds) : -1,
           recommendedStake: wideOdds ? calcRecommendedStake(calcKellyFraction(wideProb, wideOdds)) : 0,
           hitProbability: calcBetHitProb('ワイド', [a.entry.horseNumber, b.entry.horseNumber]),
+          horsePower: getHorsePowerDisplay(a.entry.horseNumber),
         });
       }
     } else if (!isAvoided('ワイド') && third.totalScore > 40) {
@@ -517,6 +577,7 @@ export function generateBetRecommendations(
         valueEdge: wideOdds ? calcValueEdge(wideProb, wideOdds) : -1,
         recommendedStake: wideOdds ? calcRecommendedStake(calcKellyFraction(wideProb, wideOdds)) : 0,
         hitProbability: calcBetHitProb('ワイド', [top.entry.horseNumber, third.entry.horseNumber]),
+        horsePower: getHorsePowerDisplay(top.entry.horseNumber),
       });
     }
   }
@@ -539,6 +600,7 @@ export function generateBetRecommendations(
       valueEdge: umatanOdds ? calcValueEdge(umatanProb, umatanOdds) : -1,
       recommendedStake: calcRecommendedStake(umatanKelly),
       hitProbability: calcBetHitProb('馬単', [top.entry.horseNumber, second.entry.horseNumber]),
+      horsePower: getHorsePowerDisplay(top.entry.horseNumber),
     });
     if (isMain && third.totalScore > 40) {
       const umatanOdds2 = (oddsOf(top) && oddsOf(third)) ? oddsOf(top)! * oddsOf(third)! * 0.9 : undefined;
@@ -554,6 +616,7 @@ export function generateBetRecommendations(
         valueEdge: umatanOdds2 ? calcValueEdge(umatanProb2, umatanOdds2) : -1,
         recommendedStake: calcRecommendedStake(umatanKelly2),
         hitProbability: calcBetHitProb('馬単', [top.entry.horseNumber, third.entry.horseNumber]),
+        horsePower: getHorsePowerDisplay(top.entry.horseNumber),
       });
     }
   }
@@ -576,6 +639,7 @@ export function generateBetRecommendations(
       valueEdge: sanrenpukuOdds ? calcValueEdge(sanrenpukuProb, sanrenpukuOdds) : -1,
       recommendedStake: calcRecommendedStake(sanrenpukuKelly),
       hitProbability: calcBetHitProb('三連複', [top.entry.horseNumber, second.entry.horseNumber, third.entry.horseNumber]),
+      horsePower: getHorsePowerDisplay(top.entry.horseNumber),
     });
   }
 
@@ -594,6 +658,7 @@ export function generateBetRecommendations(
       valueEdge: sanrentanOdds ? calcValueEdge(sanrentanProb, sanrentanOdds) : -1,
       recommendedStake: calcRecommendedStake(sanrentanKelly),
       hitProbability: calcBetHitProb('三連単', [top.entry.horseNumber, second.entry.horseNumber, third.entry.horseNumber]),
+      horsePower: getHorsePowerDisplay(top.entry.horseNumber),
     });
   }
 

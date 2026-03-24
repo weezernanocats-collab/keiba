@@ -202,7 +202,21 @@ export interface RecommendedBet {
   recommendedStake?: number; // 推奨賭け率 (fractional Kelly f*/4, 0-0.25)
   isValueBet?: boolean;      // バリューベット推奨 (バックテスト検証済フィルタ通過)
   divergence?: number;       // モデル確率と市場確率の乖離度 (%)
-  hitProbability?: number;   // この馬券の的中確率 (0-1, モデル推定)
+  hitProbability?: number;   // この馬券の的中確率 (0-1, 第1層馬力+第2層買い方補正)
+  horsePower?: HorsePowerDisplay; // 馬力スコア（第1層）
+}
+
+/** 馬力スコア表示用（RecommendedBetに付与） */
+export interface HorsePowerDisplay {
+  total: number;              // 総合スコア (0-100)
+  horseAbility: number;       // 馬の実力 (0-40)
+  jockeyAbility: number;      // 騎手の実力 (0-25)
+  compatibility: number;      // 相性 (0-25)
+  stability: number;          // 安定性 (0-10)
+  horseCatWinRate: number;    // 馬のカテゴリ別単勝率
+  horseCatPlaceRate: number;  // 馬のカテゴリ別連対率
+  jockeyWinRate: number;      // 騎手全体勝率
+  sampleWarning?: { level: 'danger' | 'caution'; message: string };
 }
 
 // 過去成績
@@ -249,6 +263,7 @@ export interface BetDisplay {
   isValueBet?: boolean;
   divergence?: number;
   hitProbability?: number;
+  horsePower?: HorsePowerDisplay;
 }
 
 /** ベット結果 */
