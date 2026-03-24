@@ -556,7 +556,11 @@ export async function generatePrediction(
       consistencyScore: sh.scores.consistency ?? 50,
       jockeyRecentFormWinRate: jockeyForm?.recent30DayWinRate ?? 0.08,
     };
-    sh.horsePower = calcHorsePower(hpInput, horsePowerCtx);
+    try {
+      sh.horsePower = calcHorsePower(hpInput, horsePowerCtx);
+    } catch {
+      // データ不足等でスコア算出失敗 → horsePower なしで続行
+    }
   }
 
   const recommendedBets = generateBetRecommendations(scoredHorses, confidence, bettingStrategy, oddsMap, blendedProbsByNumber, trackType, distance, marketAnalysisData, placeProbsByNumber);
