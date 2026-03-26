@@ -245,6 +245,7 @@ export default function PredictionDetailPage() {
     { id: 'analysis', label: 'レース分析' },
     ...(prediction?.analysis.bettingStrategy ? [{ id: 'strategy', label: '馬券戦略' }] : []),
     ...(prediction && prediction.recommendedBets.length > 0 ? [{ id: 'bets', label: '推奨馬券' }] : []),
+    ...(prediction?.aiIndependentBets && prediction.aiIndependentBets.length > 0 ? [{ id: 'ai-independent', label: 'AI独自' }] : []),
     ...(valueBets.length > 0 ? [{ id: 'value-pickup', label: '期待値+' }] : []),
     ...(prediction && prediction.recommendedBets.length > 0 && prediction.analysis.bettingStrategy ? [{ id: 'simulator', label: 'シミュレーション' }] : []),
   ];

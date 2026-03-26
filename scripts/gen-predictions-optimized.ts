@@ -610,6 +610,14 @@ async function main() {
   if (DATE_FILTER) console.log(`*** 日付フィルタ: ${DATE_FILTER} (出走確定含む) ***\n`);
   if (LIMIT > 0) console.log(`*** 件数制限: ${LIMIT}件 ***\n`);
 
+  // --regen + --limit の併用を禁止（一括削除後に部分再生成するとデータ消失する）
+  if (REGEN_MODE && LIMIT > 0) {
+    console.error('ERROR: --regen と --limit は併用できません（データ消失防止）');
+    console.error('  --regen は対象日の全予想を削除してから再生成します。');
+    console.error('  --limit で件数を絞ると、残りの予想が消失します。');
+    process.exit(1);
+  }
+
   // 1. クライアント取得 + キャッシュインストール
   const client = await ensureInitialized();
 
