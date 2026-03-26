@@ -43,6 +43,17 @@ interface BettingStrategy {
   budgetAdvice: string;
 }
 
+interface AIIndependentBetData {
+  horseNumber: number;
+  horseName: string;
+  betTypes: string[];
+  reasoning: string;
+  aiProb: number;
+  marketOdds: number;
+  favoriteNumber: number;
+  favoriteName: string;
+}
+
 interface PredictionData {
   raceId: string;
   generatedAt: string;
@@ -51,6 +62,7 @@ interface PredictionData {
   topPicks: Pick[];
   analysis: Analysis;
   recommendedBets: Bet[];
+  aiIndependentBets?: AIIndependentBetData[];
 }
 
 interface RaceData {
@@ -939,6 +951,68 @@ export default function PredictionDetailPage() {
                       )}
                     </div>
                   )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* AI独自推奨 */}
+      {prediction.aiIndependentBets && prediction.aiIndependentBets.length > 0 && (
+        <div id="ai-independent" ref={setSectionRef('ai-independent')} className="scroll-mt-16">
+          <div className="border-2 border-cyan-400 dark:border-cyan-600 rounded-xl p-6 bg-cyan-50/50 dark:bg-cyan-900/20">
+            <div className="flex items-center gap-2 mb-3">
+              <h2 className="text-lg font-bold">AI独自推奨</h2>
+              <span className="text-xs bg-cyan-200 dark:bg-cyan-800 text-cyan-800 dark:text-cyan-200 px-2 py-0.5 rounded font-bold">
+                市場非依存
+              </span>
+            </div>
+            <p className="text-xs text-muted mb-4">
+              オッズ情報を一切使わないAIモデルが、市場1番人気と異なる馬を1位評価した場合の推奨です。
+              5-fold CV検証済（複勝ROI 116%, p&lt;0.0001）
+            </p>
+            {prediction.aiIndependentBets.map((aiBet, idx) => {
+              const aiOdds = aiBet.marketOdds;
+              const isSweet = aiOdds >= 5 && aiOdds <= 10;
+              return (
+                <div key={idx} className="border rounded-lg p-4 bg-white dark:bg-gray-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {aiBet.betTypes.map(bt => (
+                        <span key={bt} className="bg-cyan-600 text-white px-3 py-1 rounded text-sm font-bold">
+                          {bt}
+                        </span>
+                      ))}
+                      {isSweet && (
+                        <span className="text-xs bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 px-2 py-0.5 rounded font-bold">
+                          最適ゾーン
+                        </span>
+                      )}
+                      {aiBet.betTypes.length > 1 && (
+                        <span className="text-xs bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300 px-2 py-0.5 rounded">
+                          高確信度
+                        </span>
+                      )}
+                    </div>
+                    {aiOdds > 0 && (
+                      <span className="text-sm text-muted">
+                        {aiOdds.toFixed(1)}倍
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-baseline gap-3 mb-2">
+                    <p className="text-2xl font-bold">
+                      {aiBet.horseNumber} {aiBet.horseName}
+                    </p>
+                    <span className="text-sm text-muted">
+                      AI評価 {(aiBet.aiProb * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="text-xs text-muted mb-2">
+                    vs 1番人気: {aiBet.favoriteNumber} {aiBet.favoriteName}
+                  </div>
+                  <p className="text-sm text-muted">{aiBet.reasoning}</p>
                 </div>
               );
             })}

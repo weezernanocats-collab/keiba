@@ -35,7 +35,7 @@
  */
 
 import type {
-  Prediction, PredictionPick, RaceAnalysis,
+  Prediction, PredictionPick, RaceAnalysis, AIIndependentBet,
   RaceEntry, PastPerformance, TrackType, TrackCondition,
 } from '@/types';
 
@@ -50,7 +50,7 @@ import {
   type JockeyRecentForm,
   type CourseDistanceStats,
 } from './historical-analyzer';
-import { callMLPredict, buildMLFeatures, type MLHorseInput } from './ml-client';
+import { callMLPredict, buildMLFeatures, predictWithNoOddsModel, type MLHorseInput } from './ml-client';
 import { calculateTodayTrackBias, type TodayTrackBias } from './track-bias';
 import { categorizeRace, applyCategoryMultipliers } from './weight-profiles';
 import { calcWeightTrendBonus } from './weight-trend';
@@ -565,8 +565,19 @@ export async function generatePrediction(
 
   const recommendedBets = generateBetRecommendations(scoredHorses, confidence, bettingStrategy, oddsMap, blendedProbsByNumber, trackType, distance, marketAnalysisData, placeProbsByNumber);
 
+  // --- AI独自推奨（No-Oddsモデル） ---
+  const aiIndependentBets = generateAIIndependentBets(
+    mlInputs, scoredHorses, oddsMap, trackType, distance,
+  );
+
   // サマリー生成
   const summary = generateSummary(topPicks, analysis, raceName, confidence, todayBias, options?.isAfternoon);
+
+  // AI独自推奨をanalysisにも格納（DB保存用）
+  if (aiIndependentBets.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (analysis as any).aiIndependentBets = aiIndependentBets;
+  }
 
   const rawPrediction: Prediction = {
     raceId,
@@ -578,9 +589,110 @@ export async function generatePrediction(
     topPicks,
     analysis,
     recommendedBets,
+    ...(aiIndependentBets.length > 0 ? { aiIndependentBets } : {}),
   };
 
   return rawPrediction;
+}
+
+// ==================== AI独自推奨（No-Oddsモデル） ====================
+
+/**
+ * No-Oddsモデルで市場非依存のランキングを生成し、
+ * AIのTop-1が1番人気と異なる場合にAI独自推奨を返す。
+ *
+ * 条件:
+ * - ダート長距離(dirt_long: >1600m)を除外
+ * - AIのTop-1 ≠ 1番人気（最低オッズ馬）
+ *
+ * 推奨:
+ * - 基本: 複勝（ROI 116%, p<0.0001）
+ * - 高確信度: 複勝 + 単勝（ROI 132%）
+ * - 5-10倍帯: 複勝 ROI 147%（最適ゾーン）
+ */
+function generateAIIndependentBets(
+  mlInputs: MLHorseInput[],
+  scoredHorses: ScoredHorse[],
+  oddsMap: Map<number, number>,
+  trackType: string,
+  distance: number,
+): AIIndependentBet[] {
+  // ダート長距離を除外
+  const trackEncoded = trackType === 'ダート' || trackType === 'ダ' ? 1 : 0;
+  if (trackEncoded === 1 && distance > 1600) return [];
+
+  if (mlInputs.length < 2) return [];
+
+  const noOddsProbs = predictWithNoOddsModel(mlInputs);
+  if (!noOddsProbs) return [];
+
+  // AI Top-1を特定
+  let aiTop1Number = -1;
+  let aiTop1Prob = -1;
+  let aiTop2Prob = -1;
+  const probEntries = [...noOddsProbs.entries()].sort((a, b) => b[1] - a[1]);
+  if (probEntries.length >= 2) {
+    aiTop1Number = probEntries[0][0];
+    aiTop1Prob = probEntries[0][1];
+    aiTop2Prob = probEntries[1][1];
+  }
+  if (aiTop1Number < 0) return [];
+
+  // 1番人気（最低オッズ）を特定
+  let favNumber = -1;
+  let favOdds = Infinity;
+  for (const [hn, odds] of oddsMap) {
+    if (odds > 0 && odds < favOdds) {
+      favOdds = odds;
+      favNumber = hn;
+    }
+  }
+  if (favNumber < 0) return [];
+
+  // AIと市場が一致 → 推奨なし
+  if (aiTop1Number === favNumber) return [];
+
+  const aiHorse = scoredHorses.find(sh => sh.entry.horseNumber === aiTop1Number);
+  const favHorse = scoredHorses.find(sh => sh.entry.horseNumber === favNumber);
+  if (!aiHorse || !favHorse) return [];
+
+  const aiOdds = oddsMap.get(aiTop1Number) ?? 0;
+
+  // 確信度判定: AI Top-1とTop-2の差が大きいほど高確信
+  const probGap = aiTop1Prob - aiTop2Prob;
+  const isHighConfidence = probGap > 0.05;
+
+  // 推奨馬券タイプ
+  const betTypes: ('複勝' | '単勝')[] = ['複勝'];
+  if (isHighConfidence) {
+    betTypes.push('単勝');
+  }
+
+  // オッズ帯の注釈
+  const oddsNote = (aiOdds >= 5 && aiOdds <= 10)
+    ? '（5-10倍帯: 最適ゾーン）'
+    : (aiOdds >= 3 && aiOdds <= 50)
+      ? ''
+      : `（${aiOdds < 3 ? '低オッズ帯' : '高オッズ帯'}: 期待値低下の可能性）`;
+
+  const reasoning = `AIモデル（市場情報なし）が${aiHorse.entry.horseName}を1位評価` +
+    `（確率${(aiTop1Prob * 100).toFixed(1)}%）。` +
+    `市場1番人気の${favHorse.entry.horseName}（${favOdds.toFixed(1)}倍）と異なる独自判断。` +
+    (isHighConfidence ? '高確信度のため単勝も推奨。' : '') +
+    oddsNote;
+
+  console.log(`[AI独自] ${aiHorse.entry.horseName}(${aiTop1Number}) vs 1人気${favHorse.entry.horseName}(${favNumber}) | odds=${aiOdds} | gap=${(probGap * 100).toFixed(1)}%`);
+
+  return [{
+    horseNumber: aiTop1Number,
+    horseName: aiHorse.entry.horseName,
+    betTypes,
+    reasoning,
+    aiProb: Math.round(aiTop1Prob * 10000) / 10000,
+    marketOdds: aiOdds,
+    favoriteNumber: favNumber,
+    favoriteName: favHorse.entry.horseName,
+  }];
 }
 
 // ==================== メインスコアリング ====================
@@ -1143,23 +1255,34 @@ function calcJockeyScore(winRate: number, placeRate: number): number {
 }
 
 /**
- * v5: 騎手能力スコア（直近30日フォーム + トレンド反映）
+ * v12.0: 騎手能力スコア（7日フォーム + 30日フォーム + トレンド反映）
+ * 根拠: 騎手7日フォーム好調vs不調で勝率6.43pp差（82,971件で検証）
  */
 function calcJockeyScoreV5(winRate: number, placeRate: number, form: JockeyRecentForm | undefined): number {
   let score = calcJockeyScore(winRate, placeRate);
 
   if (form) {
-    // 直近30日のフォームを反映（十分なサンプルがある場合）
-    if (form.recent30DayRaces >= 5) {
-      const recentPlaceRate = (form as { recent30DayPlaceRate?: number }).recent30DayPlaceRate ?? form.recent30DayWinRate * 2.5;
-      const recentScore = calcJockeyScore(form.recent30DayWinRate, recentPlaceRate);
-      // 通算70% + 直近30% でブレンド
+    // 直近7日のフォームを反映（2鞍以上ある場合）
+    if (form.recent7DayRaces >= 2) {
+      const recent7dScore = calcJockeyScore(form.recent7DayWinRate, form.recent7DayPlaceRate);
+      // 通算50% + 7日30% + 30日20% でブレンド
+      const recent30dScore = form.recent30DayRaces >= 5
+        ? calcJockeyScore(form.recent30DayWinRate, form.recent30DayPlaceRate)
+        : score;
+      score = score * 0.50 + recent7dScore * 0.30 + recent30dScore * 0.20;
+    } else if (form.recent30DayRaces >= 5) {
+      // 7日データ不足 → 30日フォールバック
+      const recentScore = calcJockeyScore(form.recent30DayWinRate, form.recent30DayPlaceRate);
       score = score * 0.7 + recentScore * 0.3;
     }
 
     // トレンドボーナス
     if (form.trend === 'improving') score += 4;
     else if (form.trend === 'declining') score -= 3;
+
+    // モメンタムボーナス（7日と30日の差が大きい場合）
+    if (form.momentum > 0.10) score += 3;       // 7日が30日を10pp以上上回る
+    else if (form.momentum < -0.10) score -= 2;  // 7日が30日を10pp以上下回る
   }
 
   return Math.min(100, Math.max(10, score));

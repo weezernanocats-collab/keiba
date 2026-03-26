@@ -251,6 +251,9 @@ let cachedEnsembleWeights: EnsembleWeights | null = null;
 let cachedPlaceClassifier: XGBModel | null | undefined;
 let cachedPlaceCalibration: CalibrationData | null = null;
 let cachedPlaceCategoryModels: Record<string, XGBModel> = {};
+let cachedNoOddsModel: CatBoostModel | null | undefined;
+let cachedNoOddsFeatureNames: string[] | null = null;
+let cachedNoOddsCalibration: CalibrationData | null = null;
 let modelMode: 'ranker' | 'classifier' | 'none' | undefined;
 
 function getModelDir(): string {
@@ -421,6 +424,21 @@ function ensureModelsLoaded(): boolean {
       }
       if (Object.keys(cachedPlaceCategoryModels).length > 0) {
         console.log(`[ML] 複勝カテゴリモデル: ${Object.keys(cachedPlaceCategoryModels).length}個`);
+      }
+    }
+
+    // No-Odds モデル（AI独自推奨用）
+    cachedNoOddsModel = loadCatBoostModel('catboost_no_odds.json');
+    if (cachedNoOddsModel) {
+      console.log(`[ML] No-Oddsモデル読み込み完了 (${cachedNoOddsModel.tree_count} trees)`);
+      const noOddsPath = join(getModelDir(), 'feature_names_no_odds.json');
+      if (existsSync(noOddsPath)) {
+        cachedNoOddsFeatureNames = JSON.parse(readFileSync(noOddsPath, 'utf-8')) as string[];
+        console.log(`[ML] No-Odds feature_names: ${cachedNoOddsFeatureNames.length}個`);
+      }
+      cachedNoOddsCalibration = loadCalibration('catboost_no_odds_calibration.json');
+      if (cachedNoOddsCalibration) {
+        console.log(`[ML] No-Odds較正読み込み完了`);
       }
     }
 
@@ -846,6 +864,36 @@ export async function callMLPredict(
     return null;
   } catch (error) {
     console.error('[ML] callMLPredict でエラー発生:', error);
+    return null;
+  }
+}
+
+/**
+ * No-Oddsモデルで推論し、馬番→確率のMapを返す。
+ * AI独自推奨（市場非依存ランキング）用。
+ * モデル未配置時はnullを返す。
+ */
+export function predictWithNoOddsModel(
+  horses: MLHorseInput[],
+): Map<number, number> | null {
+  if (!ensureModelsLoaded()) return null;
+  if (!cachedNoOddsModel || !cachedNoOddsFeatureNames) return null;
+
+  try {
+    const probs = predictWithCatBoost(
+      cachedNoOddsModel,
+      horses,
+      cachedNoOddsFeatureNames,
+      cachedNoOddsCalibration,
+    );
+
+    const result = new Map<number, number>();
+    for (let i = 0; i < horses.length; i++) {
+      result.set(horses[i].horseNumber, probs[i]);
+    }
+    return result;
+  } catch (error) {
+    console.error('[ML] No-Odds推論エラー:', error);
     return null;
   }
 }

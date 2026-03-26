@@ -136,6 +136,17 @@ export interface Odds {
 }
 
 // AI予想
+export interface AIIndependentBet {
+  horseNumber: number;
+  horseName: string;
+  betTypes: ('複勝' | '単勝')[];
+  reasoning: string;
+  aiProb: number;
+  marketOdds: number;
+  favoriteNumber: number;
+  favoriteName: string;
+}
+
 export interface Prediction {
   raceId: string;
   raceName: string;
@@ -146,6 +157,7 @@ export interface Prediction {
   topPicks: PredictionPick[];
   analysis: RaceAnalysis;
   recommendedBets: RecommendedBet[];
+  aiIndependentBets?: AIIndependentBet[];
 }
 
 export interface PredictionPick {

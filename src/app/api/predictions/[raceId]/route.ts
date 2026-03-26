@@ -134,10 +134,15 @@ export async function GET(
       return { ...bet, odds: odds > 0 ? odds : bet.odds, expectedValue };
     });
 
+    // analysis_jsonからAI独自推奨を復元
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const aiIndependentBets = (prediction.analysis as any)?.aiIndependentBets || undefined;
+
     const augmentedPrediction = {
       ...prediction,
       topPicks: augmentedPicks,
       recommendedBets: augmentedBets,
+      ...(aiIndependentBets ? { aiIndependentBets } : {}),
     };
 
     // 結果確定済みの場合は答え合わせデータを追加
