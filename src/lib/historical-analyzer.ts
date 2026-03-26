@@ -804,6 +804,9 @@ async function getJockeyRecentFormBatch(jockeyIds: string[], raceDate?: string):
   if (jockeyIds.length === 0) return result;
 
   const baseDate = raceDate ? new Date(raceDate) : new Date();
+  const d7 = new Date(baseDate);
+  d7.setDate(d7.getDate() - 7);
+  const d7Str = d7.toISOString().slice(0, 10);
   const d30 = new Date(baseDate);
   d30.setDate(d30.getDate() - 30);
   const d30Str = d30.toISOString().slice(0, 10);
@@ -837,15 +840,21 @@ async function getJockeyRecentFormBatch(jockeyIds: string[], raceDate?: string):
   for (const [jockeyId, jockeyRows] of byJockey) {
     if (jockeyRows.length < 5) continue;
 
-    let r30 = 0, w30 = 0, rYear = 0, wYear = 0;
+    let r7 = 0, w7 = 0, p7 = 0;
+    let r30 = 0, w30 = 0, p30 = 0;
+    let rYear = 0, wYear = 0;
     for (const r of jockeyRows) {
-      if (r.date >= d30Str) { r30++; if (r.result_position === 1) w30++; }
+      if (r.date >= d7Str) { r7++; if (r.result_position === 1) w7++; if (r.result_position <= 3) p7++; }
+      if (r.date >= d30Str) { r30++; if (r.result_position === 1) w30++; if (r.result_position <= 3) p30++; }
       if (r.date >= d365Str) { rYear++; if (r.result_position === 1) wYear++; }
     }
 
     const careerWinRate = jockeyRows.filter(r => r.result_position === 1).length / jockeyRows.length;
     const yearWinRate = rYear > 0 ? wYear / rYear : careerWinRate;
     const recent30DayWinRate = r30 >= 3 ? w30 / r30 : yearWinRate;
+    const recent30DayPlaceRate = r30 >= 3 ? p30 / r30 : Math.min(1.0, careerWinRate * 2.5);
+    const recent7DayWinRate = r7 >= 2 ? w7 / r7 : recent30DayWinRate;
+    const recent7DayPlaceRate = r7 >= 2 ? p7 / r7 : recent30DayPlaceRate;
 
     let trend: 'improving' | 'stable' | 'declining' = 'stable';
     if (r30 >= 5) {
@@ -853,14 +862,21 @@ async function getJockeyRecentFormBatch(jockeyIds: string[], raceDate?: string):
       else if (recent30DayWinRate < yearWinRate * 0.7) trend = 'declining';
     }
 
+    const momentum = r7 >= 2 && r30 >= 3 ? recent7DayWinRate - recent30DayWinRate : 0;
+
     result.set(jockeyId, {
       jockeyId,
+      recent7DayWinRate,
+      recent7DayPlaceRate,
+      recent7DayRaces: r7,
       recent30DayWinRate,
+      recent30DayPlaceRate,
       recent30DayRaces: r30,
       yearWinRate,
       yearRaces: rYear,
       careerWinRate,
       trend,
+      momentum,
     });
   }
 
@@ -1239,12 +1255,17 @@ function timeStrToSeconds(timeStr: string): number {
 
 export interface JockeyRecentForm {
   jockeyId: string;
+  recent7DayWinRate: number;
+  recent7DayPlaceRate: number;
+  recent7DayRaces: number;
   recent30DayWinRate: number;
+  recent30DayPlaceRate: number;
   recent30DayRaces: number;
   yearWinRate: number;
   yearRaces: number;
   careerWinRate: number;
   trend: 'improving' | 'stable' | 'declining';
+  momentum: number; // 7日勝率 - 30日勝率（正=上昇トレンド）
 }
 
 /**
@@ -1254,6 +1275,10 @@ export async function getJockeyRecentForm(jockeyId: string, raceDate?: string): 
   if (!jockeyId) return null;
 
   const baseDate = raceDate ? new Date(raceDate) : new Date();
+  const d7 = new Date(baseDate);
+  d7.setDate(d7.getDate() - 7);
+  const d7Str = d7.toISOString().slice(0, 10);
+
   const d30 = new Date(baseDate);
   d30.setDate(d30.getDate() - 30);
   const d30Str = d30.toISOString().slice(0, 10);
@@ -1277,15 +1302,21 @@ export async function getJockeyRecentForm(jockeyId: string, raceDate?: string): 
 
   if (rows.length < 5) return null;
 
-  let r30 = 0, w30 = 0, rYear = 0, wYear = 0;
+  let r7 = 0, w7 = 0, p7 = 0;
+  let r30 = 0, w30 = 0, p30 = 0;
+  let rYear = 0, wYear = 0;
   for (const r of rows) {
-    if (r.date >= d30Str) { r30++; if (r.result_position === 1) w30++; }
+    if (r.date >= d7Str) { r7++; if (r.result_position === 1) w7++; if (r.result_position <= 3) p7++; }
+    if (r.date >= d30Str) { r30++; if (r.result_position === 1) w30++; if (r.result_position <= 3) p30++; }
     if (r.date >= d365Str) { rYear++; if (r.result_position === 1) wYear++; }
   }
 
   const careerWinRate = rows.filter(r => r.result_position === 1).length / rows.length;
   const yearWinRate = rYear > 0 ? wYear / rYear : careerWinRate;
   const recent30DayWinRate = r30 >= 3 ? w30 / r30 : yearWinRate;
+  const recent30DayPlaceRate = r30 >= 3 ? p30 / r30 : Math.min(1.0, careerWinRate * 2.5);
+  const recent7DayWinRate = r7 >= 2 ? w7 / r7 : recent30DayWinRate;
+  const recent7DayPlaceRate = r7 >= 2 ? p7 / r7 : recent30DayPlaceRate;
 
   let trend: 'improving' | 'stable' | 'declining' = 'stable';
   if (r30 >= 5) {
@@ -1293,14 +1324,23 @@ export async function getJockeyRecentForm(jockeyId: string, raceDate?: string): 
     else if (recent30DayWinRate < yearWinRate * 0.7) trend = 'declining';
   }
 
+  const momentum = r7 >= 2 && r30 >= 3
+    ? recent7DayWinRate - recent30DayWinRate
+    : 0;
+
   return {
     jockeyId,
+    recent7DayWinRate,
+    recent7DayPlaceRate,
+    recent7DayRaces: r7,
     recent30DayWinRate,
+    recent30DayPlaceRate,
     recent30DayRaces: r30,
     yearWinRate,
     yearRaces: rYear,
     careerWinRate,
     trend,
+    momentum,
   };
 }
 
