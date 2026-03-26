@@ -445,6 +445,136 @@ async function computeAggregateScoringRules(): Promise<AccuracyStats['scoringRul
   };
 }
 
+// ==================== AI独自推奨 集計 ====================
+
+export interface AIIndependentBetStats {
+  totalRaces: number;
+  totalBets: number;
+  place: {
+    bets: number;
+    hits: number;
+    hitRate: number;
+    investment: number;
+    returnAmount: number;
+    roi: number;
+  };
+  win: {
+    bets: number;
+    hits: number;
+    hitRate: number;
+    investment: number;
+    returnAmount: number;
+    roi: number;
+  };
+}
+
+/**
+ * AI独自推奨（No-Oddsモデル）の的中率・ROIを集計する。
+ * analysis_json に aiIndependentBets が含まれる結果確定レースを対象にする。
+ */
+export async function getAIIndependentBetStats(): Promise<AIIndependentBetStats> {
+  const predictions = await dbAll<{
+    race_id: string;
+    analysis_json: string;
+  }>(`
+    SELECT p.race_id, p.analysis_json
+    FROM predictions p
+    JOIN races r ON p.race_id = r.id
+    WHERE r.status = '結果確定'
+      AND p.analysis_json LIKE '%aiIndependentBets%'
+  `);
+
+  let totalBets = 0;
+  let placeBets = 0;
+  let placeHits = 0;
+  let placeInvestment = 0;
+  let placeReturn = 0;
+  let winBets = 0;
+  let winHits = 0;
+  let winInvestment = 0;
+  let winReturn = 0;
+
+  const BET_AMOUNT = 100;
+
+  for (const pred of predictions) {
+    let analysis: Record<string, unknown>;
+    try {
+      analysis = JSON.parse(pred.analysis_json);
+    } catch {
+      continue;
+    }
+    const bets = (analysis.aiIndependentBets || []) as Array<{
+      horseNumber: number;
+      betTypes: string[];
+    }>;
+
+    for (const bet of bets) {
+      const result = await dbGet<{ result_position: number; odds: number | null }>(
+        'SELECT result_position, odds FROM race_entries WHERE race_id = ? AND horse_number = ? AND result_position IS NOT NULL',
+        [pred.race_id, bet.horseNumber],
+      );
+      if (!result) continue;
+
+      totalBets++;
+
+      // 複勝
+      if (bet.betTypes.includes('複勝')) {
+        placeBets++;
+        placeInvestment += BET_AMOUNT;
+        if (result.result_position <= 3) {
+          placeHits++;
+          const placeOdds = await dbGet<{ odds: number }>(
+            "SELECT odds FROM odds WHERE race_id = ? AND bet_type = '複勝' AND horse_number1 = ?",
+            [pred.race_id, bet.horseNumber],
+          );
+          if (placeOdds) {
+            placeReturn += BET_AMOUNT * placeOdds.odds;
+          }
+        }
+      }
+
+      // 単勝
+      if (bet.betTypes.includes('単勝')) {
+        winBets++;
+        winInvestment += BET_AMOUNT;
+        if (result.result_position === 1) {
+          winHits++;
+          let winOdds = result.odds ?? 0;
+          if (winOdds === 0) {
+            const oddsRow = await dbGet<{ odds: number }>(
+              "SELECT odds FROM odds WHERE race_id = ? AND bet_type = '単勝' AND horse_number1 = ?",
+              [pred.race_id, bet.horseNumber],
+            );
+            if (oddsRow) winOdds = oddsRow.odds;
+          }
+          winReturn += BET_AMOUNT * winOdds;
+        }
+      }
+    }
+  }
+
+  return {
+    totalRaces: predictions.length,
+    totalBets,
+    place: {
+      bets: placeBets,
+      hits: placeHits,
+      hitRate: placeBets > 0 ? Math.round(placeHits / placeBets * 1000) / 10 : 0,
+      investment: placeInvestment,
+      returnAmount: Math.round(placeReturn),
+      roi: placeInvestment > 0 ? Math.round(placeReturn / placeInvestment * 1000) / 10 : 0,
+    },
+    win: {
+      bets: winBets,
+      hits: winHits,
+      hitRate: winBets > 0 ? Math.round(winHits / winBets * 1000) / 10 : 0,
+      investment: winInvestment,
+      returnAmount: Math.round(winReturn),
+      roi: winInvestment > 0 ? Math.round(winReturn / winInvestment * 1000) / 10 : 0,
+    },
+  };
+}
+
 // ==================== 自動校正 (Auto-Calibration) ====================
 
 /**

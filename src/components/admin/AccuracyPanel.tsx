@@ -14,6 +14,22 @@ export interface AccuracyData {
   recentTrend: { period: string; count: number; winHitRate: number; placeHitRate: number; roi: number }[];
 }
 
+interface AIBetTypeStats {
+  bets: number;
+  hits: number;
+  hitRate: number;
+  investment: number;
+  returnAmount: number;
+  roi: number;
+}
+
+interface AIIndependentBetStats {
+  totalRaces: number;
+  totalBets: number;
+  place: AIBetTypeStats;
+  win: AIBetTypeStats;
+}
+
 interface CalibrationData {
   evaluatedRaces: number;
   factorContributions: { factor: string; weight: number; avgScoreWinners: number; avgScoreLosers: number; discriminationPower: number; suggestedWeight: number }[];
@@ -27,8 +43,8 @@ export interface AccuracyPanelProps {
   triggerSync: (type: string, extra?: Record<string, string | boolean>) => Promise<void>;
 }
 
-function StatCard({ label, value, color }: { label: string; value: string; color?: 'green' | 'yellow' | 'red' }) {
-  const colorClass = color === 'green' ? 'text-green-300' : color === 'yellow' ? 'text-yellow-300' : color === 'red' ? 'text-red-300' : 'text-white';
+function StatCard({ label, value, color }: { label: string; value: string; color?: 'green' | 'yellow' | 'red' | 'cyan' }) {
+  const colorClass = color === 'green' ? 'text-green-300' : color === 'yellow' ? 'text-yellow-300' : color === 'red' ? 'text-red-300' : color === 'cyan' ? 'text-cyan-300' : 'text-white';
   return (
     <div className="bg-gray-800/50 rounded-lg p-3 text-center">
       <div className={`text-xl font-bold ${colorClass}`}>{value}</div>
@@ -39,6 +55,7 @@ function StatCard({ label, value, color }: { label: string; value: string; color
 
 export function AccuracyPanel({ headers, triggerSync }: AccuracyPanelProps) {
   const [acc, setAcc] = useState<AccuracyData | null>(null);
+  const [aiBetStats, setAiBetStats] = useState<AIIndependentBetStats | null>(null);
   const [cal, setCal] = useState<CalibrationData | null>(null);
   const [repairStatus, setRepairStatus] = useState<string | null>(null);
 
@@ -50,6 +67,7 @@ export function AccuracyPanel({ headers, triggerSync }: AccuracyPanelProps) {
       });
       const data = await res.json();
       if (data.stats) setAcc(data.stats);
+      if (data.aiIndependentBetStats) setAiBetStats(data.aiIndependentBetStats);
     } catch { /* ignore */ }
   }, [headers]);
 
@@ -158,6 +176,70 @@ export function AccuracyPanel({ headers, triggerSync }: AccuracyPanelProps) {
             <StatCard label="複勝的中率" value={`${acc.placeHitRate}%`} color={acc.placeHitRate >= 40 ? 'green' : acc.placeHitRate >= 25 ? 'yellow' : 'red'} />
             <StatCard label="回収率" value={`${acc.overallRoi}%`} color={acc.overallRoi >= 100 ? 'green' : acc.overallRoi >= 75 ? 'yellow' : 'red'} />
           </div>
+
+          {/* AI独自推奨（No-Oddsモデル）の成績 */}
+          {aiBetStats && aiBetStats.totalBets > 0 && (
+            <div className="border-t border-cyan-800/50 pt-4">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="px-2 py-0.5 rounded text-xs font-medium bg-cyan-900/40 text-cyan-300">市場非依存</span>
+                <h4 className="text-sm font-medium">AI独自推奨の成績</h4>
+                <span className="text-[10px] text-muted">No-Oddsモデルが1番人気と異なる馬を推奨したレース</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                <StatCard label="発動レース数" value={`${aiBetStats.totalRaces}`} color="cyan" />
+                <StatCard label="複勝的中率" value={`${aiBetStats.place.hitRate}%`} color={aiBetStats.place.hitRate >= 50 ? 'green' : aiBetStats.place.hitRate >= 30 ? 'yellow' : 'red'} />
+                <StatCard label="複勝ROI" value={`${aiBetStats.place.roi}%`} color={aiBetStats.place.roi >= 100 ? 'green' : aiBetStats.place.roi >= 75 ? 'yellow' : 'red'} />
+                <StatCard
+                  label="複勝収支"
+                  value={`${aiBetStats.place.returnAmount - aiBetStats.place.investment >= 0 ? '+' : ''}${(aiBetStats.place.returnAmount - aiBetStats.place.investment).toLocaleString()}円`}
+                  color={aiBetStats.place.returnAmount - aiBetStats.place.investment >= 0 ? 'green' : 'red'}
+                />
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-card-border text-muted">
+                      <th className="py-1 text-left">券種</th>
+                      <th className="py-1 text-right">ベット数</th>
+                      <th className="py-1 text-right">的中</th>
+                      <th className="py-1 text-right">的中率</th>
+                      <th className="py-1 text-right">投資額</th>
+                      <th className="py-1 text-right">回収額</th>
+                      <th className="py-1 text-right">ROI</th>
+                      <th className="py-1 text-right">損益</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      { label: '複勝', stats: aiBetStats.place },
+                      ...(aiBetStats.win.bets > 0 ? [{ label: '単勝', stats: aiBetStats.win }] : []),
+                    ].map(row => {
+                      const profit = row.stats.returnAmount - row.stats.investment;
+                      return (
+                        <tr key={row.label} className="border-b border-card-border/50">
+                          <td className="py-1.5 font-medium">{row.label}</td>
+                          <td className="py-1.5 text-right">{row.stats.bets}</td>
+                          <td className="py-1.5 text-right">{row.stats.hits}</td>
+                          <td className="py-1.5 text-right">{row.stats.hitRate}%</td>
+                          <td className="py-1.5 text-right">{row.stats.investment.toLocaleString()}円</td>
+                          <td className="py-1.5 text-right">{row.stats.returnAmount.toLocaleString()}円</td>
+                          <td className={`py-1.5 text-right font-medium ${row.stats.roi >= 100 ? 'text-green-400' : 'text-red-400'}`}>
+                            {row.stats.roi}%
+                          </td>
+                          <td className={`py-1.5 text-right ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {profit >= 0 ? '+' : ''}{profit.toLocaleString()}円
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-muted mt-2">
+                100円均一ベット基準。AI独自推奨はオッズ情報を一切使わないNo-Oddsモデルの判断に基づく。
+              </p>
+            </div>
+          )}
 
           {acc.confidenceCalibration.length > 0 && (
             <div>

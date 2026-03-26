@@ -610,14 +610,6 @@ async function main() {
   if (DATE_FILTER) console.log(`*** 日付フィルタ: ${DATE_FILTER} (出走確定含む) ***\n`);
   if (LIMIT > 0) console.log(`*** 件数制限: ${LIMIT}件 ***\n`);
 
-  // --regen + --limit の併用を禁止（一括削除後に部分再生成するとデータ消失する）
-  if (REGEN_MODE && LIMIT > 0) {
-    console.error('ERROR: --regen と --limit は併用できません（データ消失防止）');
-    console.error('  --regen は対象日の全予想を削除してから再生成します。');
-    console.error('  --limit で件数を絞ると、残りの予想が消失します。');
-    process.exit(1);
-  }
-
   // 1. クライアント取得 + キャッシュインストール
   const client = await ensureInitialized();
 
@@ -626,49 +618,44 @@ async function main() {
   await ensureCalibrationLoaded();
   console.log('校正済みウェイト適用完了');
 
-  // 再生成モード: 対象日付の予想のみ削除（日付指定必須）
-  if (REGEN_MODE) {
-    const { dbRun } = await import('../src/lib/database');
-    if (DATE_FILTER) {
-      console.log(`${DATE_FILTER} の予想を削除中...`);
-      await dbRun(
-        `DELETE FROM prediction_results WHERE prediction_id IN (
-          SELECT p.id FROM predictions p JOIN races r ON p.race_id = r.id WHERE r.date = ?
-        )`, [DATE_FILTER]);
-      await dbRun(
-        `DELETE FROM predictions WHERE race_id IN (
-          SELECT id FROM races WHERE date = ?
-        )`, [DATE_FILTER]);
-      console.log('削除完了\n');
-    } else {
-      console.error('ERROR: --regen には --date が必須です（全削除防止）');
-      process.exit(1);
-    }
+  // --regen は一括削除を行わない。savePrediction() がレース単位で
+  // DELETE→INSERT するため、生成対象のフィルタを変えるだけで安全に再生成できる。
+  if (REGEN_MODE && !DATE_FILTER) {
+    console.error('ERROR: --regen には --date が必須です（全件再生成防止）');
+    process.exit(1);
   }
 
   // 2. データプリロード（Tursoから一括読み込み）
   await preloadData();
 
-  // 3. 予想未生成レース一覧
+  // 3. 対象レース一覧
   const statusFilter = DATE_FILTER
     ? `r.status IN ('結果確定', '出走確定') AND r.date = ?`
     : `r.status = '結果確定'`;
   const statusArgs = DATE_FILTER ? [DATE_FILTER] : [];
-  const racesWithoutPreds = await dbAll<{ id: string }>(
+
+  // --regen: 既存予想があるレースも対象に含める（savePrediction()がレース単位で安全に上書き）
+  // 通常: 予想未生成レースのみ
+  const predFilter = REGEN_MODE
+    ? ''
+    : `AND r.id NOT IN (SELECT race_id FROM predictions)`;
+
+  const targetRaces = await dbAll<{ id: string }>(
     `SELECT r.id FROM races r
      WHERE ${statusFilter}
-       AND r.id NOT IN (SELECT race_id FROM predictions)
+       ${predFilter}
      ORDER BY r.date, r.id`,
     statusArgs
   );
 
-  const targetCount = TEST_MODE ? 1 : (LIMIT > 0 ? Math.min(LIMIT, racesWithoutPreds.length) : racesWithoutPreds.length);
-  const targets = racesWithoutPreds.slice(0, targetCount);
+  const targetCount = TEST_MODE ? 1 : (LIMIT > 0 ? Math.min(LIMIT, targetRaces.length) : targetRaces.length);
+  const targets = targetRaces.slice(0, targetCount);
 
-  console.log(`予想未生成レース: ${racesWithoutPreds.length}件 (処理対象: ${targets.length}件)\n`);
+  const modeLabel = REGEN_MODE ? '再生成対象' : '予想未生成';
+  console.log(`${modeLabel}レース: ${targetRaces.length}件 (処理対象: ${targets.length}件)\n`);
 
-  if (racesWithoutPreds.length === 0) {
-    console.log('全レースに予想あり。終了。');
+  if (targetRaces.length === 0) {
+    console.log(REGEN_MODE ? '対象レースなし。終了。' : '全レースに予想あり。終了。');
     return;
   }
 

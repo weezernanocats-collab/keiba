@@ -27,7 +27,7 @@ import {
 import { buildAndPredict } from '@/lib/prediction-builder';
 import { dbAll, dbRun } from '@/lib/database';
 import { runBulkImport, getBulkImportProgress, abortBulkImport, type BulkImportConfig, runBulkChunk, createInitialChunkedState, type BulkChunkedState } from '@/lib/bulk-importer';
-import { evaluateRacePrediction, evaluateAllPendingRaces, getAccuracyStats, calibrateWeights, autoCalibrate, ensureCalibrationLoaded, repairBetsOdds, reEvaluateRepairedChunk } from '@/lib/accuracy-tracker';
+import { evaluateRacePrediction, evaluateAllPendingRaces, getAccuracyStats, getAIIndependentBetStats, calibrateWeights, autoCalibrate, ensureCalibrationLoaded, repairBetsOdds, reEvaluateRepairedChunk } from '@/lib/accuracy-tracker';
 import { calculateTodayTrackBias } from '@/lib/track-bias';
 import type { PastPerformance } from '@/types';
 
@@ -181,8 +181,11 @@ export async function POST(request: NextRequest) {
 
   // 的中率統計の取得
   if (type === 'accuracy') {
-    const stats = await getAccuracyStats();
-    return NextResponse.json({ stats });
+    const [stats, aiIndependentBetStats] = await Promise.all([
+      getAccuracyStats(),
+      getAIIndependentBetStats(),
+    ]);
+    return NextResponse.json({ stats, aiIndependentBetStats });
   }
 
   // 未照合レースの一括評価
