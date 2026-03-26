@@ -153,6 +153,7 @@ export default function StatsPage() {
   const [venueDetails, setVenueDetails] = useState<VenueDetail[]>([]);
   const [trackDetails, setTrackDetails] = useState<TrackDetail[]>([]);
   const [highConfEvStats, setHighConfEvStats] = useState<HighConfEvStats | null>(null);
+  const [aiBetStats, setAiBetStats] = useState<{ totalRaces: number; totalBets: number; place: { bets: number; hits: number; hitRate: number; investment: number; returnAmount: number; roi: number }; win: { bets: number; hits: number; hitRate: number; investment: number; returnAmount: number; roi: number } } | null>(null);
 
   useEffect(() => {
     async function fetchData() {
@@ -177,6 +178,7 @@ export default function StatsPage() {
         setBetTypeStats(data.betTypeStats || []);
         setPeriodLabel(data.period || '全期間');
         setHighConfEvStats(data.highConfEvStats || null);
+        setAiBetStats(data.aiIndependentBetStats || null);
 
         const trendJson = await trendRes.json();
         setTrendData(trendJson.trend || []);
@@ -575,6 +577,83 @@ export default function StatsPage() {
               </ResponsiveContainer>
             </div>
           )}
+        </div>
+      )}
+
+      {/* AI独自推奨（No-Oddsモデル）の成績 */}
+      {aiBetStats && aiBetStats.totalBets > 0 && (
+        <div className="bg-card-bg border border-cyan-700/40 rounded-xl p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="px-2 py-0.5 rounded text-xs font-bold bg-cyan-900/40 text-cyan-300 border border-cyan-700/40">市場非依存</span>
+            <h2 className="text-lg font-bold">AI独自推奨の成績</h2>
+          </div>
+          <p className="text-xs text-muted mb-4">
+            オッズ情報を一切使わないNo-Oddsモデルが、1番人気と異なる馬を推奨したレースの実績
+          </p>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+            <StatCard label="発動レース数" value={`${aiBetStats.totalRaces}`} color="text-cyan-400" />
+            <StatCard label="複勝的中率" value={`${aiBetStats.place.hitRate}%`} color={aiBetStats.place.hitRate >= 50 ? 'text-green-600' : 'text-red-500'} />
+            <StatCard label="複勝ROI" value={`${aiBetStats.place.roi}%`} color={aiBetStats.place.roi >= 100 ? 'text-green-600' : 'text-red-500'} />
+            <StatCard
+              label="複勝収支"
+              value={`${aiBetStats.place.returnAmount - aiBetStats.place.investment >= 0 ? '+' : ''}${(aiBetStats.place.returnAmount - aiBetStats.place.investment).toLocaleString()}円`}
+              color={aiBetStats.place.returnAmount - aiBetStats.place.investment >= 0 ? 'text-green-600' : 'text-red-500'}
+            />
+            {aiBetStats.win.bets > 0 && (
+              <StatCard label="単勝ROI" value={`${aiBetStats.win.roi}%`} color={aiBetStats.win.roi >= 100 ? 'text-green-600' : 'text-red-500'} />
+            )}
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b dark:border-gray-700 text-left">
+                  <th className="py-2 pr-3 font-medium">券種</th>
+                  <th className="py-2 px-3 font-medium text-center">ベット数</th>
+                  <th className="py-2 px-3 font-medium text-center">的中</th>
+                  <th className="py-2 px-3 font-medium text-center">的中率</th>
+                  <th className="py-2 px-3 font-medium text-right">投資額</th>
+                  <th className="py-2 px-3 font-medium text-right">回収額</th>
+                  <th className="py-2 px-3 font-medium text-center">ROI</th>
+                  <th className="py-2 px-3 font-medium text-right">収支</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { label: '複勝', stats: aiBetStats.place },
+                  ...(aiBetStats.win.bets > 0 ? [{ label: '単勝', stats: aiBetStats.win }] : []),
+                ].map(row => {
+                  const profit = row.stats.returnAmount - row.stats.investment;
+                  return (
+                    <tr key={row.label} className="border-b dark:border-gray-800">
+                      <td className="py-2 pr-3">
+                        <span className="inline-block bg-cyan-700 text-white px-2 py-0.5 rounded text-xs font-bold">
+                          {row.label}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-center">{row.stats.bets}</td>
+                      <td className="py-2 px-3 text-center">{row.stats.hits}</td>
+                      <td className="py-2 px-3 text-center">
+                        <span className={row.stats.hitRate >= 40 ? 'text-green-600 font-bold' : ''}>{row.stats.hitRate}%</span>
+                      </td>
+                      <td className="py-2 px-3 text-right font-mono text-xs">{row.stats.investment.toLocaleString()}円</td>
+                      <td className="py-2 px-3 text-right font-mono text-xs">{row.stats.returnAmount.toLocaleString()}円</td>
+                      <td className="py-2 px-3 text-center">
+                        <span className={`font-bold ${row.stats.roi >= 100 ? 'text-green-600' : 'text-red-500'}`}>{row.stats.roi}%</span>
+                      </td>
+                      <td className={`py-2 px-3 text-right font-bold font-mono ${profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                        {profit >= 0 ? '+' : ''}{profit.toLocaleString()}円
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-muted mt-3">
+            100円均一ベット基準。AI独自推奨はオッズ情報を一切使わないNo-Oddsモデルの判断に基づく。
+          </p>
         </div>
       )}
 

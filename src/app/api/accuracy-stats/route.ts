@@ -398,6 +398,93 @@ export async function GET(request: NextRequest) {
         return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
       });
 
+    // ==================== AI独自推奨（No-Oddsモデル）統計 ====================
+    const aiPredictions = await dbAll<{
+      race_id: string;
+      analysis_json: string;
+    }>(`
+      SELECT p.race_id, p.analysis_json
+      FROM predictions p
+      JOIN races r ON p.race_id = r.id
+      WHERE r.status = '結果確定'
+        AND p.analysis_json LIKE '%aiIndependentBets%'
+        ${dateFilter}
+    `, []);
+
+    const aiBetStats = { totalRaces: 0, totalBets: 0, place: { bets: 0, hits: 0, investment: 0, returnAmount: 0 }, win: { bets: 0, hits: 0, investment: 0, returnAmount: 0 } };
+
+    if (aiPredictions.length > 0) {
+      // AI推奨対象レースの着順・オッズを一括取得
+      const aiRaceIds = aiPredictions.map(p => p.race_id);
+      const aiEntryMap = new Map<string, Map<number, { position: number; odds: number }>>();
+      const aiPlaceOddsMap = new Map<string, Map<number, number>>();
+
+      const AI_BATCH = 200;
+      for (let i = 0; i < aiRaceIds.length; i += AI_BATCH) {
+        const batch = aiRaceIds.slice(i, i + AI_BATCH);
+        const ph = batch.map(() => '?').join(',');
+        const [entries, placeOdds] = await Promise.all([
+          dbAll<{ race_id: string; horse_number: number; result_position: number; odds: number | null }>(
+            `SELECT race_id, horse_number, result_position, odds FROM race_entries WHERE race_id IN (${ph}) AND result_position IS NOT NULL`, batch),
+          dbAll<{ race_id: string; horse_number1: number; odds: number }>(
+            `SELECT race_id, horse_number1, odds FROM odds WHERE race_id IN (${ph}) AND bet_type = '複勝'`, batch),
+        ]);
+        for (const e of entries) {
+          if (!aiEntryMap.has(e.race_id)) aiEntryMap.set(e.race_id, new Map());
+          aiEntryMap.get(e.race_id)!.set(e.horse_number, { position: e.result_position, odds: e.odds ?? 0 });
+        }
+        for (const o of placeOdds) {
+          if (!aiPlaceOddsMap.has(o.race_id)) aiPlaceOddsMap.set(o.race_id, new Map());
+          aiPlaceOddsMap.get(o.race_id)!.set(o.horse_number1, o.odds);
+        }
+      }
+
+      aiBetStats.totalRaces = aiPredictions.length;
+      for (const pred of aiPredictions) {
+        let analysis: Record<string, unknown>;
+        try { analysis = JSON.parse(pred.analysis_json); } catch { continue; }
+        const bets = (analysis.aiIndependentBets || []) as Array<{ horseNumber: number; betTypes: string[] }>;
+
+        for (const bet of bets) {
+          const entry = aiEntryMap.get(pred.race_id)?.get(bet.horseNumber);
+          if (!entry) continue;
+          aiBetStats.totalBets++;
+
+          if (bet.betTypes.includes('複勝')) {
+            aiBetStats.place.bets++;
+            aiBetStats.place.investment += 100;
+            if (entry.position <= 3) {
+              aiBetStats.place.hits++;
+              const pOdds = aiPlaceOddsMap.get(pred.race_id)?.get(bet.horseNumber) ?? 0;
+              aiBetStats.place.returnAmount += 100 * pOdds;
+            }
+          }
+          if (bet.betTypes.includes('単勝')) {
+            aiBetStats.win.bets++;
+            aiBetStats.win.investment += 100;
+            if (entry.position === 1) {
+              aiBetStats.win.hits++;
+              aiBetStats.win.returnAmount += 100 * entry.odds;
+            }
+          }
+        }
+      }
+    }
+
+    const formatAiBetType = (s: typeof aiBetStats.place) => ({
+      ...s,
+      hitRate: s.bets > 0 ? Math.round(s.hits / s.bets * 1000) / 10 : 0,
+      roi: s.investment > 0 ? Math.round(s.returnAmount / s.investment * 1000) / 10 : 0,
+      returnAmount: Math.round(s.returnAmount),
+    });
+
+    const aiIndependentBetStats = {
+      totalRaces: aiBetStats.totalRaces,
+      totalBets: aiBetStats.totalBets,
+      place: formatAiBetType(aiBetStats.place),
+      win: formatAiBetType(aiBetStats.win),
+    };
+
     // 全体サマリ
     const totalWin = results.reduce((s, r) => s + r.win_hit, 0);
     const totalPlace = results.reduce((s, r) => s + r.place_hit, 0);
@@ -418,6 +505,7 @@ export async function GET(request: NextRequest) {
       roiBreakdown,
       betTypeStats,
       highConfEvStats,
+      aiIndependentBetStats,
       period: days > 0 ? `${days}日` : '全期間',
     };
 
