@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
-import { useApi } from '@/hooks/use-api';
+import { useApi, formatLastFetched } from '@/hooks/use-api';
 import type { BetResultDisplay as BetResult } from '@/types';
 
 interface RaceRow {
@@ -66,7 +66,7 @@ function SkeletonCard() {
 }
 
 export default function HomePage() {
-  const { data: racesData, isValidating: racesValidating } = useApi<{ races: RaceRow[] }>('/api/races?type=upcoming');
+  const { data: racesData, isValidating: racesValidating, lastFetched } = useApi<{ races: RaceRow[] }>('/api/races?type=upcoming');
   const { data: resultsData } = useApi<{ races: RaceRow[] }>('/api/races?type=results');
   const { data: hitsData } = useApi<{ history: HitRecord[] }>('/api/predictions/history?result=win&limit=10');
   const { data: stats } = useApi<Stats>('/api/stats');
@@ -138,9 +138,11 @@ export default function HomePage() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold">📅 今後のレース</h2>
           <div className="flex items-center gap-3">
-            {racesValidating && (
+            {racesValidating ? (
               <span className="text-xs text-muted animate-pulse">更新中...</span>
-            )}
+            ) : lastFetched ? (
+              <span className="text-xs text-muted">最終取得: {formatLastFetched(lastFetched)}</span>
+            ) : null}
             <Link href="/races" className="text-sm text-accent hover:underline">すべて見る →</Link>
           </div>
         </div>

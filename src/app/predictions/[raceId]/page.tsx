@@ -9,7 +9,7 @@ import BudgetSimulator from '@/components/BudgetSimulator';
 import MonteCarloSimulator from '@/components/MonteCarloSimulator';
 import ModelVsMarket from '@/components/ModelVsMarket';
 import { useFavorites } from '@/lib/use-favorites';
-import { useApi, useDeferredApi } from '@/hooks/use-api';
+import { useApi, useDeferredApi, formatLastFetched } from '@/hooks/use-api';
 import type { MarketAnalysisEntry as MarketEntry, BetDisplay as Bet, BetTypeStat, BetSummaryDisplay as BetSummary } from '@/types';
 
 interface Pick {
@@ -145,7 +145,7 @@ export default function PredictionDetailPage() {
   const { isRaceFavoriteInProfile, toggleRaceForProfile } = useFavorites();
 
   // メイン予想データ: SWRで即表示 + バックグラウンド再検証
-  const { data: predData, error: predError, isValidating } = useApi<{
+  const { data: predData, error: predError, isValidating, lastFetched } = useApi<{
     prediction: PredictionData | null;
     race: RaceData | null;
     verification: Verification | null;
@@ -283,7 +283,11 @@ export default function PredictionDetailPage() {
         </p>
         <p className="text-white/50 text-xs mt-1">
           予想生成: {new Date(prediction.generatedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
-          {isValidating && <span className="ml-2 animate-pulse">更新中...</span>}
+          {isValidating ? (
+            <span className="ml-3 animate-pulse">更新中...</span>
+          ) : lastFetched ? (
+            <span className="ml-3">最終取得: {formatLastFetched(lastFetched)}</span>
+          ) : null}
         </p>
         <div className="mt-4 flex items-center gap-4">
           <div>

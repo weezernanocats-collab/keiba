@@ -7,7 +7,7 @@ import ConfidenceBadge from '@/components/ConfidenceBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import FavoriteProfilePopover from '@/components/FavoriteProfilePopover';
 import { useFavorites } from '@/lib/use-favorites';
-import { useApi, useDeferredApi } from '@/hooks/use-api';
+import { useApi, useDeferredApi, formatLastFetched } from '@/hooks/use-api';
 import type { BetTypeStat } from '@/types';
 import { PredictionHistoryContent } from './history/page';
 
@@ -124,7 +124,7 @@ function PredictionsPageInner() {
 const rankLabels = ['\u25CE', '\u25CB', '\u25B2', '\u25B3', '\u00D7', '\u2606'];
 
 function UpcomingRaces() {
-  const { data: racesData } = useApi<{ races: RaceRow[] }>('/api/races?type=upcoming');
+  const { data: racesData, isValidating, lastFetched } = useApi<{ races: RaceRow[] }>('/api/races?type=upcoming');
   const { data: statsData } = useDeferredApi<{ betTypeStats: BetTypeStat[] }>('/api/accuracy-stats');
 
   const races = racesData?.races || [];
@@ -211,6 +211,11 @@ function UpcomingRaces() {
           過去の成績データを多角的に分析し、各レースの予想を提供します。タップで推奨馬券を表示します。
         </p>
         <div className="flex items-center gap-2 ml-auto">
+          {isValidating ? (
+            <span className="text-xs text-muted animate-pulse">更新中...</span>
+          ) : lastFetched ? (
+            <span className="text-xs text-muted">最終取得: {formatLastFetched(lastFetched)}</span>
+          ) : null}
           <select
             className="px-3 py-2 text-sm border border-card-border rounded-lg bg-card-bg"
             value={confidenceFilter}

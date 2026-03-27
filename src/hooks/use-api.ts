@@ -1,4 +1,5 @@
 'use client';
+import { useRef, useCallback } from 'react';
 import useSWR, { type SWRConfiguration } from 'swr';
 
 const fetcher = async (url: string) => {
@@ -20,18 +21,29 @@ const defaultConfig: SWRConfiguration = {
   errorRetryCount: 2,
 };
 
-/** 汎用SWRフック */
+/** 汎用SWRフック（最終取得時刻付き） */
 export function useApi<T>(url: string | null, config?: SWRConfiguration) {
-  return useSWR<T>(url, fetcher, { ...defaultConfig, ...config });
+  const lastFetchedRef = useRef<Date | null>(null);
+  const onSuccess = useCallback(() => {
+    lastFetchedRef.current = new Date();
+  }, []);
+
+  const result = useSWR<T>(url, fetcher, { ...defaultConfig, ...config, onSuccess });
+  return { ...result, lastFetched: lastFetchedRef.current };
 }
 
-/** 遅延読み込み用: マウント後に少し遅れてフェッチ開始 */
+/** 遅延読み込み用 */
 export function useDeferredApi<T>(url: string | null, config?: SWRConfiguration) {
   return useSWR<T>(url, fetcher, {
     ...defaultConfig,
     ...config,
     revalidateOnMount: true,
-    // 初回はサスペンドしない（メイン描画をブロックしない）
     suspense: false,
   });
+}
+
+/** 最終取得時刻をJST文字列で返す */
+export function formatLastFetched(date: Date | null): string {
+  if (!date) return '';
+  return date.toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
