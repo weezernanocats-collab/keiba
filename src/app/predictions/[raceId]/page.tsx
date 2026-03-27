@@ -299,6 +299,9 @@ export default function PredictionDetailPage() {
           {race.date} | {race.racecourseName} {race.raceNumber}R | {race.trackType}{race.distance}m
           {race.trackCondition && ` | ${race.trackCondition}`}
         </p>
+        <p className="text-white/50 text-xs mt-1">
+          予想生成: {new Date(prediction.generatedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+        </p>
         <div className="mt-4 flex items-center gap-4">
           <div>
             <span className="text-white/60 text-xs">AI信頼度</span>
