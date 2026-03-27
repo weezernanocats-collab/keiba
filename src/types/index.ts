@@ -147,6 +147,19 @@ export interface AIIndependentBet {
   favoriteName: string;
 }
 
+export interface AIOnlyRankingEntry {
+  rank: number;
+  horseNumber: number;
+  horseName: string;
+  aiProb: number;
+  marketRank: number | null;
+}
+
+export interface AIOnlyRanking {
+  entries: AIOnlyRankingEntry[];
+  modelAccuracy: number;
+}
+
 export interface Prediction {
   raceId: string;
   raceName: string;
@@ -158,6 +171,7 @@ export interface Prediction {
   analysis: RaceAnalysis;
   recommendedBets: RecommendedBet[];
   aiIndependentBets?: AIIndependentBet[];
+  aiOnlyRanking?: AIOnlyRanking;
 }
 
 export interface PredictionPick {

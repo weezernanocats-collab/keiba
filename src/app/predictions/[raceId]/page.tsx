@@ -54,6 +54,19 @@ interface AIIndependentBetData {
   favoriteName: string;
 }
 
+interface AIOnlyRankingEntry {
+  rank: number;
+  horseNumber: number;
+  horseName: string;
+  aiProb: number;
+  marketRank: number | null;
+}
+
+interface AIOnlyRanking {
+  entries: AIOnlyRankingEntry[];
+  modelAccuracy: number;
+}
+
 interface PredictionData {
   raceId: string;
   generatedAt: string;
@@ -63,6 +76,7 @@ interface PredictionData {
   analysis: Analysis;
   recommendedBets: Bet[];
   aiIndependentBets?: AIIndependentBetData[];
+  aiOnlyRanking?: AIOnlyRanking;
 }
 
 interface RaceData {
@@ -246,6 +260,7 @@ export default function PredictionDetailPage() {
     ...(prediction?.analysis.bettingStrategy ? [{ id: 'strategy', label: '馬券戦略' }] : []),
     ...(prediction && prediction.recommendedBets.length > 0 ? [{ id: 'bets', label: '推奨馬券' }] : []),
     ...(prediction?.aiIndependentBets && prediction.aiIndependentBets.length > 0 ? [{ id: 'ai-independent', label: 'AI独自' }] : []),
+    ...(prediction?.aiOnlyRanking ? [{ id: 'ai-only-ranking', label: 'AI単独' }] : []),
     ...(valueBets.length > 0 ? [{ id: 'value-pickup', label: '期待値+' }] : []),
     ...(prediction && prediction.recommendedBets.length > 0 && prediction.analysis.bettingStrategy ? [{ id: 'simulator', label: 'シミュレーション' }] : []),
   ];
@@ -1017,6 +1032,89 @@ export default function PredictionDetailPage() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* AI単独予想（No-Oddsモデル全順位） */}
+      {prediction.aiOnlyRanking && (
+        <div id="ai-only-ranking" ref={setSectionRef('ai-only-ranking')} className="scroll-mt-16">
+          <div className="border rounded-xl p-6 bg-card-bg">
+            <div className="flex items-center gap-2 mb-3">
+              <h2 className="text-lg font-bold">AI単独予想</h2>
+              <span className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded font-bold">
+                参考情報
+              </span>
+            </div>
+            <p className="text-xs text-muted mb-4">
+              オッズ・人気情報を一切使わないAI単独モデルの順位評価です。
+              Top-1的中率: {(prediction.aiOnlyRanking.modelAccuracy * 100).toFixed(1)}%（市場1番人気: 32.7%）。
+              市場と大きく異なる評価の馬に注目してください。
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-xs text-muted">
+                    <th className="py-2 px-2 text-left">AI順位</th>
+                    <th className="py-2 px-2 text-left">馬番</th>
+                    <th className="py-2 px-2 text-left">馬名</th>
+                    <th className="py-2 px-2 text-right">AI確率</th>
+                    <th className="py-2 px-2 text-right">市場順位</th>
+                    <th className="py-2 px-2 text-right">差</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {prediction.aiOnlyRanking.entries.map((entry) => {
+                    const diff = entry.marketRank != null ? entry.marketRank - entry.rank : null;
+                    const isUndervalued = diff != null && diff >= 3;
+                    return (
+                      <tr
+                        key={entry.horseNumber}
+                        className={
+                          entry.rank <= 3
+                            ? 'bg-blue-50/50 dark:bg-blue-900/10 border-b'
+                            : isUndervalued
+                              ? 'bg-amber-50/50 dark:bg-amber-900/10 border-b'
+                              : 'border-b'
+                        }
+                      >
+                        <td className="py-2 px-2 font-bold">{entry.rank}</td>
+                        <td className="py-2 px-2">{entry.horseNumber}</td>
+                        <td className="py-2 px-2 font-medium">
+                          {entry.horseName}
+                          {isUndervalued && (
+                            <span className="ml-1 text-xs text-amber-600 dark:text-amber-400">
+                              AI注目
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 px-2 text-right tabular-nums">
+                          {(entry.aiProb * 100).toFixed(1)}%
+                        </td>
+                        <td className="py-2 px-2 text-right tabular-nums">
+                          {entry.marketRank != null ? `${entry.marketRank}位` : '---'}
+                        </td>
+                        <td className={`py-2 px-2 text-right tabular-nums ${
+                          diff != null && diff >= 3
+                            ? 'text-amber-600 dark:text-amber-400 font-bold'
+                            : diff != null && diff <= -3
+                              ? 'text-blue-400 dark:text-blue-500'
+                              : 'text-muted'
+                        }`}>
+                          {diff != null
+                            ? diff > 0 ? `+${diff}` : diff === 0 ? '-' : `${diff}`
+                            : '---'
+                          }
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-muted mt-3">
+              差: 正の値 = AIが市場より高評価（市場が過小評価の可能性）。「AI注目」は市場順位より3位以上高評価の馬。
+            </p>
           </div>
         </div>
       )}

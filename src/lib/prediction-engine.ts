@@ -35,7 +35,7 @@
  */
 
 import type {
-  Prediction, PredictionPick, RaceAnalysis, AIIndependentBet,
+  Prediction, PredictionPick, RaceAnalysis, AIIndependentBet, AIOnlyRanking,
   RaceEntry, PastPerformance, TrackType, TrackCondition,
 } from '@/types';
 
@@ -565,18 +565,26 @@ export async function generatePrediction(
 
   const recommendedBets = generateBetRecommendations(scoredHorses, confidence, bettingStrategy, oddsMap, blendedProbsByNumber, trackType, distance, marketAnalysisData, placeProbsByNumber);
 
-  // --- AI独自推奨（No-Oddsモデル） ---
+  // --- No-Oddsモデル推論（AI独自推奨 + AI単独ランキング共通） ---
+  const noOddsProbs = predictWithNoOddsModel(mlInputs);
+
   const aiIndependentBets = generateAIIndependentBets(
-    mlInputs, scoredHorses, oddsMap, trackType, distance,
+    noOddsProbs, scoredHorses, oddsMap, trackType, distance,
   );
+
+  const aiOnlyRanking = generateAIOnlyRanking(noOddsProbs, scoredHorses, oddsMap);
 
   // サマリー生成
   const summary = generateSummary(topPicks, analysis, raceName, confidence, todayBias, options?.isAfternoon);
 
-  // AI独自推奨をanalysisにも格納（DB保存用）
+  // AI独自推奨・AI単独ランキングをanalysisにも格納（DB保存用）
   if (aiIndependentBets.length > 0) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (analysis as any).aiIndependentBets = aiIndependentBets;
+  }
+  if (aiOnlyRanking) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (analysis as any).aiOnlyRanking = aiOnlyRanking;
   }
 
   const rawPrediction: Prediction = {
@@ -590,6 +598,7 @@ export async function generatePrediction(
     analysis,
     recommendedBets,
     ...(aiIndependentBets.length > 0 ? { aiIndependentBets } : {}),
+    ...(aiOnlyRanking ? { aiOnlyRanking } : {}),
   };
 
   return rawPrediction;
@@ -611,7 +620,7 @@ export async function generatePrediction(
  * - 5-10倍帯: 複勝 ROI 147%（最適ゾーン）
  */
 function generateAIIndependentBets(
-  mlInputs: MLHorseInput[],
+  noOddsProbs: Map<number, number> | null,
   scoredHorses: ScoredHorse[],
   oddsMap: Map<number, number>,
   trackType: string,
@@ -621,10 +630,7 @@ function generateAIIndependentBets(
   const trackEncoded = trackType === 'ダート' || trackType === 'ダ' ? 1 : 0;
   if (trackEncoded === 1 && distance > 1600) return [];
 
-  if (mlInputs.length < 2) return [];
-
-  const noOddsProbs = predictWithNoOddsModel(mlInputs);
-  if (!noOddsProbs) return [];
+  if (!noOddsProbs || noOddsProbs.size < 2) return [];
 
   // AI Top-1を特定
   let aiTop1Number = -1;
@@ -693,6 +699,42 @@ function generateAIIndependentBets(
     favoriteNumber: favNumber,
     favoriteName: favHorse.entry.horseName,
   }];
+}
+
+// ==================== AI単独ランキング生成 ====================
+
+function generateAIOnlyRanking(
+  noOddsProbs: Map<number, number> | null,
+  scoredHorses: ScoredHorse[],
+  oddsMap: Map<number, number>,
+): AIOnlyRanking | undefined {
+  if (!noOddsProbs || noOddsProbs.size < 2) return undefined;
+
+  // 市場順位を算出（オッズ昇順）
+  const marketRankMap = new Map<number, number>();
+  const oddsEntries = [...oddsMap.entries()]
+    .filter(([, odds]) => odds > 0)
+    .sort((a, b) => a[1] - b[1]);
+  oddsEntries.forEach(([hn], idx) => marketRankMap.set(hn, idx + 1));
+
+  // AI確率降順でソート
+  const sorted = [...noOddsProbs.entries()].sort((a, b) => b[1] - a[1]);
+
+  const entries = sorted.map(([horseNumber, prob], idx) => {
+    const horse = scoredHorses.find(sh => sh.entry.horseNumber === horseNumber);
+    return {
+      rank: idx + 1,
+      horseNumber,
+      horseName: horse?.entry.horseName ?? `馬番${horseNumber}`,
+      aiProb: Math.round(prob * 10000) / 10000,
+      marketRank: marketRankMap.get(horseNumber) ?? null,
+    };
+  });
+
+  return {
+    entries,
+    modelAccuracy: 0.231,
+  };
 }
 
 // ==================== メインスコアリング ====================
