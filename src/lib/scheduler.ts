@@ -505,6 +505,87 @@ async function executeAfternoonPredictions(date: string): Promise<void> {
 }
 
 /**
+ * 出馬表が不完全なレース（2頭以下）を再スクレイピング
+ * cronの部分取得やnetkeiba側の段階公開で中途半端になったデータを修復
+ */
+export async function rescrapeIncompleteEntries(timeBudgetMs?: number): Promise<{ fixed: number; total: number }> {
+  const incomplete = await dbAll<{ id: string; name: string; date: string; cnt: number }>(
+    `SELECT r.id, r.name, r.date, COUNT(e.horse_id) as cnt FROM races r
+     LEFT JOIN race_entries e ON e.race_id = r.id
+     WHERE r.date >= date('now')
+       AND r.status IN ('予定', '出走確定')
+     GROUP BY r.id
+     HAVING cnt <= 2
+     ORDER BY r.date, r.id`
+  );
+
+  if (incomplete.length === 0) {
+    return { fixed: 0, total: 0 };
+  }
+
+  addLog('出馬表補完開始', `${incomplete.length}レースの出馬表が不完全`, true);
+
+  const startTime = Date.now();
+  const hasTime = timeBudgetMs
+    ? () => (Date.now() - startTime) < timeBudgetMs
+    : () => true;
+
+  let fixed = 0;
+  for (const race of incomplete) {
+    if (!hasTime()) {
+      addLog('出馬表補完中断', `タイムバジェット超過: ${fixed}/${incomplete.length}件修復済み`, true);
+      break;
+    }
+    try {
+      const detail = await scrapeRaceCard(race.id);
+      if (detail.entries.length <= 2) {
+        continue; // まだ未公開
+      }
+
+      await upsertRace({
+        id: detail.id,
+        name: detail.name,
+        racecourseName: detail.racecourseName,
+        racecourseId: detail.racecourseId,
+        trackType: detail.trackType,
+        distance: detail.distance,
+        trackCondition: detail.trackCondition,
+        weather: detail.weather,
+        time: detail.time,
+        grade: detail.grade as import('@/types').Race['grade'],
+        status: '出走確定',
+      });
+
+      // 既存の不完全エントリを削除してから正式データを挿入
+      await dbRun('DELETE FROM race_entries WHERE race_id = ?', [race.id]);
+
+      for (const e of detail.entries) {
+        await upsertRaceEntry(race.id, {
+          postPosition: e.postPosition,
+          horseNumber: e.horseNumber,
+          horseId: e.horseId,
+          horseName: e.horseName,
+          age: e.age,
+          sex: e.sex,
+          jockeyId: e.jockeyId,
+          jockeyName: e.jockeyName,
+          trainerName: e.trainerName,
+          handicapWeight: e.handicapWeight,
+        });
+      }
+
+      addLog('出馬表補完', `${race.date} ${race.name}: ${race.cnt}→${detail.entries.length}頭`, true);
+      fixed++;
+    } catch (error) {
+      addLog('出馬表補完失敗', `${race.id}: ${errMsg(error)}`, false);
+    }
+    await sleep(currentConfig.rateLimitMs);
+  }
+
+  return { fixed, total: incomplete.length };
+}
+
+/**
  * 予想未生成レースの補完（不足分のみ、既存予想は削除しない）
  * 朝の bulk_chunked パイプラインが途中で切れた場合の安全網
  */

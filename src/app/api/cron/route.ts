@@ -11,7 +11,7 @@
  *   - 夜cron (22:00 JST) で当日結果の安全網を提供
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { runCronJob, executeMissingPredictions, cleanupStaleRaces, executeResultFetch, fetchUpcomingOdds, collectOddsSnapshots } from '@/lib/scheduler';
+import { runCronJob, executeMissingPredictions, cleanupStaleRaces, executeResultFetch, fetchUpcomingOdds, collectOddsSnapshots, rescrapeIncompleteEntries } from '@/lib/scheduler';
 import { evaluateAllPendingRaces } from '@/lib/accuracy-tracker';
 import { dbGet } from '@/lib/database';
 
@@ -110,7 +110,8 @@ export async function GET(request: NextRequest) {
 
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (syncKey) headers['x-sync-key'] = syncKey;
-      const endDay = new Date(jstTime.getTime() + 1 * 86400000).toISOString().split('T')[0];
+      // 当日+2日後まで取得（金曜朝に日曜分もカバー）
+      const endDay = new Date(jstTime.getTime() + 2 * 86400000).toISOString().split('T')[0];
 
       fetch(`${baseUrl}/api/sync`, {
         method: 'POST',
@@ -127,6 +128,18 @@ export async function GET(request: NextRequest) {
       });
 
       executed.push(`morning: bulk_chunked triggered (${todayStr}〜${endDay})`);
+
+      // 出馬表が不完全なレース（2頭以下）を再スクレイピング
+      try {
+        const elapsed = Date.now() - handlerStart;
+        const rescrapeBudget = Math.max(5_000, 20_000 - elapsed);
+        const { fixed, total } = await rescrapeIncompleteEntries(rescrapeBudget);
+        if (total > 0) {
+          executed.push(`morning: 出馬表補完 ${fixed}/${total}件`);
+        }
+      } catch (e) {
+        console.error('[cron] morning rescrape incomplete failed:', e);
+      }
 
       // 当日レースのオッズスナップショット収集（時系列データ蓄積）
       try {
@@ -150,13 +163,33 @@ export async function GET(request: NextRequest) {
     if (jstHour >= 10 && jstHour <= 14) {
       const executed = [...alwaysExecuted];
 
-      // 予想未生成レースの補完
+      // 出馬表が不完全なレースを再スクレイピング
+      try {
+        const rescrapeElapsed = Date.now() - handlerStart;
+        const rescrapeBudget = Math.max(5_000, 15_000 - rescrapeElapsed);
+        const { fixed, total: incTotal } = await rescrapeIncompleteEntries(rescrapeBudget);
+        if (incTotal > 0) {
+          executed.push(`midday: 出馬表補完 ${fixed}/${incTotal}件`);
+        }
+      } catch (e) {
+        console.error('[cron] midday rescrape incomplete failed:', e);
+      }
+
+      // 予想未生成レースの補完（当日+翌日+翌々日）
       const elapsed = Date.now() - handlerStart;
       const predictionBudget = Math.max(5_000, 50_000 - elapsed);
       try {
-        const { generated, total } = await executeMissingPredictions(todayStr, predictionBudget);
-        executed.push(total > 0
-          ? `midday: 予想補完 ${generated}/${total}件生成`
+        let totalGenerated = 0;
+        let totalMissing = 0;
+        for (let d = 0; d <= 2; d++) {
+          const targetDate = new Date(jstTime.getTime() + d * 86400000).toISOString().split('T')[0];
+          const remaining = Math.max(3_000, predictionBudget - (Date.now() - handlerStart - elapsed));
+          const { generated, total } = await executeMissingPredictions(targetDate, remaining);
+          totalGenerated += generated;
+          totalMissing += total;
+        }
+        executed.push(totalMissing > 0
+          ? `midday: 予想補完 ${totalGenerated}/${totalMissing}件生成`
           : 'midday: 全レース予想済み');
       } catch (e) {
         console.error('[cron] midday predictions failed:', e);
@@ -235,19 +268,39 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      // 3. 予想未生成レースの補完（残り時間）
+      // 3. 出馬表が不完全なレースを再スクレイピング
+      try {
+        const elapsedRescrape = Date.now() - handlerStart;
+        const rescrapeBudget = Math.max(5_000, 15_000 - (elapsedRescrape - (Date.now() - handlerStart)));
+        const { fixed, total: incTotal } = await rescrapeIncompleteEntries(rescrapeBudget);
+        if (incTotal > 0) {
+          executed.push(`evening: 出馬表補完 ${fixed}/${incTotal}件`);
+        }
+      } catch (e) {
+        console.error('[cron] evening rescrape incomplete failed:', e);
+      }
+
+      // 4. 予想未生成レースの補完（当日+翌日+翌々日）
       const elapsedFinal = Date.now() - handlerStart;
       const predBudget = Math.max(3_000, 50_000 - elapsedFinal);
       try {
-        const { generated, total } = await executeMissingPredictions(todayStr, predBudget);
-        if (generated > 0) {
-          executed.push(`evening: 予想補完 ${generated}/${total}件生成`);
+        let totalGenerated = 0;
+        let totalMissing = 0;
+        for (let d = 0; d <= 2; d++) {
+          const targetDate = new Date(jstTime.getTime() + d * 86400000).toISOString().split('T')[0];
+          const remaining = Math.max(3_000, predBudget - (Date.now() - handlerStart - elapsedFinal));
+          const { generated, total } = await executeMissingPredictions(targetDate, remaining);
+          totalGenerated += generated;
+          totalMissing += total;
+        }
+        if (totalGenerated > 0) {
+          executed.push(`evening: 予想補完 ${totalGenerated}/${totalMissing}件生成`);
         }
       } catch (e) {
         console.error('[cron] evening predictions failed:', e);
       }
 
-      // 4. 翌日・翌々日のオッズ事前取得 + 予想再生成
+      // 5. 翌日・翌々日のオッズ事前取得 + 予想再生成
       try {
         const { fetched, predicted } = await fetchUpcomingOdds(todayStr);
         if (fetched > 0) {
