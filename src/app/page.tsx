@@ -1,8 +1,7 @@
 'use client';
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
-import LoadingSpinner from '@/components/LoadingSpinner';
+import { useApi } from '@/hooks/use-api';
 import type { BetResultDisplay as BetResult } from '@/types';
 
 interface RaceRow {
@@ -46,48 +45,42 @@ interface Stats {
   totalPredictions: number;
 }
 
+function SkeletonRow() {
+  return (
+    <tr>
+      <td colSpan={9} className="px-4 py-3">
+        <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
+      </td>
+    </tr>
+  );
+}
+
+function SkeletonCard() {
+  return (
+    <div className="bg-card-bg border border-card-border rounded-xl p-4 text-center">
+      <div className="h-8 w-8 mx-auto mb-2 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
+      <div className="h-6 w-16 mx-auto mb-1 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
+      <div className="h-3 w-12 mx-auto bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
+    </div>
+  );
+}
+
 export default function HomePage() {
-  const [upcomingRaces, setUpcomingRaces] = useState<RaceRow[]>([]);
-  const [recentResults, setRecentResults] = useState<RaceRow[]>([]);
-  const [recentHits, setRecentHits] = useState<HitRecord[]>([]);
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: racesData, isValidating: racesValidating } = useApi<{ races: RaceRow[] }>('/api/races?type=upcoming');
+  const { data: resultsData } = useApi<{ races: RaceRow[] }>('/api/races?type=results');
+  const { data: hitsData } = useApi<{ history: HitRecord[] }>('/api/predictions/history?result=win&limit=10');
+  const { data: stats } = useApi<Stats>('/api/stats');
 
-  useEffect(() => {
-    async function fetchData() {
-      try {
-        const [racesRes, resultsRes, statsRes, hitsRes] = await Promise.all([
-          fetch('/api/races?type=upcoming'),
-          fetch('/api/races?type=results'),
-          fetch('/api/stats'),
-          fetch('/api/predictions/history?result=win&limit=10'),
-        ]);
-        const racesData = await racesRes.json();
-        const resultsData = await resultsRes.json();
-        const statsData = await statsRes.json();
-        const hitsData = await hitsRes.json();
-
-        setUpcomingRaces(racesData.races || []);
-        setRecentResults(resultsData.races || []);
-        setRecentHits(hitsData.history || []);
-        setStats(statsData);
-      } catch (err) {
-        console.error('データ取得エラー:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchData();
-  }, []);
-
-  if (loading) return <LoadingSpinner message="データを読み込んでいます..." />;
+  const upcomingRaces = racesData?.races || [];
+  const recentResults = resultsData?.races || [];
+  const recentHits = hitsData?.history || [];
 
   return (
     <div className="space-y-8 animate-fadeIn">
       {/* ヒーローセクション */}
       <section className="bg-gradient-to-r from-primary to-primary-light rounded-2xl p-8 text-white">
         <h1 className="text-3xl md:text-4xl font-bold mb-3">
-          🏇 KEIBA MASTER
+          KEIBA MASTER
         </h1>
         <p className="text-lg text-white/80 mb-6">
           AIが分析する高精度競馬予想。中央競馬・地方競馬の全レース対応。
@@ -121,9 +114,9 @@ export default function HomePage() {
       </section>
 
       {/* 統計 */}
-      {stats && (
-        <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
+      <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {stats ? (
+          [
             { label: '登録馬', value: stats.totalHorses, icon: '🐴' },
             { label: '登録騎手', value: stats.totalJockeys, icon: '🏆' },
             { label: '今後のレース', value: stats.upcomingRaces, icon: '📅' },
@@ -134,15 +127,22 @@ export default function HomePage() {
               <div className="text-2xl font-bold">{s.value}</div>
               <div className="text-sm text-muted">{s.label}</div>
             </div>
-          ))}
-        </section>
-      )}
+          ))
+        ) : (
+          Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
+        )}
+      </section>
 
       {/* 今後のレース */}
       <section>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold">📅 今後のレース</h2>
-          <Link href="/races" className="text-sm text-accent hover:underline">すべて見る →</Link>
+          <div className="flex items-center gap-3">
+            {racesValidating && (
+              <span className="text-xs text-muted animate-pulse">更新中...</span>
+            )}
+            <Link href="/races" className="text-sm text-accent hover:underline">すべて見る →</Link>
+          </div>
         </div>
         <div className="bg-card-bg border border-card-border rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
@@ -161,34 +161,42 @@ export default function HomePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-card-border">
-                {upcomingRaces.slice(0, 10).map((race) => (
-                  <tr key={race.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
-                    <td className="px-4 py-3 whitespace-nowrap">{race.date}</td>
-                    <td className="px-4 py-3 font-medium">{race.racecourseName}</td>
-                    <td className="px-4 py-3">{race.raceNumber}R</td>
-                    <td className="px-4 py-3 text-muted whitespace-nowrap">{race.time || '-'}</td>
-                    <td className="px-4 py-3">
-                      <Link href={`/races/${race.id}`} className="text-accent hover:underline font-medium">
-                        {race.name}
-                      </Link>
-                      {' '}
-                      <GradeBadge grade={race.grade} size="sm" />
-                    </td>
-                    <td className="px-4 py-3 text-muted">{race.trackType}{race.distance}m</td>
-                    <td className="px-4 py-3 text-center">{race.entryCount}頭</td>
-                    <td className="px-4 py-3 text-center text-muted">
-                      {race.topOdds != null ? `${race.topOdds.toFixed(1)}倍` : '-'}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <Link
-                        href={`/predictions/${race.id}`}
-                        className="inline-block bg-accent/10 text-accent px-3 py-1 rounded-full text-xs font-medium hover:bg-accent/20 transition-colors"
-                      >
-                        予想
-                      </Link>
-                    </td>
+                {upcomingRaces.length > 0 ? (
+                  upcomingRaces.slice(0, 10).map((race) => (
+                    <tr key={race.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
+                      <td className="px-4 py-3 whitespace-nowrap">{race.date}</td>
+                      <td className="px-4 py-3 font-medium">{race.racecourseName}</td>
+                      <td className="px-4 py-3">{race.raceNumber}R</td>
+                      <td className="px-4 py-3 text-muted whitespace-nowrap">{race.time || '-'}</td>
+                      <td className="px-4 py-3">
+                        <Link href={`/races/${race.id}`} className="text-accent hover:underline font-medium">
+                          {race.name}
+                        </Link>
+                        {' '}
+                        <GradeBadge grade={race.grade} size="sm" />
+                      </td>
+                      <td className="px-4 py-3 text-muted">{race.trackType}{race.distance}m</td>
+                      <td className="px-4 py-3 text-center">{race.entryCount}頭</td>
+                      <td className="px-4 py-3 text-center text-muted">
+                        {race.topOdds != null ? `${race.topOdds.toFixed(1)}倍` : '-'}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <Link
+                          href={`/predictions/${race.id}`}
+                          className="inline-block bg-accent/10 text-accent px-3 py-1 rounded-full text-xs font-medium hover:bg-accent/20 transition-colors"
+                        >
+                          予想
+                        </Link>
+                      </td>
+                    </tr>
+                  ))
+                ) : !racesData ? (
+                  Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} />)
+                ) : (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-8 text-center text-muted">今後のレースはありません</td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>

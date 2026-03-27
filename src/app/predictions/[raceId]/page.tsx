@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
@@ -9,6 +9,7 @@ import BudgetSimulator from '@/components/BudgetSimulator';
 import MonteCarloSimulator from '@/components/MonteCarloSimulator';
 import ModelVsMarket from '@/components/ModelVsMarket';
 import { useFavorites } from '@/lib/use-favorites';
+import { useApi, useDeferredApi } from '@/hooks/use-api';
 import type { MarketAnalysisEntry as MarketEntry, BetDisplay as Bet, BetTypeStat, BetSummaryDisplay as BetSummary } from '@/types';
 
 interface Pick {
@@ -141,24 +142,33 @@ const BET_TYPE_CALIBRATION: Record<string, number> = {
 export default function PredictionDetailPage() {
   const params = useParams();
   const raceId = params.raceId as string;
-  const [prediction, setPrediction] = useState<PredictionData | null>(null);
-  const [race, setRace] = useState<RaceData | null>(null);
-  const [verification, setVerification] = useState<Verification | null>(null);
-  const [scoreBuckets, setScoreBuckets] = useState<ScoreBucket[]>([]);
-  const [betTypeStats, setBetTypeStats] = useState<BetTypeStat[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const { isRaceFavoriteInProfile, toggleRaceForProfile } = useFavorites();
 
-  // セクションナビ用（Hooksは条件分岐の前に置く必要がある）
+  // メイン予想データ: SWRで即表示 + バックグラウンド再検証
+  const { data: predData, error: predError, isValidating } = useApi<{
+    prediction: PredictionData | null;
+    race: RaceData | null;
+    verification: Verification | null;
+    error?: string;
+  }>(`/api/predictions/${raceId}`);
+
+  // 補助データ: 遅延読み込み（メイン描画をブロックしない）
+  const { data: scoreData } = useDeferredApi<{ buckets: ScoreBucket[] }>('/api/score-lookup');
+  const { data: statsData } = useDeferredApi<{ betTypeStats: BetTypeStat[] }>('/api/accuracy-stats');
+
+  const prediction = predData?.prediction || null;
+  const race = predData?.race || null;
+  const verification = predData?.verification || null;
+  const scoreBuckets = scoreData?.buckets || [];
+  const betTypeStats = statsData?.betTypeStats || [];
+  const error = predData?.error || (predError ? 'データの取得に失敗しました' : null);
+
+  // セクションナビ用
   const [activeSection, setActiveSection] = useState('');
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
-  const setSectionRef = useCallback((id: string) => (el: HTMLElement | null) => {
-    sectionRefs.current[id] = el;
-  }, []);
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  if (typeof window !== 'undefined' && !observerRef.current) {
+    observerRef.current = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
           if (entry.isIntersecting) {
@@ -168,44 +178,16 @@ export default function PredictionDetailPage() {
       },
       { rootMargin: '-80px 0px -60% 0px', threshold: 0.1 }
     );
-    const refs = sectionRefs.current;
-    for (const el of Object.values(refs)) {
-      if (el) observer.observe(el);
-    }
-    return () => observer.disconnect();
-  }, [prediction, verification]);
+  }
 
-  useEffect(() => {
-    async function fetchData() {
-      try {
-        const [predRes, scoreRes, statsRes] = await Promise.all([
-          fetch(`/api/predictions/${raceId}`),
-          fetch('/api/score-lookup'),
-          fetch('/api/accuracy-stats'),
-        ]);
-        const predData = await predRes.json();
-        if (predData.error) {
-          setError(predData.error);
-        } else {
-          setPrediction(predData.prediction || null);
-          setRace(predData.race || null);
-          setVerification(predData.verification || null);
-        }
-        const scoreData = await scoreRes.json();
-        setScoreBuckets(scoreData.buckets || []);
-        const statsData = await statsRes.json();
-        setBetTypeStats(statsData.betTypeStats || []);
-      } catch (err) {
-        console.error('エラー:', err);
-        setError('データの取得に失敗しました');
-      } finally {
-        setLoading(false);
-      }
+  const setSectionRefWrapped = useCallback((id: string) => (el: HTMLElement | null) => {
+    sectionRefs.current[id] = el;
+    if (el && observerRef.current) {
+      observerRef.current.observe(el);
     }
-    fetchData();
-  }, [raceId]);
+  }, []);
 
-  if (loading) return <LoadingSpinner message="AI予想を読み込んでいます..." />;
+  if (!predData && !predError) return <LoadingSpinner message="AI予想を読み込んでいます..." />;
 
   if (error) {
     return (
@@ -213,7 +195,7 @@ export default function PredictionDetailPage() {
         <p className="text-lg text-muted">{error}</p>
         <div className="flex items-center justify-center gap-4">
           <button
-            onClick={() => { setError(null); setLoading(true); window.location.reload(); }}
+            onClick={() => window.location.reload()}
             className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-light transition-colors text-sm"
           >
             もう一度試す
@@ -301,6 +283,7 @@ export default function PredictionDetailPage() {
         </p>
         <p className="text-white/50 text-xs mt-1">
           予想生成: {new Date(prediction.generatedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+          {isValidating && <span className="ml-2 animate-pulse">更新中...</span>}
         </p>
         <div className="mt-4 flex items-center gap-4">
           <div>
@@ -344,7 +327,7 @@ export default function PredictionDetailPage() {
 
       {/* 答え合わせ (B2) - 結果確定済みの場合 */}
       {verification && (
-        <div id="verification" ref={setSectionRef('verification')} className="bg-card-bg border-2 border-amber-400 dark:border-amber-600 rounded-xl p-6 scroll-mt-16">
+        <div id="verification" ref={setSectionRefWrapped('verification')} className="bg-card-bg border-2 border-amber-400 dark:border-amber-600 rounded-xl p-6 scroll-mt-16">
           <h2 className="text-lg font-bold mb-4">📋 答え合わせ</h2>
 
           {/* 的中馬券ハイライトバナー */}
@@ -537,13 +520,13 @@ export default function PredictionDetailPage() {
       )}
 
       {/* サマリー */}
-      <div id="summary" ref={setSectionRef('summary')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-16">
+      <div id="summary" ref={setSectionRefWrapped('summary')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-16">
         <h2 className="text-lg font-bold mb-3">予想サマリー</h2>
         <div className="whitespace-pre-line text-sm leading-relaxed">{prediction.summary}</div>
       </div>
 
       {/* トップピック */}
-      <div id="picks" ref={setSectionRef('picks')} className="scroll-mt-16">
+      <div id="picks" ref={setSectionRefWrapped('picks')} className="scroll-mt-16">
         <h2 className="text-lg font-bold mb-4">予想印</h2>
         <div className="space-y-3">
           {prediction.topPicks.map((pick, idx) => {
@@ -603,7 +586,7 @@ export default function PredictionDetailPage() {
 
       {/* モデル vs 市場オッズ */}
       {prediction.analysis.marketAnalysis && prediction.analysis.valueHorses && prediction.analysis.overround ? (
-        <div id="market" ref={setSectionRef('market')} className="scroll-mt-16">
+        <div id="market" ref={setSectionRefWrapped('market')} className="scroll-mt-16">
         <ModelVsMarket
           marketAnalysis={prediction.analysis.marketAnalysis}
           valueHorses={prediction.analysis.valueHorses}
@@ -614,7 +597,7 @@ export default function PredictionDetailPage() {
         />
         </div>
       ) : race.status !== '結果確定' && (
-        <div id="market" ref={setSectionRef('market')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-16">
+        <div id="market" ref={setSectionRefWrapped('market')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-16">
           <h2 className="text-lg font-bold mb-2">モデル vs 市場オッズ</h2>
           <p className="text-sm text-muted">
             市場オッズがまだ取得されていません。オッズ取得後にモデル勝率との比較が表示されます。
@@ -626,7 +609,7 @@ export default function PredictionDetailPage() {
       )}
 
       {/* レース分析 */}
-      <div id="analysis" ref={setSectionRef('analysis')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-16">
+      <div id="analysis" ref={setSectionRefWrapped('analysis')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-16">
         <h2 className="text-lg font-bold mb-4">レース分析</h2>
         <div className="space-y-4">
           <div>
@@ -666,7 +649,7 @@ export default function PredictionDetailPage() {
 
       {/* 馬券戦略 */}
       {prediction.analysis.bettingStrategy && (
-        <div id="strategy" ref={setSectionRef('strategy')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-16">
+        <div id="strategy" ref={setSectionRefWrapped('strategy')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-16">
           <h2 className="text-lg font-bold mb-4">馬券戦略</h2>
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-3">
@@ -733,7 +716,7 @@ export default function PredictionDetailPage() {
 
       {/* 推奨馬券 */}
       {prediction.recommendedBets.length > 0 && (
-        <div id="bets" ref={setSectionRef('bets')} className="scroll-mt-16">
+        <div id="bets" ref={setSectionRefWrapped('bets')} className="scroll-mt-16">
           <h2 className="text-lg font-bold mb-1">推奨馬券</h2>
           <p className="text-xs text-muted mb-4">
             的中率算出要素: 過去成績・騎手適性・競馬場相性・脚質相性・安定性・買い方実績
@@ -979,7 +962,7 @@ export default function PredictionDetailPage() {
 
       {/* AI独自推奨 */}
       {prediction.aiIndependentBets && prediction.aiIndependentBets.length > 0 && (
-        <div id="ai-independent" ref={setSectionRef('ai-independent')} className="scroll-mt-16">
+        <div id="ai-independent" ref={setSectionRefWrapped('ai-independent')} className="scroll-mt-16">
           <div className="border-2 border-cyan-400 dark:border-cyan-600 rounded-xl p-6 bg-cyan-50/50 dark:bg-cyan-900/20">
             <div className="flex items-center gap-2 mb-3">
               <h2 className="text-lg font-bold">AI独自推奨</h2>
@@ -1041,7 +1024,7 @@ export default function PredictionDetailPage() {
 
       {/* AI単独予想（No-Oddsモデル全順位） */}
       {prediction.aiOnlyRanking && (
-        <div id="ai-only-ranking" ref={setSectionRef('ai-only-ranking')} className="scroll-mt-16">
+        <div id="ai-only-ranking" ref={setSectionRefWrapped('ai-only-ranking')} className="scroll-mt-16">
           <div className="border rounded-xl p-6 bg-card-bg">
             <div className="flex items-center gap-2 mb-3">
               <h2 className="text-lg font-bold">AI単独予想</h2>
@@ -1124,7 +1107,7 @@ export default function PredictionDetailPage() {
 
       {/* 期待値プラスの馬券ピックアップ */}
       {valueBets.length > 0 && (
-        <div id="value-pickup" ref={setSectionRef('value-pickup')} className="bg-card-bg border-2 border-green-400 dark:border-green-600 rounded-xl p-6 scroll-mt-16">
+        <div id="value-pickup" ref={setSectionRefWrapped('value-pickup')} className="bg-card-bg border-2 border-green-400 dark:border-green-600 rounded-xl p-6 scroll-mt-16">
           <h2 className="text-lg font-bold mb-2">期待値プラスの馬券</h2>
           <p className="text-xs text-muted mb-4">
             各券種の過去の的中率とオッズの積が100を超える（期待値がプラスになる）推奨馬券をピックアップしています。
@@ -1170,7 +1153,7 @@ export default function PredictionDetailPage() {
 
       {/* B5: 金額シミュレーション & モンテカルロ */}
       {prediction.recommendedBets.length > 0 && prediction.analysis.bettingStrategy && (
-        <div id="simulator" ref={setSectionRef('simulator')} className="scroll-mt-16 space-y-6">
+        <div id="simulator" ref={setSectionRefWrapped('simulator')} className="scroll-mt-16 space-y-6">
           <BudgetSimulator
             bets={prediction.recommendedBets}
             riskLevel={prediction.analysis.bettingStrategy.riskLevel}
