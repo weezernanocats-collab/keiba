@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useEffect, useState, useMemo, useCallback } from 'react';
+import { Suspense, useState, useMemo, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import GradeBadge from '@/components/GradeBadge';
@@ -7,6 +7,7 @@ import ConfidenceBadge from '@/components/ConfidenceBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import FavoriteProfilePopover from '@/components/FavoriteProfilePopover';
 import { useFavorites } from '@/lib/use-favorites';
+import { useApi, useDeferredApi } from '@/hooks/use-api';
 import type { BetTypeStat } from '@/types';
 import { PredictionHistoryContent } from './history/page';
 
@@ -123,34 +124,18 @@ function PredictionsPageInner() {
 const rankLabels = ['\u25CE', '\u25CB', '\u25B2', '\u25B3', '\u00D7', '\u2606'];
 
 function UpcomingRaces() {
-  const [races, setRaces] = useState<RaceRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: racesData } = useApi<{ races: RaceRow[] }>('/api/races?type=upcoming');
+  const { data: statsData } = useDeferredApi<{ betTypeStats: BetTypeStat[] }>('/api/accuracy-stats');
+
+  const races = racesData?.races || [];
+  const betTypeStats = statsData?.betTypeStats || [];
+  const loading = !racesData;
+
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [predCache, setPredCache] = useState<Map<string, PredCache>>(new Map());
   const [loadingPred, setLoadingPred] = useState<string | null>(null);
-  const [betTypeStats, setBetTypeStats] = useState<BetTypeStat[]>([]);
   const [confidenceFilter, setConfidenceFilter] = useState<string>('all');
   const { isRaceFavoriteInProfile, toggleRaceForProfile } = useFavorites();
-
-  useEffect(() => {
-    async function fetchRaces() {
-      try {
-        const [racesRes, statsRes] = await Promise.all([
-          fetch('/api/races?type=upcoming'),
-          fetch('/api/accuracy-stats'),
-        ]);
-        const racesData = await racesRes.json();
-        setRaces(racesData.races || []);
-        const statsData = await statsRes.json();
-        setBetTypeStats(statsData.betTypeStats || []);
-      } catch (err) {
-        console.error('Error:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchRaces();
-  }, []);
 
   const betTypeStatsMap = useMemo(
     () => new Map(betTypeStats.map(s => [s.type, s])),
