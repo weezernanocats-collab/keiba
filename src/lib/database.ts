@@ -19,7 +19,12 @@ function getClient(): Client {
     });
   } else {
     // ローカル開発用: ファイルベースSQLite
-    const dataDir = path.join(process.cwd(), 'data');
+    // Vercel等の読み取り専用環境では /tmp を使用
+    const baseDir = fs.existsSync(path.join(process.cwd(), 'package.json'))
+      && !process.env.VERCEL
+      ? process.cwd()
+      : '/tmp';
+    const dataDir = path.join(baseDir, 'data');
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
     }
