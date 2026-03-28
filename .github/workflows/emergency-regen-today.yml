@@ -11,7 +11,7 @@ on:
 jobs:
   regen:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -31,10 +31,7 @@ jobs:
           echo "TURSO_DATABASE_URL=\"${{ secrets.TURSO_DATABASE_URL }}\"" > .env.local
           echo "TURSO_AUTH_TOKEN=\"${{ secrets.TURSO_AUTH_TOKEN }}\"" >> .env.local
 
-      - name: Step 1 - Morning pipeline (scrape races + entries + predictions)
-        run: npx tsx -r tsconfig-paths/register scripts/daily-pipeline.ts --job morning
-
-      - name: Step 2 - Regen all predictions for today
+      - name: Generate predictions for 2026-03-28
         run: npx tsx -r tsconfig-paths/register scripts/gen-predictions-optimized.ts --date 2026-03-28 --regen
 
       - name: Cleanup
