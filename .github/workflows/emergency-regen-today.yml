@@ -1,6 +1,11 @@
 name: Emergency Regen Today Predictions
 
 on:
+  push:
+    branches:
+      - claude/fix-ai-prediction-update-GBAYC
+    paths:
+      - '.github/workflows/emergency-regen-today.yml'
   workflow_dispatch:
 
 jobs:
@@ -11,8 +16,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          ref: claude/fix-ai-prediction-update-GBAYC
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
