@@ -11,7 +11,7 @@
  *   - 夜cron (22:00 JST) で当日結果の安全網を提供
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { runCronJob, executeMissingPredictions, cleanupStaleRaces, executeResultFetch, fetchUpcomingOdds, collectOddsSnapshots, rescrapeIncompleteEntries } from '@/lib/scheduler';
+import { runCronJob, executeMissingPredictions, cleanupStaleRaces, executeResultFetch, fetchUpcomingOdds, collectOddsSnapshots, rescrapeIncompleteEntries, regenerateTodayPredictions } from '@/lib/scheduler';
 import { evaluateAllPendingRaces } from '@/lib/accuracy-tracker';
 import { dbGet } from '@/lib/database';
 
@@ -149,6 +149,18 @@ export async function GET(request: NextRequest) {
         }
       } catch (e) {
         console.error('[cron] morning odds snapshot failed:', e);
+      }
+
+      // 当日レースの予想を最新オッズで再生成（前夜生成分を更新）
+      try {
+        const elapsed = Date.now() - handlerStart;
+        const regenBudget = Math.max(5_000, 30_000 - elapsed);
+        const { regenerated, total } = await regenerateTodayPredictions(todayStr, regenBudget);
+        if (total > 0) {
+          executed.push(`morning: 当日予想再生成 ${regenerated}/${total}件`);
+        }
+      } catch (e) {
+        console.error('[cron] morning prediction regen failed:', e);
       }
 
       return NextResponse.json({

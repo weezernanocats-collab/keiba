@@ -25,6 +25,7 @@ interface RaceRow {
   status: string;
   entryCount: number;
   confidence: number | null;
+  predictionGeneratedAt: string | null;
 }
 
 interface PredBet {
@@ -261,6 +262,11 @@ function UpcomingRaces() {
                       </div>
                       <div className="flex items-center gap-2 shrink-0 ml-2">
                         <span className="text-xs text-muted hidden sm:inline">{race.entryCount}頭</span>
+                        {race.predictionGeneratedAt && (
+                          <span className="text-xs text-muted hidden sm:inline">
+                            生成: {new Date(race.predictionGeneratedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
                         <ConfidenceBadge value={race.confidence} />
                         <FavoriteProfilePopover
                           checkFavorite={(p) => isRaceFavoriteInProfile(race.id, p)}
@@ -273,6 +279,11 @@ function UpcomingRaces() {
                     {/* モバイル補助行 */}
                     <div className="sm:hidden text-xs text-muted mt-1">
                       {race.racecourseName} {race.trackType}{race.distance}m {race.entryCount}頭
+                      {race.predictionGeneratedAt && (
+                        <span className="ml-2">
+                          生成: {new Date(race.predictionGeneratedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
                     </div>
                   </button>
 

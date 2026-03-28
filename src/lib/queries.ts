@@ -5,6 +5,13 @@ import type {
   RACECOURSES
 } from '@/types';
 
+// SQLite datetime('now') は UTC だが 'Z' サフィックスなし → JS で local 扱いされるのを防ぐ
+function ensureUtcSuffix(dt: string): string {
+  if (!dt) return dt;
+  if (dt.endsWith('Z') || dt.includes('+') || dt.includes('T')) return dt;
+  return dt.replace(' ', 'T') + 'Z';
+}
+
 // ==================== 競馬場 ====================
 
 export async function getAllRacecourses() {
@@ -126,6 +133,7 @@ export async function getUpcomingRaces(limit: number = 50) {
 
   const rows = await dbAll<Record<string, unknown>>(`
     SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence,
+      p.generated_at as prediction_generated_at,
       (SELECT MIN(re2.odds) FROM race_entries re2 WHERE re2.race_id = r.id AND re2.odds > 0) as top_odds
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
@@ -140,6 +148,7 @@ export async function getUpcomingRaces(limit: number = 50) {
     ...mapRace(r),
     entryCount: (r.entry_count ?? 0) as number,
     confidence: r.prediction_confidence != null ? Number(r.prediction_confidence) : null,
+    predictionGeneratedAt: r.prediction_generated_at ? ensureUtcSuffix(r.prediction_generated_at as string) : null,
     topOdds: r.top_odds != null ? Number(r.top_odds) : null,
   }));
 }
@@ -676,7 +685,7 @@ export async function getPredictionByRaceId(raceId: string) {
 
   return {
     raceId: row.race_id as string,
-    generatedAt: row.generated_at as string,
+    generatedAt: ensureUtcSuffix(row.generated_at as string),
     confidence: row.confidence as number,
     summary: row.summary as string,
     analysis: JSON.parse(row.analysis_json as string || '{}') as RaceAnalysis,
