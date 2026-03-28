@@ -1067,6 +1067,71 @@ export async function collectOddsSnapshots(
   return { collected, total: races.length };
 }
 
+/**
+ * 当日レースの予想を最新オッズで再生成
+ *
+ * 朝cronでオッズスナップショット収集後に呼び出し、
+ * 前夜生成の予想を当日朝のオッズで更新する。
+ */
+export async function regenerateTodayPredictions(
+  date: string,
+  timeBudgetMs: number = 20_000,
+): Promise<{ regenerated: number; total: number }> {
+  const deadline = Date.now() + timeBudgetMs;
+
+  // 予想が既に存在する当日レースを対象にする
+  const races = await dbAll<{
+    id: string; name: string; track_type: string; distance: number;
+    track_condition: string; racecourse_name: string; grade: string; weather: string;
+  }>(
+    `SELECT r.id, r.name, r.track_type, r.distance, r.track_condition,
+            r.racecourse_name, r.grade, r.weather
+     FROM races r
+     JOIN predictions p ON r.id = p.race_id
+     WHERE r.date = ?
+       AND r.status IN ('出走確定')
+       AND (SELECT COUNT(*) FROM race_entries re WHERE re.race_id = r.id) >= 2
+     ORDER BY r.race_number`,
+    [date]
+  );
+
+  if (races.length === 0) {
+    return { regenerated: 0, total: 0 };
+  }
+
+  await ensureCalibrationLoaded();
+  addLog('当日予想再生成開始', `${date}: ${races.length}レース`, true);
+
+  let regenerated = 0;
+  for (const race of races) {
+    if (Date.now() >= deadline) {
+      addLog('当日予想再生成中断', `タイムバジェット到達 (${regenerated}/${races.length})`, true);
+      break;
+    }
+    try {
+      const raceData = await getRaceById(race.id);
+      if (!raceData?.entries?.length || raceData.entries.length < 2) continue;
+
+      const prediction = await buildAndPredict(
+        race.id, race.name, date,
+        race.track_type as import('@/types').TrackType, race.distance,
+        race.track_condition as import('@/types').TrackCondition | undefined,
+        race.racecourse_name, race.grade,
+        raceData.entries as import('@/types').RaceEntry[],
+        race.weather as string | undefined,
+        { includeTrainerStats: true },
+      );
+      await savePrediction(prediction);
+      regenerated++;
+    } catch (error) {
+      addLog('当日予想再生成失敗', `${race.id}: ${errMsg(error)}`, false);
+    }
+  }
+
+  addLog('当日予想再生成完了', `${date}: ${regenerated}/${races.length}件`, true);
+  return { regenerated, total: races.length };
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
