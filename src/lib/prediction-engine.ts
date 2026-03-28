@@ -198,6 +198,12 @@ export async function generatePrediction(
   // --- ML推論によるスコアブレンド ---
   const horseInputMap = new Map(horses.map(h => [h.entry.horseNumber, h]));
   const raceDate = new Date(date);
+
+  // oddsMapからpopularityを推定（オッズ昇順で1位=人気1）
+  const oddsEntries = [...oddsMap.entries()].sort((a, b) => a[1] - b[1]);
+  const oddsPopularity = new Map<number, number>();
+  oddsEntries.forEach(([hn], i) => oddsPopularity.set(hn, i + 1));
+
   const mlInputs: MLHorseInput[] = scoredHorses.map(sh => {
     const input = horseInputMap.get(sh.entry.horseNumber);
     const pp = input?.pastPerformances || [];
@@ -294,8 +300,8 @@ export async function generatePrediction(
         ),
         {
           fieldSize: horses.length,
-          odds: sh.entry.odds,
-          popularity: sh.entry.popularity,
+          odds: sh.entry.odds ?? oddsMap.get(sh.entry.horseNumber),
+          popularity: sh.entry.popularity ?? oddsPopularity.get(sh.entry.horseNumber),
           age: sh.entry.age,
           sex: sh.entry.sex,
           handicapWeight: sh.entry.handicapWeight,

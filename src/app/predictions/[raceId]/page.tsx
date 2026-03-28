@@ -868,7 +868,7 @@ export default function PredictionDetailPage() {
         <div id="bets" ref={setSectionRefWrapped('bets')} className="scroll-mt-16">
           <h2 className="text-lg font-bold mb-1">推奨馬券</h2>
           <p className="text-xs text-muted mb-4">
-            的中率算出要素: 過去成績・騎手適性・競馬場相性・脚質相性・安定性・買い方実績
+            市場オッズとAIモデルのブレンド確率に基づく推奨。的中率算出要素: 過去成績・騎手適性・競馬場相性・脚質相性・安定性・買い方実績
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {prediction.recommendedBets.map((bet, idx) => {
@@ -1114,7 +1114,7 @@ export default function PredictionDetailPage() {
         <div id="value-pickup" ref={setSectionRefWrapped('value-pickup')} className="bg-card-bg border-2 border-green-400 dark:border-green-600 rounded-xl p-6 scroll-mt-16">
           <h2 className="text-lg font-bold mb-2">期待値プラスの馬券</h2>
           <p className="text-xs text-muted mb-4">
-            各券種の過去の的中率とオッズの積が100を超える（期待値がプラスになる）推奨馬券をピックアップしています。
+            市場オッズとAIモデルのブレンド確率から算出。各券種の的中率とオッズの積が100を超える（期待値がプラスになる）馬券をピックアップしています。
           </p>
           <div className="space-y-3">
             {valueBets
