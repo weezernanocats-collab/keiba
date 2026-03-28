@@ -865,11 +865,7 @@ async function syncRegeneratePredictions(entry: SyncLogEntry, date?: string): Pr
     return;
   }
 
-  // 既存予想を削除
-  const regenIds = racesToRegenerate.map(r => r.id);
-  const placeholders = regenIds.map(() => '?').join(',');
-  await dbRun(`DELETE FROM predictions WHERE race_id IN (${placeholders})`, regenIds);
-
+  // savePrediction が race_id 単位で DELETE→INSERT するため、事前の一括削除は不要
   entry.details = `[2/2] 予想を再生成中: 0/${racesToRegenerate.length}レース`;
   let timedOut = false;
   for (const race of racesToRegenerate) {
