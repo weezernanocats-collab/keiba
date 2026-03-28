@@ -35,27 +35,38 @@ export async function GET(request: NextRequest) {
     const today = jstNow.toISOString().split('T')[0];
     const dateParam = request.nextUrl.searchParams.get('date') || today;
 
-    // 予想がないレースを取得
-    const missing = await dbAll<{
+    // forceパラメータ: 既存予想も上書き（デフォルト: true）
+    const force = request.nextUrl.searchParams.get('force') !== 'false';
+
+    // 対象レースを取得（force=trueなら全レース、falseなら予想未生成のみ）
+    const targets = await dbAll<{
       id: string; name: string; track_type: string; distance: number;
       track_condition: string; racecourse_name: string; grade: string; weather: string;
     }>(
-      `SELECT r.id, r.name, r.track_type, r.distance, r.track_condition,
-              r.racecourse_name, r.grade, r.weather
-       FROM races r
-       LEFT JOIN predictions p ON r.id = p.race_id
-       WHERE p.id IS NULL AND r.date = ?
-         AND r.status IN ('出走確定', '結果確定')
-         AND (SELECT COUNT(*) FROM race_entries re WHERE re.race_id = r.id) >= 2
-       ORDER BY r.race_number`,
+      force
+        ? `SELECT r.id, r.name, r.track_type, r.distance, r.track_condition,
+                  r.racecourse_name, r.grade, r.weather
+           FROM races r
+           WHERE r.date = ?
+             AND r.status IN ('出走確定', '結果確定')
+             AND (SELECT COUNT(*) FROM race_entries re WHERE re.race_id = r.id) >= 2
+           ORDER BY r.race_number`
+        : `SELECT r.id, r.name, r.track_type, r.distance, r.track_condition,
+                  r.racecourse_name, r.grade, r.weather
+           FROM races r
+           LEFT JOIN predictions p ON r.id = p.race_id
+           WHERE p.id IS NULL AND r.date = ?
+             AND r.status IN ('出走確定', '結果確定')
+             AND (SELECT COUNT(*) FROM race_entries re WHERE re.race_id = r.id) >= 2
+           ORDER BY r.race_number`,
       [dateParam]
     );
 
-    if (missing.length === 0) {
+    if (targets.length === 0) {
       return NextResponse.json({
         ok: true,
         date: dateParam,
-        message: '予想未生成レースなし（全レース予想済み）',
+        message: force ? '対象レースなし' : '予想未生成レースなし（全レース予想済み）',
         generated: 0,
         total: 0,
       });
@@ -66,9 +77,9 @@ export async function GET(request: NextRequest) {
     let generated = 0;
     const errors: string[] = [];
 
-    for (const race of missing) {
+    for (const race of targets) {
       if (Date.now() >= deadline) {
-        errors.push(`タイムバジェット到達: ${generated}/${missing.length}件で中断`);
+        errors.push(`タイムバジェット到達: ${generated}/${targets.length}件で中断`);
         break;
       }
 
@@ -97,8 +108,8 @@ export async function GET(request: NextRequest) {
       ok: true,
       date: dateParam,
       generated,
-      total: missing.length,
-      remaining: missing.length - generated,
+      total: targets.length,
+      remaining: targets.length - generated,
       elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s`,
       errors: errors.length > 0 ? errors : undefined,
     });

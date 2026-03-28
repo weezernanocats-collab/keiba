@@ -670,8 +670,14 @@ async function processChunkPhase(
 
     case 'race_details': {
       state.phaseLabel = '出馬表取得';
+      // 未処理 or 出馬表が不完全(2頭以下)のレースも再スクレイピング対象
       const unprocessed = await dbAll<{ id: string; name: string }>(
-        "SELECT id, name FROM races WHERE (status = '予定' OR (status = '出走確定' AND distance = 0)) AND date BETWEEN ? AND ? ORDER BY date",
+        `SELECT r.id, r.name FROM races r
+         WHERE (r.status = '予定'
+           OR (r.status = '出走確定' AND r.distance = 0)
+           OR (r.status = '出走確定' AND (SELECT COUNT(*) FROM race_entries re WHERE re.race_id = r.id) <= 2))
+         AND r.date BETWEEN ? AND ?
+         ORDER BY r.date`,
         [state.config.startDate, state.config.endDate]
       );
 
@@ -729,9 +735,13 @@ async function processChunkPhase(
         await sleep(CHUNK_RATE_LIMIT_MS);
       }
 
-      // 残りを再確認
+      // 残りを再確認（選択クエリと同じ条件）
       const remaining = await dbGet<{ c: number }>(
-        "SELECT COUNT(*) as c FROM races WHERE (status = '予定' OR (status = '出走確定' AND distance = 0)) AND date BETWEEN ? AND ?",
+        `SELECT COUNT(*) as c FROM races r
+         WHERE (r.status = '予定'
+           OR (r.status = '出走確定' AND r.distance = 0)
+           OR (r.status = '出走確定' AND (SELECT COUNT(*) FROM race_entries re WHERE re.race_id = r.id) <= 2))
+         AND r.date BETWEEN ? AND ?`,
         [state.config.startDate, state.config.endDate]
       );
       state.phaseRemaining = remaining?.c ?? 0;
@@ -863,11 +873,12 @@ async function processChunkPhase(
 
     case 'odds': {
       state.phaseLabel = 'オッズ取得';
-      // オッズ未取得のレースを対象（ステータス問わず）
+      // 未発走レースは常にオッズ更新、結果確定レースはオッズ未取得のみ取得
       const targetRaces = await dbAll<{ id: string; name: string; status: string }>(
         `SELECT r.id, r.name, r.status FROM races r
          WHERE r.date BETWEEN ? AND ?
-         AND NOT EXISTS (SELECT 1 FROM odds o WHERE o.race_id = r.id)
+         AND (r.status IN ('予定', '出走確定')
+              OR (r.status = '結果確定' AND NOT EXISTS (SELECT 1 FROM odds o WHERE o.race_id = r.id)))
          ORDER BY r.date`,
         [state.config.startDate, state.config.endDate]
       );
@@ -918,7 +929,7 @@ async function processChunkPhase(
 
     case 'predictions': {
       state.phaseLabel = 'AI予想生成';
-      const today = new Date().toISOString().split('T')[0];
+      // 出走確定レースの予想を生成・更新（結果確定済み=prediction_results有りは除外して孤立防止）
       const unprocessed = await dbAll<{
         id: string; name: string; date: string; track_type: string;
         distance: number; track_condition: string; racecourse_name: string; grade: string;
@@ -926,11 +937,11 @@ async function processChunkPhase(
         `SELECT DISTINCT r.id, r.name, r.date, r.track_type, r.distance,
                r.track_condition, r.racecourse_name, r.grade
         FROM races r
-        LEFT JOIN predictions p ON r.id = p.race_id
-        WHERE p.id IS NULL AND r.date >= ?
-        AND r.status IN ('出走確定', '結果確定')
-        AND r.date BETWEEN ? AND ?`,
-        [today, state.config.startDate, state.config.endDate]
+        WHERE r.status = '出走確定'
+        AND r.date BETWEEN ? AND ?
+        AND (SELECT COUNT(*) FROM race_entries re WHERE re.race_id = r.id) >= 2
+        AND NOT EXISTS (SELECT 1 FROM prediction_results pr WHERE pr.race_id = r.id)`,
+        [state.config.startDate, state.config.endDate]
       );
 
       state.phaseRemaining = unprocessed.length;
@@ -965,14 +976,16 @@ async function processChunkPhase(
         state.phaseRemaining--;
       }
 
+      // 未処理の出走確定レース残件を確認（選択クエリと同じ条件）
       const remainingRow = await dbGet<{ c: number }>(
         `SELECT COUNT(DISTINCT r.id) as c
         FROM races r
-        LEFT JOIN predictions p ON r.id = p.race_id
-        WHERE p.id IS NULL AND r.date >= ?
-        AND r.status IN ('出走確定', '結果確定')
-        AND r.date BETWEEN ? AND ?`,
-        [today, state.config.startDate, state.config.endDate]
+        WHERE r.status = '出走確定'
+        AND r.date BETWEEN ? AND ?
+        AND (SELECT COUNT(*) FROM race_entries re WHERE re.race_id = r.id) >= 2
+        AND NOT EXISTS (SELECT 1 FROM prediction_results pr WHERE pr.race_id = r.id)
+        AND NOT EXISTS (SELECT 1 FROM predictions p WHERE p.race_id = r.id)`,
+        [state.config.startDate, state.config.endDate]
       );
       const remainingCount = remainingRow?.c ?? 0;
       state.phaseRemaining = remainingCount;

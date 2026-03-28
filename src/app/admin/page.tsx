@@ -117,7 +117,21 @@ export default function AdminPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        setMessage(data.message || `同期開始: ${data.syncId || ''}`);
+        // 同期処理の結果を詳細表示
+        const parts: string[] = [];
+        if (data.message) parts.push(data.message);
+        if (data.details) parts.push(data.details);
+        if (data.stats) {
+          const s = data.stats;
+          const statParts: string[] = [];
+          if (s.predictionsGenerated > 0) statParts.push(`予想: ${s.predictionsGenerated}件`);
+          if (s.racesScraped > 0) statParts.push(`レース: ${s.racesScraped}件`);
+          if (s.oddsScraped > 0) statParts.push(`オッズ: ${s.oddsScraped}件`);
+          if (s.horsesScraped > 0) statParts.push(`馬: ${s.horsesScraped}件`);
+          if (statParts.length > 0) parts.push(`[${statParts.join(' / ')}]`);
+        }
+        if (data.errors?.length > 0) parts.push(`⚠ エラー${data.errors.length}件`);
+        setMessage(parts.join(' | ') || `同期開始: ${data.syncId || ''}`);
         setTimeout(fetchStatus, 2000);
       } else {
         setMessage(data.error || 'エラーが発生しました');

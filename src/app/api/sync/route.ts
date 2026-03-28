@@ -321,9 +321,9 @@ export async function POST(request: NextRequest) {
   if (type === 'full') {
     const targetDate = date || new Date(Date.now() + 9 * 60 * 60_000).toISOString().split('T')[0];
 
-    // 対象日の既存エントリを削除し、レースステータスをリセット
-    // これにより race_details フェーズで再スクレイプされる
-    await dbRun('DELETE FROM race_entries WHERE race_id IN (SELECT id FROM races WHERE date = ?)', [targetDate]);
+    // 対象日の未確定レースのエントリを削除し、ステータスをリセット
+    // 結果確定済みレースのデータは保持する
+    await dbRun("DELETE FROM race_entries WHERE race_id IN (SELECT id FROM races WHERE date = ? AND status != '結果確定') AND result_position IS NULL", [targetDate]);
     await dbRun("UPDATE races SET status = '予定', distance = 0 WHERE date = ? AND status != '結果確定'", [targetDate]);
 
     const state = createInitialChunkedState({
@@ -445,7 +445,7 @@ export async function POST(request: NextRequest) {
 
   // For single-item operations, execute synchronously (within maxDuration=60s)
   // For bulk operations, fire-and-forget with background processing
-  const isBulkOperation = type === 'races' || type === 'regenerate_predictions';
+  const isBulkOperation = type === 'races';
 
   if (isBulkOperation) {
     executeSyncInBackground(syncEntry, type, date, raceId, horseId);
@@ -857,13 +857,8 @@ async function syncRegeneratePredictions(entry: SyncLogEntry, date?: string): Pr
   }
   entry.details = `[1/2] バイアス確認: ${biasStatus.join(' / ')}`;
 
-  // Step 2: 出走確定レースの予想を再生成（タイムバジェット管理付き）
-  const racesToRegenerate = races.filter(r => r.status === '出走確定');
-
-  if (racesToRegenerate.length === 0) {
-    entry.details = `予想再生成完了: ${targetDate} - 再生成対象なし（全レース結果確定済み）`;
-    return;
-  }
+  // Step 2: 全対象レースの予想を再生成（結果確定済みも含む）
+  const racesToRegenerate = races;
 
   // savePrediction が race_id 単位で DELETE→INSERT するため、事前の一括削除は不要
   entry.details = `[2/2] 予想を再生成中: 0/${racesToRegenerate.length}レース`;

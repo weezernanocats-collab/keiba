@@ -67,11 +67,12 @@ export async function GET(request: NextRequest) {
       console.error('[cron] evaluate failed:', e);
     }
 
-    // 1b. 過去の滞留レースをクリーンアップ
+    // 1b. 滞留レースをクリーンアップ（夕方以降は当日レースも対象）
     try {
       const elapsed1 = Date.now() - handlerStart;
       const cleanupBudget = Math.max(5_000, 15_000 - elapsed1);
-      const { fixed, total } = await cleanupStaleRaces(cleanupBudget);
+      const includeTodayInCleanup = jstHour >= 18;
+      const { fixed, total } = await cleanupStaleRaces(cleanupBudget, includeTodayInCleanup);
       if (total > 0) {
         alwaysExecuted.push(`ステータス修復: ${fixed}/${total}件`);
       }
@@ -249,11 +250,11 @@ export async function GET(request: NextRequest) {
     if (jstHour >= 16 && jstHour <= 18) {
       const executed = [...alwaysExecuted];
 
-      // 1. 当日の結果取得（タイムバジェット30秒、Phase1+後続処理分を確保）
+      // 1. 当日の結果取得（タイムバジェット拡大: 50秒確保）
       let eveningPartial = false;
       try {
         const elapsed = Date.now() - handlerStart;
-        const resultBudget = Math.max(10_000, 35_000 - elapsed);
+        const resultBudget = Math.max(10_000, 50_000 - elapsed);
         const { resultCount, totalRaces } = await executeResultFetch(todayStr, resultBudget);
         eveningPartial = totalRaces > 0 && resultCount < totalRaces;
         if (totalRaces > 0) {
