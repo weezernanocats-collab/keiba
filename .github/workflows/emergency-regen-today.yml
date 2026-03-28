@@ -11,7 +11,7 @@ on:
 jobs:
   regen:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
@@ -31,30 +31,10 @@ jobs:
           echo "TURSO_DATABASE_URL=\"${{ secrets.TURSO_DATABASE_URL }}\"" > .env.local
           echo "TURSO_AUTH_TOKEN=\"${{ secrets.TURSO_AUTH_TOKEN }}\"" >> .env.local
 
-      - name: Debug - check env and DB connection
-        run: |
-          echo "=== .env.local exists: $(test -f .env.local && echo YES || echo NO) ==="
-          echo "=== .env.local line count: $(wc -l < .env.local) ==="
-          echo "=== TURSO_DATABASE_URL set: $(grep -c TURSO_DATABASE_URL .env.local) ==="
-          node -e "
-            const fs = require('fs');
-            const env = fs.readFileSync('.env.local','utf-8');
-            for (const line of env.split('\n')) {
-              const m = line.match(/^(\w+)=\"?([^\"]*?)\"?$/);
-              if (m) { process.env[m[1]] = m[2]; }
-            }
-            console.log('TURSO_DATABASE_URL starts with:', (process.env.TURSO_DATABASE_URL||'UNSET').substring(0,20));
-            const { createClient } = require('@libsql/client');
-            const c = createClient({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN });
-            c.execute('SELECT COUNT(*) as cnt FROM races WHERE date = \"2026-03-28\"').then(r => {
-              console.log('Races on 2026-03-28:', JSON.stringify(r.rows));
-              return c.execute('SELECT COUNT(*) as cnt FROM predictions p JOIN races r ON p.race_id = r.id WHERE r.date = \"2026-03-28\"');
-            }).then(r => {
-              console.log('Predictions for 2026-03-28:', JSON.stringify(r.rows));
-            }).catch(e => console.error('DB error:', e.message));
-          "
+      - name: Step 1 - Morning pipeline (scrape races + entries + predictions)
+        run: npx tsx -r tsconfig-paths/register scripts/daily-pipeline.ts --job morning
 
-      - name: Generate today predictions (regen mode)
+      - name: Step 2 - Regen all predictions for today
         run: npx tsx -r tsconfig-paths/register scripts/gen-predictions-optimized.ts --date 2026-03-28 --regen
 
       - name: Cleanup
