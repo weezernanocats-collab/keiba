@@ -6,7 +6,7 @@ import { isBetHit } from '@/lib/bet-utils';
 import { getCacheHeaders } from '@/lib/api-helpers';
 
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 /** 予想が壊れているか判定（horseId が全て欠落している場合） */
 function isBrokenPrediction(topPicks: { horseId?: string; horseName?: string }[]): boolean {
@@ -46,6 +46,24 @@ export async function GET(
       } catch (regenError) {
         console.error('予想再生成失敗:', regenError);
         // 再生成に失敗した場合はフォールバック
+      }
+    }
+
+    // 予想が未生成の場合、オンデマンドで自動生成
+    if (!prediction && race.entries.length >= 2) {
+      try {
+        const newPrediction = await buildAndPredict(
+          raceId, race.name, race.date,
+          race.trackType as '芝' | 'ダート' | '障害', race.distance,
+          race.trackCondition as '良' | '稍重' | '重' | '不良' | undefined,
+          race.racecourseName, race.grade, race.entries,
+          race.weather as string | undefined,
+          { includeTrainerStats: true },
+        );
+        await savePrediction(newPrediction);
+        prediction = newPrediction;
+      } catch (genError) {
+        console.error('オンデマンド予想生成失敗:', genError);
       }
     }
 
