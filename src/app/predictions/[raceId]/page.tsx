@@ -141,6 +141,32 @@ const BET_TYPE_CALIBRATION: Record<string, number> = {
   '馬単': 0.69, '三連複': 0.52, '三連単': 3.4,
 };
 
+function PredictionLoadingIndicator() {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setElapsed(prev => prev + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const message = elapsed < 3
+    ? 'AI予想を読み込んでいます...'
+    : elapsed < 8
+      ? 'データ取得中...（馬場バイアスを確認しています）'
+      : 'AI予想を再生成しています...（通常10〜20秒）';
+
+  const showSubtext = elapsed >= 5;
+
+  return (
+    <div className="flex flex-col items-center justify-center py-16">
+      <div className="w-10 h-10 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
+      <p className="mt-4 text-sm text-muted">{message}</p>
+      {showSubtext && (
+        <p className="mt-2 text-xs text-muted/60">{elapsed}秒経過</p>
+      )}
+    </div>
+  );
+}
+
 export default function PredictionDetailPage() {
   const params = useParams();
   const raceId = params.raceId as string;
@@ -212,7 +238,7 @@ export default function PredictionDetailPage() {
     }
   }, []);
 
-  if (!predData && !predError) return <LoadingSpinner message="AI予想を読み込んでいます..." />;
+  if (!predData && !predError) return <PredictionLoadingIndicator />;
 
   if (error) {
     return (
