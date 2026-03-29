@@ -1027,8 +1027,12 @@ export async function collectOddsSnapshots(
 ): Promise<{ collected: number; total: number }> {
   const deadline = Date.now() + timeBudgetMs;
 
-  const races = await dbAll<{ id: string; name: string }>(
-    "SELECT id, name FROM races WHERE date = ? AND status IN ('予定', '出走確定')",
+  // オッズ未取得レースを先に処理（race_entries.odds が NULL のレースを優先）
+  const races = await dbAll<{ id: string; name: string; has_odds: number }>(
+    `SELECT r.id, r.name,
+     CASE WHEN EXISTS (SELECT 1 FROM race_entries re WHERE re.race_id = r.id AND re.odds IS NOT NULL AND re.odds > 0) THEN 1 ELSE 0 END as has_odds
+     FROM races r WHERE r.date = ? AND r.status IN ('予定', '出走確定')
+     ORDER BY has_odds ASC, r.id ASC`,
     [date]
   );
 
@@ -1036,7 +1040,8 @@ export async function collectOddsSnapshots(
     return { collected: 0, total: 0 };
   }
 
-  addLog('オッズスナップショット収集', `${date}: ${races.length}レース`, true);
+  const noOddsCount = races.filter(r => !r.has_odds).length;
+  addLog('オッズスナップショット収集', `${date}: ${races.length}レース (未取得${noOddsCount}件を優先)`, true);
 
   let collected = 0;
   for (const race of races) {

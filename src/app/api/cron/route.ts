@@ -143,8 +143,11 @@ export async function GET(request: NextRequest) {
       }
 
       // 当日レースのオッズスナップショット収集（時系列データ蓄積）
+      // オッズ収集を最優先: 残り時間の大部分を確保（36レース×1.2s+DB=約50秒必要）
       try {
-        const { collected, total } = await collectOddsSnapshots(todayStr, 15_000);
+        const elapsedOdds = Date.now() - handlerStart;
+        const oddsBudget = Math.max(10_000, 50_000 - elapsedOdds);
+        const { collected, total } = await collectOddsSnapshots(todayStr, oddsBudget);
         if (collected > 0) {
           executed.push(`morning: オッズスナップショット ${collected}/${total}レース`);
         }
@@ -154,8 +157,8 @@ export async function GET(request: NextRequest) {
 
       // 当日レースの予想を最新オッズで再生成（前夜生成分を更新）
       try {
-        const elapsed = Date.now() - handlerStart;
-        const regenBudget = Math.max(5_000, 30_000 - elapsed);
+        const elapsedRegen = Date.now() - handlerStart;
+        const regenBudget = Math.max(5_000, 55_000 - elapsedRegen);
         const { regenerated, total } = await regenerateTodayPredictions(todayStr, regenBudget);
         if (total > 0) {
           executed.push(`morning: 当日予想再生成 ${regenerated}/${total}件`);
@@ -172,7 +175,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 午前〜午後 (10:00-14:00 JST) → チェーン再開 + 予想補完
+    // 午前〜午後 (10:00-14:00 JST) → オッズ収集（最優先）+ 予想補完 + チェーン再開
     if (jstHour >= 10 && jstHour <= 14) {
       const executed = [...alwaysExecuted];
 
@@ -188,9 +191,21 @@ export async function GET(request: NextRequest) {
         console.error('[cron] midday rescrape incomplete failed:', e);
       }
 
+      // 当日レースのオッズ収集（予想補完より先に実行 — オッズが予想精度に直結）
+      try {
+        const elapsedOdds = Date.now() - handlerStart;
+        const oddsBudget = Math.max(10_000, 50_000 - elapsedOdds);
+        const { collected, total } = await collectOddsSnapshots(todayStr, oddsBudget);
+        if (collected > 0) {
+          executed.push(`midday: オッズ収集 ${collected}/${total}レース`);
+        }
+      } catch (e) {
+        console.error('[cron] midday odds collection failed:', e);
+      }
+
       // 予想未生成レースの補完（当日+翌日+翌々日）
       const elapsed = Date.now() - handlerStart;
-      const predictionBudget = Math.max(5_000, 50_000 - elapsed);
+      const predictionBudget = Math.max(5_000, 55_000 - elapsed);
       try {
         let totalGenerated = 0;
         let totalMissing = 0;
@@ -226,17 +241,6 @@ export async function GET(request: NextRequest) {
         console.error('[cron] midday bulk_chunked resume failed:', err instanceof Error ? err.message : err);
       });
       executed.push('midday: bulk_chunked 再開トリガー');
-
-      // 当日レースのオッズスナップショット収集（時系列データ蓄積）
-      const snapshotBudget = Math.max(5_000, 45_000 - (Date.now() - handlerStart));
-      try {
-        const { collected, total } = await collectOddsSnapshots(todayStr, snapshotBudget);
-        if (collected > 0) {
-          executed.push(`midday: オッズスナップショット ${collected}/${total}レース`);
-        }
-      } catch (e) {
-        console.error('[cron] midday odds snapshot failed:', e);
-      }
 
       return NextResponse.json({
         ok: true,
