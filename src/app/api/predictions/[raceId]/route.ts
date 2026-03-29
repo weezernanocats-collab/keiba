@@ -98,6 +98,7 @@ export async function GET(
     }
 
     // 馬場バイアス鮮度チェック: 当日レースで新しいバイアスデータがあれば再生成
+    let regeneratedWithBias = false;
     if (prediction && race.entries.length >= 2) {
       try {
         const biasCountAtGen = prediction.analysis?.biasRaceCount ?? 0;
@@ -113,6 +114,7 @@ export async function GET(
           );
           await savePrediction(newPrediction);
           prediction = newPrediction;
+          regeneratedWithBias = true;
         }
       } catch (biasError) {
         console.error('馬場バイアス再生成失敗:', biasError);
@@ -312,7 +314,12 @@ export async function GET(
 
     // 結果確定済みレースはデータ不変 → 長めにキャッシュ
     const cachePreset = race.status === '結果確定' ? 'stats' : 'prediction';
-    return NextResponse.json({ prediction: augmentedPrediction, race, verification }, { headers: getCacheHeaders(cachePreset) });
+    return NextResponse.json({
+      prediction: augmentedPrediction,
+      race,
+      verification,
+      ...(regeneratedWithBias ? { regeneratedWithBias: true } : {}),
+    }, { headers: getCacheHeaders(cachePreset) });
   } catch (error) {
     console.error('予想API エラー:', error);
     return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });

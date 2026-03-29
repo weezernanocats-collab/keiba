@@ -149,6 +149,7 @@ export default function PredictionDetailPage() {
     prediction: PredictionData | null;
     race: RaceData | null;
     verification: Verification | null;
+    regeneratedWithBias?: boolean;
     error?: string;
   }>(`/api/predictions/${raceId}`);
 
@@ -307,6 +308,16 @@ export default function PredictionDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* 馬場バイアス再生成通知 */}
+      {predData?.regeneratedWithBias && (
+        <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-300 dark:border-emerald-700 rounded-lg px-4 py-3 text-sm text-emerald-800 dark:text-emerald-200">
+          <span className="font-medium">馬場バイアス反映済み</span>
+          <span className="text-emerald-600 dark:text-emerald-400 ml-2">
+            本日の完走レース結果から馬場傾向を分析し、予想を更新しました
+          </span>
+        </div>
+      )}
 
       {/* セクションナビ */}
       {sections.length > 2 && (
