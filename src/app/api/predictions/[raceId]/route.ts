@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getPredictionByRaceId, getRaceById, savePrediction } from '@/lib/queries';
-import { dbRun, dbAll } from '@/lib/database';
+import { dbRun, dbAll, dbGet } from '@/lib/database';
 import { buildAndPredict } from '@/lib/prediction-builder';
 import { isBetHit } from '@/lib/bet-utils';
 import { getCacheHeaders } from '@/lib/api-helpers';
@@ -12,6 +12,36 @@ export const maxDuration = 60;
 function isBrokenPrediction(topPicks: { horseId?: string; horseName?: string }[]): boolean {
   if (!topPicks || topPicks.length === 0) return true;
   return topPicks.every(pick => !pick.horseId && (!pick.horseName || pick.horseName.endsWith('番')));
+}
+
+/**
+ * 馬場バイアス鮮度チェック: 予想生成後に同場の結果確定レースが増えたか判定
+ *
+ * 条件を全て満たす場合のみ再生成:
+ *   1. 当日レースである
+ *   2. 発走前（status = '出走確定'）
+ *   3. 同場・同日の結果確定レースが3つ以上（バイアス算出可能）
+ *   4. 予想生成時より結果確定レースが増えている（analysis.biasRaceCount と比較）
+ */
+async function shouldRegenerateForBias(
+  race: { date: string; status: string; racecourseName: string },
+  biasRaceCountAtGeneration: number,
+): Promise<boolean> {
+  // 当日レース & 発走前のみ
+  const jstNow = new Date(Date.now() + 9 * 60 * 60_000);
+  const todayStr = jstNow.toISOString().split('T')[0];
+  if (race.date !== todayStr || race.status !== '出走確定') return false;
+
+  // 同場・同日の結果確定レース数（軽量COUNT 1本）
+  const result = await dbGet<{ cnt: number }>(
+    `SELECT COUNT(*) as cnt FROM races
+     WHERE date = ? AND racecourse_name = ? AND status = '結果確定'`,
+    [race.date, race.racecourseName],
+  );
+  const completedNow = result?.cnt ?? 0;
+
+  // バイアス算出に3R必要 & 生成時より増えている
+  return completedNow >= 3 && completedNow > biasRaceCountAtGeneration;
 }
 
 export async function GET(
@@ -64,6 +94,29 @@ export async function GET(
         prediction = newPrediction;
       } catch (genError) {
         console.error('オンデマンド予想生成失敗:', genError);
+      }
+    }
+
+    // 馬場バイアス鮮度チェック: 当日レースで新しいバイアスデータがあれば再生成
+    if (prediction && race.entries.length >= 2) {
+      try {
+        const biasCountAtGen = prediction.analysis?.biasRaceCount ?? 0;
+        const needsRegen = await shouldRegenerateForBias(race, biasCountAtGen);
+        if (needsRegen) {
+          const newPrediction = await buildAndPredict(
+            raceId, race.name, race.date,
+            race.trackType as '芝' | 'ダート' | '障害', race.distance,
+            race.trackCondition as '良' | '稍重' | '重' | '不良' | undefined,
+            race.racecourseName, race.grade, race.entries,
+            race.weather as string | undefined,
+            { includeTrainerStats: true },
+          );
+          await savePrediction(newPrediction);
+          prediction = newPrediction;
+        }
+      } catch (biasError) {
+        console.error('馬場バイアス再生成失敗:', biasError);
+        // 失敗しても既存予想をそのまま返す
       }
     }
 

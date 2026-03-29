@@ -462,6 +462,8 @@ export async function generatePrediction(
 
   // レース分析（当日バイアス + ペースプロファイルも含める）
   const analysis = analyzeRace(scoredHorses, trackType, distance, cond, racecourseName, ctx, todayBias);
+  // 馬場バイアス鮮度チェック用: 生成時の結果確定レース数を記録
+  analysis.biasRaceCount = todayBias?.sampleRaces ?? 0;
 
   // キャリブレーション用: 全馬のファクタースコアを analysis に格納
   // (horse_number -> { factor: score })

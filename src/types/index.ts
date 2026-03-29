@@ -203,6 +203,8 @@ export interface RaceAnalysis {
   valueHorses?: number[];
   overround?: number;
   winProbabilities?: Record<number, number>;
+  /** 予想生成時の同場・当日結果確定レース数（馬場バイアス鮮度チェック用） */
+  biasRaceCount?: number;
 }
 
 export type RacePattern = '一強' | '二強' | '三つ巴' | '混戦' | '大混戦';
