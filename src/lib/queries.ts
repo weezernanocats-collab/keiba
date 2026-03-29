@@ -228,18 +228,16 @@ function inferRacecourseIdFromRaceId(raceId: string): string {
 // ==================== 出走馬 ====================
 
 export async function upsertRaceEntry(raceId: string, entry: Partial<RaceEntry>) {
-  // FK制約対策: horse_id が horses テーブルに存在しない場合、プレースホルダーを挿入
-  if (entry.horseId) {
-    await dbRun(
-      "INSERT OR IGNORE INTO horses (id, name, age, sex) VALUES (?, ?, ?, ?)",
-      [entry.horseId, entry.horseName || '不明', entry.age || 0, entry.sex || '牡']
-    );
-  }
-
   // undefined → null 変換（Turso/libsql は undefined を受け付けない）
   // NOT NULL 制約のあるカラムはフォールバック値を設定（結果取得時にINSERTになるケース対策）
   const postPosition = entry.postPosition ?? 0;
   const horseId = entry.horseId ?? `unknown_${raceId}_${entry.horseNumber}`;
+
+  // FK制約対策: horse_id が horses テーブルに存在しない場合、プレースホルダーを挿入
+  await dbRun(
+    "INSERT OR IGNORE INTO horses (id, name, age, sex) VALUES (?, ?, ?, ?)",
+    [horseId, entry.horseName || `${entry.horseNumber}番`, entry.age || 0, entry.sex || '牡']
+  );
   const horseName = entry.horseName ?? `${entry.horseNumber}番`;
   const age = entry.age ?? null;
   const sex = entry.sex ?? null;
