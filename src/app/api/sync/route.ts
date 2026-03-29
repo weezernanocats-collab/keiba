@@ -831,9 +831,14 @@ async function syncResultsBulk(entry: SyncLogEntry, date?: string): Promise<void
   const targetDate = date || new Date().toISOString().split('T')[0];
   entry.details = `結果一括取得開始: ${targetDate}`;
 
-  const { resultCount, totalRaces } = await executeResultFetch(targetDate, 50_000);
+  // 45秒バジェットで取得（maxDuration=60sのマージン確保）
+  const { resultCount, totalRaces } = await executeResultFetch(targetDate, 45_000);
   entry.stats.resultsScraped = resultCount;
-  entry.details = `結果一括取得完了: ${targetDate} - ${resultCount}/${totalRaces}レース`;
+
+  const remaining = totalRaces - resultCount;
+  entry.details = remaining > 0
+    ? `結果取得: ${targetDate} - ${resultCount}/${totalRaces}レース確定（残り${remaining}件は再実行してください）`
+    : `結果一括取得完了: ${targetDate} - ${resultCount}/${totalRaces}レース確定`;
 }
 
 // ==================== Sync: Regenerate Predictions ====================

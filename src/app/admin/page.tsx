@@ -112,11 +112,16 @@ export default function AdminPage() {
       const body: Record<string, string | boolean> = { type };
       if (extraParams) Object.assign(body, extraParams);
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 65_000);
+
       const res = await fetch('/api/sync', {
         method: 'POST',
         headers: headers(),
         body: JSON.stringify(body),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       const data = await res.json();
       if (res.ok) {
         // 同期処理の結果を詳細表示
@@ -138,8 +143,13 @@ export default function AdminPage() {
       } else {
         setMessage(data.error || 'エラーが発生しました');
       }
-    } catch {
-      setMessage('サーバーに接続できません');
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setMessage('サーバー処理がタイムアウトしました。処理は継続中の可能性があります。「状態確認」で結果を確認してください。');
+      } else {
+        setMessage('サーバーに接続できません');
+      }
+      setTimeout(fetchStatus, 5000);
     } finally {
       setLoading(false);
       setLoadingType('');
