@@ -719,7 +719,7 @@ export async function executeResultFetch(date: string, timeBudgetMs?: number): P
       ? () => (Date.now() - startTime) < timeBudgetMs
       : () => true;
 
-    const resultRateMs = 500;
+    const resultRateMs = 200;
     let resultCount = 0;
     let entryResultCount = 0;
     let errorCount = 0;
@@ -735,7 +735,8 @@ export async function executeResultFetch(date: string, timeBudgetMs?: number): P
         if (results.length === 0) {
           addLog('結果取得空', `${race.id} (${race.name}): 結果データなし`, false);
         }
-        for (const r of results) {
+        // DB書き込みを並列化（同一レース内の各馬は競合しない）
+        await Promise.all(results.map(async (r) => {
           await upsertRaceEntry(race.id, {
             horseNumber: r.horseNumber, horseName: r.horseName,
             result: {
@@ -743,12 +744,12 @@ export async function executeResultFetch(date: string, timeBudgetMs?: number): P
               lastThreeFurlongs: r.lastThreeFurlongs, cornerPositions: r.cornerPositions,
             },
           });
-          entryResultCount++;
           if (r.odds > 0) {
             await upsertOdds(race.id, '単勝', [r.horseNumber], r.odds);
             await upsertRaceEntryOdds(race.id, r.horseNumber, r.odds, r.popularity);
           }
-        }
+        }));
+        entryResultCount += results.length;
         if (lapTimes.length > 0) {
           const paceType = classifyPaceType(lapTimes);
           await upsertRaceLapTimes(race.id, lapTimes, paceType);
