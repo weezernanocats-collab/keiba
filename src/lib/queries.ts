@@ -237,7 +237,8 @@ export async function upsertRaceEntry(raceId: string, entry: Partial<RaceEntry>)
   }
 
   // undefined → null 変換（Turso/libsql は undefined を受け付けない）
-  const postPosition = entry.postPosition ?? null;
+  // post_position は NOT NULL 制約があるため、未指定時は 0 にフォールバック
+  const postPosition = entry.postPosition ?? 0;
   const horseId = entry.horseId ?? null;
   const horseName = entry.horseName ?? null;
   const age = entry.age ?? null;
