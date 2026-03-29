@@ -50,6 +50,7 @@ export async function buildAndPredict(
 ): Promise<Prediction> {
   const maxPP = options?.maxPP ?? 100;
   const includeTrainer = options?.includeTrainerStats ?? false;
+  const t0 = Date.now();
 
   // 全馬のIDを収集
   const horseIds = entries.map(re => re.horseId);
@@ -61,6 +62,7 @@ export async function buildAndPredict(
     getHorsesByIds(horseIds),
     getJockeyStatsBatch(jockeyIds, date),
   ]);
+  console.log(`[perf] ${raceId} 基本データ取得: ${Date.now() - t0}ms (${entries.length}頭)`);
 
   // 拡張統計をバッチ取得（includeTrainer の場合のみ、4クエリ、並列実行）
   const trainerNames = entries.map(re => re.trainerName);
@@ -77,6 +79,7 @@ export async function buildAndPredict(
         getJockeyCourseWinRateBatch(jockeyIds, racecourseName, date),
       ])
     : [null, null, null, null];
+  if (includeTrainer) console.log(`[perf] ${raceId} 拡張統計取得: ${Date.now() - t0}ms`);
 
   const distCat = distance <= 1400 ? 'sprint' : distance <= 1800 ? 'mile' : 'long';
   const isHeavy = trackCondition === '重' || trackCondition === '不良';
@@ -129,9 +132,12 @@ export async function buildAndPredict(
     };
   });
 
-  return generatePrediction(
+  console.log(`[perf] ${raceId} データ準備完了: ${Date.now() - t0}ms → generatePrediction開始`);
+  const prediction = await generatePrediction(
     raceId, raceName, date, trackType, distance,
     trackCondition, racecourseName, grade, horseInputs,
     weather, { isAfternoon: options?.isAfternoon },
   );
+  console.log(`[perf] ${raceId} 予想生成完了: ${Date.now() - t0}ms`);
+  return prediction;
 }

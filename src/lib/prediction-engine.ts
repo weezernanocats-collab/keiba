@@ -150,18 +150,24 @@ export async function generatePrediction(
 ): Promise<Prediction> {
   const cond = trackCondition || '良';
   const month = new Date(date).getMonth() + 1;
+  const t0 = Date.now();
 
-  // 統計コンテキストを構築（1レースにつき1回、beforeDateフィルタ付き）
-  const ctx = await buildRaceContext(
-    racecourseName, trackType, distance, month,
-    horses.map(h => ({
-      horseId: h.entry.horseId,
-      fatherName: h.fatherName,
-      jockeyId: h.entry.jockeyId,
-      trainerName: h.entry.trainerName,
-    })),
-    date,
-  );
+  // 統計コンテキスト + オッズ + 馬場バイアスを並列取得
+  const [ctx, oddsMap, todayBias] = await Promise.all([
+    buildRaceContext(
+      racecourseName, trackType, distance, month,
+      horses.map(h => ({
+        horseId: h.entry.horseId,
+        fatherName: h.fatherName,
+        jockeyId: h.entry.jockeyId,
+        trainerName: h.entry.trainerName,
+      })),
+      date,
+    ),
+    getWinOddsMap(raceId),
+    calculateTodayTrackBias(racecourseName, date, trackType),
+  ]);
+  console.log(`[perf] ${raceId} DB並列取得: ${Date.now() - t0}ms`);
 
   // 平均斤量を算出（斤量ファクター用）
   const avgHandicapWeight = horses.length > 0
@@ -175,9 +181,6 @@ export async function generatePrediction(
     racecourseName,
   );
 
-  // 単勝オッズマップ取得（市場シグナル用）
-  const oddsMap = await getWinOddsMap(raceId);
-
   // 各馬をスコアリング
   const scoredHorses = horses.map(h =>
     scoreHorse(h, trackType, distance, cond, racecourseName, grade, horses.length, ctx, month, avgHandicapWeight, oddsMap, categoryWeights, weather, date)
@@ -185,9 +188,6 @@ export async function generatePrediction(
 
   // 展開予想から脚質ボーナスを付与（強化版: コンテキスト依存）
   applyEnhancedPaceBonus(scoredHorses, distance, grade, cond, ctx.paceProfile);
-
-  // 当日馬場バイアスを反映（同場・同日・同トラックの完走レースから推定）
-  const todayBias = await calculateTodayTrackBias(racecourseName, date, trackType);
   if (todayBias) {
     applyTodayTrackBias(scoredHorses, todayBias, horses.length);
   }
@@ -377,7 +377,9 @@ export async function generatePrediction(
     };
   });
 
+  const t1 = Date.now();
   const mlPredictions = await callMLPredict(mlInputs, { trackType, distance });
+  console.log(`[perf] ${raceId} ML推論: ${Date.now() - t1}ms, 全体: ${Date.now() - t0}ms`);
 
   // v7.2: カテゴリ別ブレンドパラメータ取得
   const blendParams = getCategoryBlendParams(trackType, distance);
