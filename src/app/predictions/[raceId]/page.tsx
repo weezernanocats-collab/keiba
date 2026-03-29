@@ -91,6 +91,8 @@ interface RaceData {
   distance: number;
   trackCondition: string | null;
   status: string;
+  time?: string;
+  entries: { horseNumber: number; jockeyName: string }[];
 }
 
 interface PickResult extends Pick {
@@ -163,6 +165,14 @@ export default function PredictionDetailPage() {
   const scoreBuckets = scoreData?.buckets || [];
   const betTypeStats = statsData?.betTypeStats || [];
   const error = predData?.error || (predError ? 'データの取得に失敗しました' : null);
+
+  // 馬番→騎手名マップ
+  const jockeyMap = new Map<number, string>();
+  if (race?.entries) {
+    for (const e of race.entries) {
+      if (e.jockeyName) jockeyMap.set(e.horseNumber, e.jockeyName);
+    }
+  }
 
   // セクションナビ用
   const [activeSection, setActiveSection] = useState('');
@@ -281,6 +291,7 @@ export default function PredictionDetailPage() {
         <p className="text-white/80 text-sm">
           {race.date} | {race.racecourseName} {race.raceNumber}R | {race.trackType}{race.distance}m
           {race.trackCondition && ` | ${race.trackCondition}`}
+          {race.time && ` | 発走 ${race.time}`}
         </p>
         <p className="text-white/50 text-xs mt-1">
           予想生成: {new Date(prediction.generatedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
@@ -446,7 +457,7 @@ export default function PredictionDetailPage() {
                   <tr key={pick.horseNumber} className="border-b dark:border-gray-800">
                     <td className="py-2 pr-2 font-bold">{rankLabels[idx] || '\u2606'}</td>
                     <td className="py-2 font-mono">{pick.horseNumber}</td>
-                    <td className="py-2">{pick.horseName}</td>
+                    <td className="py-2">{pick.horseName}{jockeyMap.get(pick.horseNumber) && <span className="text-muted text-xs ml-1">({jockeyMap.get(pick.horseNumber)})</span>}</td>
                     <td className="py-2 text-right font-mono">{pick.score}</td>
                     <td className="py-2 text-center font-bold">
                       {pick.actualPosition ? `${pick.actualPosition}着` : '-'}
@@ -661,6 +672,9 @@ export default function PredictionDetailPage() {
                   <div className="flex items-center gap-3">
                     <span className="text-lg font-bold">{rankLabels[idx] || '\u2606'}</span>
                     <span className="text-xl font-bold">{pick.horseNumber}番 {pick.horseName}</span>
+                    {jockeyMap.get(pick.horseNumber) && (
+                      <span className="text-sm text-muted font-normal">({jockeyMap.get(pick.horseNumber)})</span>
+                    )}
                     {pick.runningStyle && (
                       <span className={`text-xs px-2 py-0.5 rounded font-bold ${
                         pick.runningStyle === '逃げ'
@@ -775,6 +789,9 @@ export default function PredictionDetailPage() {
                   <div className="flex items-baseline gap-3 mb-2">
                     <p className="text-2xl font-bold">
                       {aiBet.horseNumber} {aiBet.horseName}
+                      {jockeyMap.get(aiBet.horseNumber) && (
+                        <span className="text-sm text-muted font-normal ml-1">({jockeyMap.get(aiBet.horseNumber)})</span>
+                      )}
                     </p>
                     <span className="text-sm text-muted">
                       AI評価 {(aiBet.aiProb * 100).toFixed(1)}%
@@ -837,6 +854,9 @@ export default function PredictionDetailPage() {
                         <td className="py-2 px-2">{entry.horseNumber}</td>
                         <td className="py-2 px-2 font-medium">
                           {entry.horseName}
+                          {jockeyMap.get(entry.horseNumber) && (
+                            <span className="text-muted text-xs ml-1">({jockeyMap.get(entry.horseNumber)})</span>
+                          )}
                           {isUndervalued && (
                             <span className="ml-1 text-xs text-amber-600 dark:text-amber-400">
                               AI注目
