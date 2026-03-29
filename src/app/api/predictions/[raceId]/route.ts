@@ -62,14 +62,26 @@ export async function GET(
     // タイムガード: 残り時間が少なければ重い処理をスキップ（maxDuration=60s）
     const hasTimeForRegen = () => (Date.now() - apiStart) < 40_000; // 40秒以内
 
+    // buildAndPredictを50秒タイムアウト付きで実行するヘルパー
+    const buildWithTimeout = async (...args: Parameters<typeof buildAndPredict>) => {
+      const timeoutMs = Math.max(5_000, 50_000 - (Date.now() - apiStart));
+      const result = await Promise.race([
+        buildAndPredict(...args),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('予想生成タイムアウト')), timeoutMs)
+        ),
+      ]);
+      return result;
+    };
+
     // 壊れた予想を検出して再生成
     if (prediction && isBrokenPrediction(prediction.topPicks) && race.entries.length > 0 && hasTimeForRegen()) {
       try {
         // 既存の壊れた予想を削除
         await dbRun('DELETE FROM predictions WHERE race_id = ?', [raceId]);
 
-        // 再生成
-        const newPrediction = await buildAndPredict(
+        // 再生成（タイムアウト付き）
+        const newPrediction = await buildWithTimeout(
           raceId, race.name, race.date,
           race.trackType as '芝' | 'ダート' | '障害', race.distance,
           race.trackCondition as '良' | '稍重' | '重' | '不良' | undefined,
@@ -86,7 +98,7 @@ export async function GET(
     // 予想が未生成の場合、オンデマンドで自動生成
     if (!prediction && race.entries.length >= 2 && hasTimeForRegen()) {
       try {
-        const newPrediction = await buildAndPredict(
+        const newPrediction = await buildWithTimeout(
           raceId, race.name, race.date,
           race.trackType as '芝' | 'ダート' | '障害', race.distance,
           race.trackCondition as '良' | '稍重' | '重' | '不良' | undefined,
@@ -110,7 +122,7 @@ export async function GET(
         const needsRegen = await shouldRegenerateForBias(race, biasCountAtGen);
         if (needsRegen) {
           if (hasTimeForRegen()) {
-            const newPrediction = await buildAndPredict(
+            const newPrediction = await buildWithTimeout(
               raceId, race.name, race.date,
               race.trackType as '芝' | 'ダート' | '障害', race.distance,
               race.trackCondition as '良' | '稍重' | '重' | '不良' | undefined,
