@@ -30,6 +30,8 @@ export function makePP(overrides: Partial<PastPerformance> = {}): PastPerformanc
     odds: 5.0,
     popularity: 3,
     prize: 1000,
+    timeIndex: null,
+    trackIndex: null,
     ...overrides,
   };
 }

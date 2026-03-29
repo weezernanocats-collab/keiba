@@ -562,8 +562,10 @@ export async function scrapeHorseDetail(horseId: string): Promise<ScrapedHorseDe
       const distText = $r(tds[14]).text().trim();
       const trackMatch = distText.match(/(芝|ダート|ダ|障害|障)(\d+)/);
       const condText = $r(tds[16]).text().trim();
+      const trackIndexRaw = parseFloat($r(tds[17]).text().trim()) || null;
       const time = $r(tds[18]).text().trim();
       const margin = $r(tds[19]).text().trim();
+      const timeIndexRaw = parseFloat($r(tds[20]).text().trim()) || null;
       const cornerPositions = $r(tds[21]).text().trim();
       const lastThreeFurlongs = $r(tds[23]).text().trim();
       const weightText = $r(tds[24]).text().trim();
@@ -591,6 +593,8 @@ export async function scrapeHorseDetail(horseId: string): Promise<ScrapedHorseDe
           cornerPositions,
           odds,
           popularity,
+          timeIndex: timeIndexRaw,
+          trackIndex: trackIndexRaw,
         });
       }
     });
@@ -727,6 +731,8 @@ export interface ScrapedPastPerformance {
   cornerPositions: string;
   odds: number;
   popularity: number;
+  timeIndex: number | null;
+  trackIndex: number | null;
 }
 
 // ==================== デバッグ用 ====================

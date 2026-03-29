@@ -459,6 +459,8 @@ export function mapPastPerformance(row: any): PastPerformance {
     odds: row.odds ?? 0,
     popularity: row.popularity ?? 0,
     prize: row.prize ?? 0,
+    timeIndex: row.time_index ?? row.timeIndex ?? null,
+    trackIndex: row.track_index ?? row.trackIndex ?? null,
     // v9.0: JOINで取得したレースグレード（存在する場合のみ）
     grade: row.race_grade ?? undefined,
   };
@@ -484,8 +486,8 @@ export async function insertPastPerformance(horseId: string, perf: Partial<PastP
       distance, track_condition, weather, entries, post_position,
       horse_number, position, jockey_name, handicap_weight,
       weight, weight_change, time, margin, last_three_furlongs,
-      corner_positions, odds, popularity, prize
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      corner_positions, odds, popularity, prize, time_index, track_index
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     horseId, perf.raceId ?? null, perf.date ?? null, perf.raceName ?? null, perf.racecourseName ?? null,
     perf.trackType ?? null, perf.distance ?? 0, perf.trackCondition ?? null, perf.weather ?? null,
@@ -493,6 +495,7 @@ export async function insertPastPerformance(horseId: string, perf: Partial<PastP
     perf.jockeyName ?? null, perf.handicapWeight ?? 0, perf.weight ?? 0, perf.weightChange ?? 0,
     perf.time ?? null, perf.margin ?? null, perf.lastThreeFurlongs ?? null, perf.cornerPositions ?? null,
     perf.odds ?? 0, perf.popularity ?? 0, perf.prize ?? 0,
+    perf.timeIndex ?? null, perf.trackIndex ?? null,
   ]);
 }
 

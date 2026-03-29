@@ -272,6 +272,8 @@ export interface PastPerformance {
   odds: number;
   popularity: number;
   prize: number;
+  timeIndex: number | null;
+  trackIndex: number | null;
   // v9.0: レースのグレード（races テーブルから JOIN）
   grade?: string;
 }

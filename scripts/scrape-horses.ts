@@ -155,8 +155,10 @@ async function scrapeHorse(horseId: string): Promise<HorseData | null> {
       const distText = $r(tds[14]).text().trim();
       const trackMatch = distText.match(/(芝|ダート|ダ|障害|障)(\d+)/);
       const condText = $r(tds[16]).text().trim();
+      const trackIndexRaw = parseFloat($r(tds[17])?.text().trim()) || null;
       const time = $r(tds[18]).text().trim();
       const margin = $r(tds[19]).text().trim();
+      const timeIndexRaw = parseFloat($r(tds[20])?.text().trim()) || null;
       const cornerPositions = $r(tds[21])?.text().trim() || '';
       const lastThreeFurlongs = $r(tds[23])?.text().trim() || '';
       const weightText = $r(tds[24])?.text().trim() || '';
@@ -190,6 +192,8 @@ async function scrapeHorse(horseId: string): Promise<HorseData | null> {
         lastThreeFurlongs,
         cornerPositions,
         prize,
+        timeIndex: timeIndexRaw,
+        trackIndex: trackIndexRaw,
       });
     });
 
@@ -252,14 +256,15 @@ async function writeHorseToDB(horse: HorseData): Promise<number> {
     for (let i = 0; i < horse.pastPerformances.length; i += 20) {
       const batch = horse.pastPerformances.slice(i, i + 20);
       const stmts = batch.map(pp => ({
-        sql: `INSERT INTO past_performances (horse_id, date, race_name, racecourse_name, track_type, distance, track_condition, weather, entries, post_position, horse_number, position, jockey_name, handicap_weight, weight, weight_change, time, margin, last_three_furlongs, corner_positions, odds, popularity, prize)
-              VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        sql: `INSERT INTO past_performances (horse_id, date, race_name, racecourse_name, track_type, distance, track_condition, weather, entries, post_position, horse_number, position, jockey_name, handicap_weight, weight, weight_change, time, margin, last_three_furlongs, corner_positions, odds, popularity, prize, time_index, track_index)
+              VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           horse.id, pp.date, pp.raceName, pp.racecourseName, pp.trackType,
           pp.distance, pp.trackCondition, pp.entries, pp.postPosition,
           pp.horseNumber, pp.position, pp.jockeyName, pp.handicapWeight,
           pp.weight, pp.weightChange, pp.time, pp.margin,
           pp.lastThreeFurlongs, pp.cornerPositions, pp.odds, pp.popularity, pp.prize,
+          pp.timeIndex ?? null, pp.trackIndex ?? null,
         ],
       }));
       await db.batch(stmts, 'write');
