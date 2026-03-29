@@ -345,7 +345,7 @@ export default function PredictionDetailPage() {
       )}
 
       {/* スティッキーヘッダー（レース情報 + セクションナビ統合） */}
-      <div className={`sticky top-0 z-10 -mx-4 px-4 transition-all duration-200 ${
+      <div className={`sticky top-16 z-10 -mx-4 px-4 transition-all duration-200 ${
         headerHidden
           ? 'bg-primary/95 backdrop-blur-sm shadow-md'
           : sections.length > 2 ? 'bg-background/95 backdrop-blur-sm border-b border-card-border' : ''
@@ -387,7 +387,7 @@ export default function PredictionDetailPage() {
 
       {/* 答え合わせ (B2) - 結果確定済みの場合 */}
       {verification && (
-        <div id="verification" ref={setSectionRefWrapped('verification')} className="bg-card-bg border-2 border-amber-400 dark:border-amber-600 rounded-xl p-6 scroll-mt-24">
+        <div id="verification" ref={setSectionRefWrapped('verification')} className="bg-card-bg border-2 border-amber-400 dark:border-amber-600 rounded-xl p-6 scroll-mt-32">
           <h2 className="text-lg font-bold mb-4">📋 答え合わせ</h2>
 
           {/* 的中馬券ハイライトバナー */}
@@ -580,13 +580,13 @@ export default function PredictionDetailPage() {
       )}
 
       {/* サマリー */}
-      <div id="summary" ref={setSectionRefWrapped('summary')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-24">
+      <div id="summary" ref={setSectionRefWrapped('summary')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-32">
         <h2 className="text-lg font-bold mb-3">予想サマリー</h2>
         <div className="whitespace-pre-line text-sm leading-relaxed">{prediction.summary}</div>
       </div>
 
       {/* レース分析 */}
-      <div id="analysis" ref={setSectionRefWrapped('analysis')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-24">
+      <div id="analysis" ref={setSectionRefWrapped('analysis')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-32">
         <h2 className="text-lg font-bold mb-4">レース分析</h2>
         <div className="space-y-4">
           <div>
@@ -626,7 +626,7 @@ export default function PredictionDetailPage() {
 
       {/* 馬券戦略 */}
       {prediction.analysis.bettingStrategy && (
-        <div id="strategy" ref={setSectionRefWrapped('strategy')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-24">
+        <div id="strategy" ref={setSectionRefWrapped('strategy')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-32">
           <h2 className="text-lg font-bold mb-4">馬券戦略</h2>
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-3">
@@ -692,7 +692,7 @@ export default function PredictionDetailPage() {
       )}
 
       {/* 市場オッズとAIのブレンド予想 */}
-      <div id="picks" ref={setSectionRefWrapped('picks')} className="scroll-mt-24">
+      <div id="picks" ref={setSectionRefWrapped('picks')} className="scroll-mt-32">
         <h2 className="text-lg font-bold mb-4">市場オッズとAIのブレンド予想</h2>
         <div className="space-y-3">
           {prediction.topPicks.map((pick, idx) => {
@@ -755,7 +755,7 @@ export default function PredictionDetailPage() {
 
       {/* モデル vs 市場オッズ */}
       {prediction.analysis.marketAnalysis && prediction.analysis.valueHorses && prediction.analysis.overround ? (
-        <div id="market" ref={setSectionRefWrapped('market')} className="scroll-mt-24">
+        <div id="market" ref={setSectionRefWrapped('market')} className="scroll-mt-32">
         <ModelVsMarket
           marketAnalysis={prediction.analysis.marketAnalysis}
           valueHorses={prediction.analysis.valueHorses}
@@ -766,7 +766,7 @@ export default function PredictionDetailPage() {
         />
         </div>
       ) : race.status !== '結果確定' && (
-        <div id="market" ref={setSectionRefWrapped('market')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-24">
+        <div id="market" ref={setSectionRefWrapped('market')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-32">
           <h2 className="text-lg font-bold mb-2">モデル vs 市場オッズ</h2>
           <p className="text-sm text-muted">
             市場オッズがまだ取得されていません。オッズ取得後にモデル勝率との比較が表示されます。
@@ -779,7 +779,7 @@ export default function PredictionDetailPage() {
 
       {/* AI独自推奨 */}
       {prediction.aiIndependentBets && prediction.aiIndependentBets.length > 0 && (
-        <div id="ai-independent" ref={setSectionRefWrapped('ai-independent')} className="scroll-mt-24">
+        <div id="ai-independent" ref={setSectionRefWrapped('ai-independent')} className="scroll-mt-32">
           <div className="border-2 border-cyan-400 dark:border-cyan-600 rounded-xl p-6 bg-cyan-50/50 dark:bg-cyan-900/20">
             <div className="flex items-center gap-2 mb-3">
               <h2 className="text-lg font-bold">AI独自推奨</h2>
@@ -844,7 +844,7 @@ export default function PredictionDetailPage() {
 
       {/* AI単独予想（No-Oddsモデル全順位） */}
       {prediction.aiOnlyRanking && (
-        <div id="ai-only-ranking" ref={setSectionRefWrapped('ai-only-ranking')} className="scroll-mt-24">
+        <div id="ai-only-ranking" ref={setSectionRefWrapped('ai-only-ranking')} className="scroll-mt-32">
           <div className="border rounded-xl p-6 bg-card-bg">
             <div className="flex items-center gap-2 mb-3">
               <h2 className="text-lg font-bold">AI単独予想</h2>
@@ -930,7 +930,7 @@ export default function PredictionDetailPage() {
 
       {/* 推奨馬券 */}
       {prediction.recommendedBets.length > 0 && (
-        <div id="bets" ref={setSectionRefWrapped('bets')} className="scroll-mt-24">
+        <div id="bets" ref={setSectionRefWrapped('bets')} className="scroll-mt-32">
           <h2 className="text-lg font-bold mb-1">推奨馬券</h2>
           <p className="text-xs text-muted mb-4">
             市場オッズとAIモデルのブレンド確率に基づく推奨。的中率算出要素: 過去成績・騎手適性・競馬場相性・脚質相性・安定性・買い方実績
@@ -1176,7 +1176,7 @@ export default function PredictionDetailPage() {
 
       {/* 期待値プラスの馬券ピックアップ */}
       {valueBets.length > 0 && (
-        <div id="value-pickup" ref={setSectionRefWrapped('value-pickup')} className="bg-card-bg border-2 border-green-400 dark:border-green-600 rounded-xl p-6 scroll-mt-24">
+        <div id="value-pickup" ref={setSectionRefWrapped('value-pickup')} className="bg-card-bg border-2 border-green-400 dark:border-green-600 rounded-xl p-6 scroll-mt-32">
           <h2 className="text-lg font-bold mb-2">期待値プラスの馬券</h2>
           <p className="text-xs text-muted mb-4">
             市場オッズとAIモデルのブレンド確率から算出。各券種の的中率とオッズの積が100を超える（期待値がプラスになる）馬券をピックアップしています。
@@ -1222,7 +1222,7 @@ export default function PredictionDetailPage() {
 
       {/* B5: 金額シミュレーション & モンテカルロ */}
       {prediction.recommendedBets.length > 0 && prediction.analysis.bettingStrategy && (
-        <div id="simulator" ref={setSectionRefWrapped('simulator')} className="scroll-mt-24 space-y-6">
+        <div id="simulator" ref={setSectionRefWrapped('simulator')} className="scroll-mt-32 space-y-6">
           <BudgetSimulator
             bets={prediction.recommendedBets}
             riskLevel={prediction.analysis.bettingStrategy.riskLevel}
