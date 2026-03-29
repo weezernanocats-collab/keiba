@@ -507,7 +507,10 @@ async function executeSyncInBackground(
         break;
     }
     entry.status = 'completed';
-    entry.details = `同期完了: ${buildStatsSummary(entry.stats)}`;
+    // 各sync関数がdetailsを設定済みなら上書きしない
+    if (!entry.details || entry.details.includes('開始')) {
+      entry.details = `同期完了: ${buildStatsSummary(entry.stats)}`;
+    }
   } catch (error) {
     entry.status = 'failed';
     const errMsg = error instanceof Error ? error.message : String(error);
@@ -830,6 +833,13 @@ async function syncFull(entry: SyncLogEntry, date?: string): Promise<void> {
 async function syncResultsBulk(entry: SyncLogEntry, date?: string): Promise<void> {
   const targetDate = date || new Date().toISOString().split('T')[0];
   entry.details = `結果一括取得開始: ${targetDate}`;
+
+  // デバッグ: 対象レース数を事前確認
+  const debugRaces = await dbAll<{ id: string; status: string }>(
+    "SELECT id, status FROM races WHERE date = ? LIMIT 5",
+    [targetDate],
+  );
+  console.log(`[syncResultsBulk] date=${targetDate}, sample races:`, debugRaces.map(r => `${r.id}(${r.status})`).join(', '));
 
   // 45秒バジェットで取得（maxDuration=60sのマージン確保）
   const { resultCount, totalRaces } = await executeResultFetch(targetDate, 45_000);
