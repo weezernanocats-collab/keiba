@@ -20,13 +20,16 @@
 │                                    │  prediction_results      │     │
 │  bulk-importer.ts ─────────────────│  calibration_weights     │     │
 │    過去データ一括取り込み          │  category_calibration    │     │
-│    (チャンク分割でVercel対応)      │                          │     │
+│    (チャンク分割でVercel対応)      │  horse_traits            │     │
+│                                    │  scheduler_runs          │     │
 │                                    └──────────────────────────┘     │
+│                                     接続: HTTPS必須                  │
+│                                     batch()禁止 → sequential exec   │
 └─────────────────────────────────────────────────────────────────────┘
                                         │
                                         ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                PREDICTION ENGINE v8.1 + ML v10.0                    │
+│                PREDICTION ENGINE v8.1 + ML v10.1                    │
 │                                                                     │
 │  ┌─────────────────────────────────────────────────────────┐        │
 │  │ STEP 1: 17ファクタースコアリング (0〜100点)              │        │
@@ -612,6 +615,7 @@ SHAP Top5: oddsLogTransform(38.2), jockeyAbility(9.0), trainerDistCatWinRate(4.3
 |---|---|
 | フル同期 | 指定日のレース一覧→出馬表→馬詳細→オッズ→予想を一括実行 |
 | 予想再生成 | 結果取得→バイアス算出→予想再生成を1ボタンで実行 |
+| 結果一括取得 | 当日の全レース結果を一括取得（タイムアウト対策済み） |
 | バルクインポート | 日付範囲指定で過去データを一括取込（チャンク分割） |
 | 的中率ダッシュボード | 単勝/複勝的中率、ROI、信頼度帯別精度を表示 |
 | 一括照合 | 未照合レースの予想vs結果を一括評価 |
@@ -621,17 +625,52 @@ SHAP Top5: oddsLogTransform(38.2), jockeyAbility(9.0), trainerDistCatWinRate(4.3
 
 | ページ | パス | 機能 |
 |---|---|---|
-| トップ | `/` | レース一覧 |
-| レース詳細 | `/races/[raceId]` | 予想詳細、モンテカルロシミュレーション、オッズ取得ボタン |
-| 予想一覧 | `/predictions` | 全予想の一覧 |
-| 統計 | `/stats` | 的中率・ROI統計 |
+| トップ | `/` | 当日レース一覧、最近の的中、統計サマリー |
+| レース一覧 | `/races` | レース一覧（フィルタ・並び替え） |
+| レース詳細 | `/races/[raceId]` | レース詳細、出馬表、オッズ取得ボタン |
+| 予想一覧 | `/predictions` | 予想一覧（フィルタ・並び替え） |
+| 予想詳細 | `/predictions/[raceId]` | 予想詳細、馬分析、馬場バイアス、スティッキーヘッダー |
+| 予想結果履歴 | `/predictions/history` | 予想結果の履歴（的中・ROI集計） |
+| 統計 | `/stats` | 統計ダッシュボード（ROI推移、信頼度分析、馬券種別、競馬場別） |
 | カレンダー | `/calendar` | レースカレンダー |
-| 馬詳細 | `/horses` | 馬の過去成績 |
-| 騎手一覧 | `/jockeys` | 騎手統計 |
-| お気に入り | `/favorites` | ブックマークしたレース |
-| 管理画面 | `/admin` | 管理機能 |
+| 馬一覧 | `/horses` | 馬一覧 |
+| 馬詳細 | `/horses/[horseId]` | 馬の過去成績グラフ、コンディション |
+| 騎手一覧 | `/jockeys` | 騎手一覧 |
+| 騎手詳細 | `/jockeys/[jockeyId]` | 騎手詳細（勝率、直近フォーム） |
+| お気に入り | `/favorites` | お気に入り馬管理 |
+| 管理画面 | `/admin` | 同期・再生成・バルクインポート・結果一括取得・校正 |
 
-### 6.3 同期進捗バナー
+### 6.3 APIエンドポイント一覧
+
+| エンドポイント | メソッド | 機能 |
+|---|---|---|
+| `/api/cron` | GET | Vercel Cron実行（時間帯別に処理分岐） |
+| `/api/sync` | POST | データ同期・チャンク処理・予想再生成 |
+| `/api/races` | GET | レース一覧（upcoming/results/日付指定） |
+| `/api/races/[raceId]` | GET | レース詳細 |
+| `/api/predictions` | GET | 予想一覧 |
+| `/api/predictions/[raceId]` | GET | 予想詳細（5-8クエリ/回） |
+| `/api/predictions/history` | GET | 予想結果履歴（ページネーション付き） |
+| `/api/odds` | GET/POST | オッズ取得・更新 |
+| `/api/horses` | GET | 馬一覧 |
+| `/api/horses/[horseId]` | GET | 馬詳細（過去成績） |
+| `/api/jockeys` | GET | 騎手一覧 |
+| `/api/jockeys/[jockeyId]` | GET | 騎手詳細 |
+| `/api/stats` | GET | 統計サマリー（キャッシュ60秒） |
+| `/api/stats/bet-types` | GET | 馬券種別成績 |
+| `/api/stats/confidence-roi` | GET | 信頼度帯別ROI |
+| `/api/stats/trend` | GET | 精度トレンド |
+| `/api/stats/venue` | GET | 競馬場別統計 |
+| `/api/accuracy-stats` | GET | 精度統計総括 |
+| `/api/ml-export` | GET | ML学習データエクスポート |
+| `/api/score-lookup` | GET | スコア詳細照会（デバッグ用） |
+| `/api/diagnostic` | GET | システム診断 |
+| `/api/scheduler` | GET/POST | スケジューラ状態・手動実行 |
+| `/api/regen-today` | POST | 当日予想の強制再生成 |
+| `/api/admin/fix-grades` | POST | グレード修正 |
+| `/api/admin/reset-horses` | POST | 馬データリセット |
+
+### 6.4 同期進捗バナー
 
 全ページ共通のヘッダー下に `SyncStatusBanner` コンポーネントを配置。バックグラウンドで同期処理が実行中の場合、5秒ごとにポーリングして進捗を表示する。完了時は緑バナーで8秒間通知。SYNC_KEY は localStorage に永続化し、どのページからでも参照可能。
 
@@ -709,11 +748,15 @@ SQLインターセプター:
 
 | コンポーネント | 技術 | 備考 |
 |---|---|---|
-| フロントエンド | Next.js (App Router) | Vercel Hobbyプラン |
-| バックエンド | Next.js API Routes | サーバーレス (60秒タイムアウト) |
-| データベース | Turso (libsql/SQLite) | エッジ対応の分散SQLite |
+| フロントエンド | Next.js 16 + React 19 + Tailwind CSS 4 | Vercel Hobbyプラン |
+| バックエンド | Next.js API Routes (App Router) | サーバーレス (60秒タイムアウト) |
+| データベース | Turso (libsql/SQLite) Developerプラン | エッジ対応の分散SQLite。HTTPS接続必須（`libsql://`禁止） |
 | ML推論 | TypeScriptネイティブ (XGBoost/CatBoost JSON走査) | Python不要、追加依存なし |
 | ML学習 | GitHub Actions (Python) | 週次自動 or 手動 |
+| データフェッチ | SWR v2 | クライアント側キャッシュ（60秒TTL） |
+| グラフ表示 | Recharts v3 | 統計ダッシュボード用 |
+| スクレイピング | cheerio + iconv-lite | EUC-JP対応 |
+| テスト | Vitest | ユニットテスト |
 | CI/CD | Vercel (git push連動) + GitHub Actions | 自動デプロイ + 自動再学習 |
 
 ### 8.2 ディレクトリ構成
@@ -815,7 +858,18 @@ keiba/
 └── vercel.json                    # Cron設定 (6ジョブ)
 ```
 
-### 8.3 エラーハンドリング方針
+### 8.3 インフラ制約と運用ルール
+
+| 項目 | 制約 | 対策 |
+|---|---|---|
+| Turso接続 | `libsql://`（WebSocket）は障害リスクあり | 必ず `https://` を使用 |
+| Turso `db.batch()` | 障害時にハングする（2026-03-21障害の教訓） | sequential execute を使用 |
+| Turso Rows Read | Developerプラン: 2.5B/月（超過$1/B） | 通常運用で2-3B/月。重い処理はローカルスクリプトで実行 |
+| Vercel Functions | Hobbyプラン: Fluid Active CPU 4時間/月 | Vercelは閲覧用に限定。予想生成・インポートはローカルで実行 |
+| Vercel タイムアウト | 60秒 | チャンク分割、段階的処理で対応 |
+| netkeiba | 約2,600リクエストで400エラー（12時間BAN） | rateLimitMs 1200ms以上、チャンク分割 |
+
+### 8.4 エラーハンドリング方針
 
 本システムは**段階的フォールバック**を採用している。各レイヤーが独立して失敗してもシステム全体は動作し続ける。
 
@@ -836,7 +890,7 @@ keiba/
 | 同期処理タイムアウト | バックグラウンド処理 | 2分後に自動リセット、再実行可能 |
 | Turso読み取り制限 | 全クエリ | ローカルスクリプト（プリロード方式）で回避可能 |
 
-### 8.4 環境変数
+### 8.5 環境変数
 
 | 変数名 | 必須 | 説明 |
 |---|---|---|
@@ -847,7 +901,7 @@ keiba/
 | `ML_BLEND_WEIGHT` | No | MLブレンド比率（カテゴリ別パラメータで管理、環境変数でオーバーライド可） |
 | `MARKET_BLEND_WEIGHT` | No | 市場オッズブレンド比率（同上） |
 
-### 8.5 GitHub Secrets（GitHub Actions用）
+### 8.6 GitHub Secrets（GitHub Actions用）
 
 | シークレット名 | 説明 |
 |---|---|
@@ -861,6 +915,7 @@ keiba/
 
 | バージョン | 日付 | 変更内容 |
 |---|---|---|
+| v10.1 | 2026-03-29 | インフラ整理: keiba-fixプロジェクト廃止（Vercel CPU枠節約）。Turso Developerプラン確定（月2-3B rows read）。タイムアウト対策（段階的メッセージUI、buildAndPredictタイムアウト適用）。DB操作並列化。予想ページUX改善（スティッキーヘッダー、騎手名・発走時刻表示、馬場バイアス自動再生成バナー）。管理ページに結果一括取得ボタン追加 |
 | v10.0 | 2026-03-19 | ML較正済み確率を直接使用（二重softmax問題解消）。63特徴量化。v9.0特徴量追加（relativePosition, upsetRate, avgPastOdds, totalEarningsLog）。classChange/trackTypeChange推論修正 |
 | v8.1 | 2026-03-15 | Value Betting戦略確立（Filter E: ROI 243.1%）。Kelly Criterion f*/4。isValueBetフラグ追加 |
 | v7.2 | 2026-03-14 | カテゴリ別ブレンドパラメータ（mlBlend/marketBlend/temperature）グリッドサーチ最適化。市場オッズブレンド（market-blend.ts）。競馬場別補正（racecourse-profiles.ts） |
