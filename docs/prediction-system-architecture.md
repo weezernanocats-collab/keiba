@@ -851,7 +851,7 @@ keiba/
 
 | シークレット名 | 説明 |
 |---|---|
-| `APP_URL` | VercelデプロイURL（例: `https://keiba-fix.vercel.app`） |
+| `APP_URL` | VercelデプロイURL（例: `https://keiba.vercel.app`） |
 | `TURSO_DATABASE_URL` | Turso DB接続URL |
 | `TURSO_AUTH_TOKEN` | Turso認証トークン |
 

@@ -21,7 +21,7 @@ for (const line of envContent.split('\n')) {
 
 const TURSO_URL = process.env.TURSO_DATABASE_URL!;
 const TURSO_TOKEN = process.env.TURSO_AUTH_TOKEN!;
-const PROD_URL = 'https://keiba-fix.vercel.app';
+const PROD_URL = 'https://keiba.vercel.app';
 
 if (!TURSO_URL || !TURSO_TOKEN) {
   console.error('TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are required in .env.local');

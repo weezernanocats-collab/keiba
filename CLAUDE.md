@@ -77,4 +77,4 @@
 ### Turso / インフラ
 - [ ] **Turso接続プロトコル**: HTTPS (`https://`) を使用。`libsql://` (WebSocket) は障害リスクあり
 - [ ] **batch() の使用禁止**: `db.batch()` はTurso障害でハングする。sequential execute を使う
-- [ ] **トークン更新時**: Vercel 2プロジェクト（keiba, keiba-fix）+ GitHub Secrets + .env.local を全て同時更新
+- [ ] **トークン更新時**: Vercelプロジェクト（keiba）+ GitHub Secrets + .env.local を全て同時更新
