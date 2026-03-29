@@ -29,6 +29,7 @@ import { dbAll, dbRun } from '@/lib/database';
 import { runBulkImport, getBulkImportProgress, abortBulkImport, type BulkImportConfig, runBulkChunk, createInitialChunkedState, type BulkChunkedState } from '@/lib/bulk-importer';
 import { evaluateRacePrediction, evaluateAllPendingRaces, getAccuracyStats, getAIIndependentBetStats, calibrateWeights, autoCalibrate, ensureCalibrationLoaded, repairBetsOdds, reEvaluateRepairedChunk } from '@/lib/accuracy-tracker';
 import { calculateTodayTrackBias } from '@/lib/track-bias';
+import { executeResultFetch } from '@/lib/scheduler';
 import type { PastPerformance } from '@/types';
 
 // Vercelのサーバーレス関数タイムアウトを60秒に設定
@@ -38,7 +39,7 @@ export const preferredRegion = 'hnd1';
 
 // ==================== Types ====================
 
-type SyncType = 'races' | 'race_detail' | 'odds' | 'odds_refresh' | 'results' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort' | 'bulk_chunked' | 'accuracy' | 'evaluate_all' | 'calibrate' | 'regenerate_predictions' | 'repair_bets_odds' | 'reeval_repaired' | 'debug_scrape';
+type SyncType = 'races' | 'race_detail' | 'odds' | 'odds_refresh' | 'results' | 'results_bulk' | 'horse' | 'full' | 'bulk' | 'bulk_status' | 'bulk_abort' | 'bulk_chunked' | 'accuracy' | 'evaluate_all' | 'calibrate' | 'regenerate_predictions' | 'repair_bets_odds' | 'reeval_repaired' | 'debug_scrape';
 
 interface SyncRequest {
   type: SyncType;
@@ -153,7 +154,7 @@ export async function POST(request: NextRequest) {
   const { type, date, raceId, horseId } = body;
 
   // Validate type
-  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'odds_refresh', 'results', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'bulk_chunked', 'accuracy', 'evaluate_all', 'calibrate', 'regenerate_predictions', 'repair_bets_odds', 'reeval_repaired', 'debug_scrape'];
+  const validTypes: SyncType[] = ['races', 'race_detail', 'odds', 'odds_refresh', 'results', 'results_bulk', 'horse', 'full', 'bulk', 'bulk_status', 'bulk_abort', 'bulk_chunked', 'accuracy', 'evaluate_all', 'calibrate', 'regenerate_predictions', 'repair_bets_odds', 'reeval_repaired', 'debug_scrape'];
   if (!type || !validTypes.includes(type)) {
     return NextResponse.json(
       {
@@ -492,6 +493,9 @@ async function executeSyncInBackground(
       case 'results':
         await syncResults(entry, raceId!);
         break;
+      case 'results_bulk':
+        await syncResultsBulk(entry, date);
+        break;
       case 'horse':
         await syncHorseDetail(entry, horseId!);
         break;
@@ -819,6 +823,17 @@ async function syncFull(entry: SyncLogEntry, date?: string): Promise<void> {
   } else {
     entry.details = `フル同期完了: ${targetDate} - ${buildStatsSummary(entry.stats)}`;
   }
+}
+
+// ==================== Sync: Results Bulk (日付指定一括結果取得) ====================
+
+async function syncResultsBulk(entry: SyncLogEntry, date?: string): Promise<void> {
+  const targetDate = date || new Date().toISOString().split('T')[0];
+  entry.details = `結果一括取得開始: ${targetDate}`;
+
+  const { resultCount, totalRaces } = await executeResultFetch(targetDate, 50_000);
+  entry.stats.resultsScraped = resultCount;
+  entry.details = `結果一括取得完了: ${targetDate} - ${resultCount}/${totalRaces}レース`;
 }
 
 // ==================== Sync: Regenerate Predictions ====================

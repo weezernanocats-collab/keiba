@@ -59,6 +59,7 @@ export default function AdminPage() {
   });
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingType, setLoadingType] = useState('');
   const [message, setMessage] = useState('');
   const [syncDate, setSyncDate] = useState(new Date().toISOString().split('T')[0]);
   const [syncRaceId, setSyncRaceId] = useState('');
@@ -105,7 +106,8 @@ export default function AdminPage() {
 
   const triggerSync = useCallback(async (type: string, extraParams?: Record<string, string | boolean>) => {
     setLoading(true);
-    setMessage('');
+    setLoadingType(type);
+    setMessage('処理中...');
     try {
       const body: Record<string, string | boolean> = { type };
       if (extraParams) Object.assign(body, extraParams);
@@ -140,6 +142,7 @@ export default function AdminPage() {
       setMessage('サーバーに接続できません');
     } finally {
       setLoading(false);
+      setLoadingType('');
     }
   }, [headers, fetchStatus]);
 
@@ -277,7 +280,16 @@ export default function AdminPage() {
       </div>
 
       {message && (
-        <div className={`p-3 rounded-lg text-sm ${message.includes('エラー') || message.includes('接続') || message.includes('失敗') ? 'bg-red-900/30 text-red-300 border border-red-700/30' : 'bg-green-900/30 text-green-300 border border-green-700/30'}`}>
+        <div className={`p-3 rounded-lg text-sm flex items-center gap-2 ${
+          message.includes('エラー') || message.includes('接続') || message.includes('失敗')
+            ? 'bg-red-900/30 text-red-300 border border-red-700/30'
+            : message === '処理中...'
+              ? 'bg-yellow-900/30 text-yellow-300 border border-yellow-700/30'
+              : 'bg-green-900/30 text-green-300 border border-green-700/30'
+        }`}>
+          {message === '処理中...' && (
+            <svg className="animate-spin h-4 w-4 shrink-0" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+          )}
           {message}
         </div>
       )}
@@ -515,16 +527,16 @@ export default function AdminPage() {
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Regenerate Predictions */}
+          {/* 結果取得 + バイアス再生成 */}
           <div className="bg-card-bg border border-card-border rounded-xl p-4">
             <div className="flex items-center gap-2 mb-1">
-              <h3 className="font-bold">予想再生成（バイアス反映）</h3>
+              <h3 className="font-bold">結果取得 + 予想再生成</h3>
             </div>
             <div className="flex items-center gap-2 mb-3">
               <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-900/30 text-orange-300">レース当日に使う</span>
             </div>
             <p className="text-sm text-muted mb-3">
-              午前のレース結果を取得し、馬場バイアスを分析して午後のレース予想を再生成します。
+              レース結果を取得後、馬場バイアスを反映して予想を再生成します。
               <span className="text-orange-300"> レース当日の13時頃</span>に実行すると効果的です。
             </p>
             <div className="flex gap-2">
@@ -535,13 +547,33 @@ export default function AdminPage() {
                 className="flex-1 px-3 py-2 text-sm border border-card-border rounded-lg bg-gray-800 text-white"
               />
               <button
+                onClick={() => triggerSync('results_bulk', { date: syncDate })}
+                disabled={loading}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-50 transition-colors whitespace-nowrap"
+              >
+                {loading && loadingType === 'results_bulk' ? (
+                  <span className="flex items-center gap-1.5">
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                    取得中...
+                  </span>
+                ) : '結果取得'}
+              </button>
+              <button
                 onClick={() => triggerSync('regenerate_predictions', { date: syncDate })}
                 disabled={loading}
-                className="px-4 py-2 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-500 disabled:opacity-50 transition-colors"
+                className="px-4 py-2 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-500 disabled:opacity-50 transition-colors whitespace-nowrap"
               >
-                再生成
+                {loading && loadingType === 'regenerate_predictions' ? (
+                  <span className="flex items-center gap-1.5">
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                    再生成中...
+                  </span>
+                ) : '再生成'}
               </button>
             </div>
+            <p className="text-xs text-muted mt-2">
+              手順: 先に「結果取得」→ 完了後に「再生成」を押してください。
+            </p>
           </div>
 
           {/* Full Sync */}
@@ -566,9 +598,14 @@ export default function AdminPage() {
               <button
                 onClick={() => triggerSync('full', { date: syncDate })}
                 disabled={loading}
-                className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-500 disabled:opacity-50 transition-colors"
+                className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-500 disabled:opacity-50 transition-colors whitespace-nowrap"
               >
-                実行
+                {loading && loadingType === 'full' ? (
+                  <span className="flex items-center gap-1.5">
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                    実行中...
+                  </span>
+                ) : '実行'}
               </button>
             </div>
           </div>
