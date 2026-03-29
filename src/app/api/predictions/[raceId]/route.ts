@@ -74,6 +74,8 @@ export async function GET(
       return result;
     };
 
+    let generationTimedOut = false;
+
     // 壊れた予想を検出して再生成
     if (prediction && isBrokenPrediction(prediction.topPicks) && race.entries.length > 0 && hasTimeForRegen()) {
       try {
@@ -91,7 +93,9 @@ export async function GET(
         prediction = newPrediction;
       } catch (regenError) {
         console.error('予想再生成失敗:', regenError);
-        // 再生成に失敗した場合はフォールバック
+        if (regenError instanceof Error && regenError.message.includes('タイムアウト')) {
+          generationTimedOut = true;
+        }
       }
     }
 
@@ -110,6 +114,9 @@ export async function GET(
         prediction = newPrediction;
       } catch (genError) {
         console.error('オンデマンド予想生成失敗:', genError);
+        if (genError instanceof Error && genError.message.includes('タイムアウト')) {
+          generationTimedOut = true;
+        }
       }
     }
 
@@ -145,7 +152,10 @@ export async function GET(
     }
 
     if (!prediction) {
-      return NextResponse.json({ error: '予想がまだ生成されていません' }, { status: 404 });
+      const msg = generationTimedOut
+        ? '予想生成がタイムアウトしました。再読み込みで再試行できます。'
+        : '予想がまだ生成されていません';
+      return NextResponse.json({ error: msg, generationTimedOut }, { status: 404 });
     }
 
     // topPicks に horseName/horseNumber がない場合、race.entries から補完

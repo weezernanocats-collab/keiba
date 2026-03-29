@@ -241,16 +241,23 @@ export default function PredictionDetailPage() {
 
   if (!predData && !predError) return <PredictionLoadingIndicator />;
 
+  const isTimeout = error?.includes('タイムアウト') || predError?.message?.includes('timeout');
+
   if (error) {
     return (
       <div className="text-center py-12 space-y-4">
         <p className="text-lg text-muted">{error}</p>
+        {isTimeout && (
+          <p className="text-sm text-muted/70">
+            予想生成に時間がかかっています。再試行すると2回目以降はキャッシュが効いて速くなります。
+          </p>
+        )}
         <div className="flex items-center justify-center gap-4">
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => mutate()}
             className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-light transition-colors text-sm"
           >
-            もう一度試す
+            {isTimeout ? '再試行する' : 'もう一度試す'}
           </button>
           <Link href="/predictions" className="text-accent hover:underline text-sm">&larr; 予想一覧に戻る</Link>
         </div>
