@@ -15,6 +15,7 @@ interface RaceRow {
   id: string;
   name: string;
   date: string;
+  time?: string;
   racecourseName: string;
   raceNumber: number;
   grade: string | null;
@@ -255,6 +256,7 @@ function UpcomingRaces() {
                         <span className="text-xs text-muted shrink-0">{race.raceNumber}R</span>
                         <GradeBadge grade={race.grade} size="sm" />
                         <span className="font-medium truncate">{race.name}</span>
+                        {race.time && <span className="text-xs text-muted shrink-0">{race.time}</span>}
                         <span className="text-xs text-muted shrink-0 hidden sm:inline">
                           {race.racecourseName} {race.trackType}{race.distance}m
                           {race.trackCondition ? ` / ${race.trackCondition}` : ''}
@@ -279,6 +281,7 @@ function UpcomingRaces() {
                     {/* モバイル補助行 */}
                     <div className="sm:hidden text-xs text-muted mt-1">
                       {race.racecourseName} {race.trackType}{race.distance}m {race.entryCount}頭
+                      {race.time && ` / ${race.time}`}
                       {race.predictionGeneratedAt && (
                         <span className="ml-2">
                           生成: {new Date(race.predictionGeneratedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
