@@ -347,7 +347,7 @@ def main():
         iterations=1500,
         learning_rate=0.02,
         depth=6,
-        loss_function='YetiRank',
+        loss_function='PairLogitPairwise',
         eval_metric='NDCG:top=1',
         random_seed=42,
         verbose=100,
