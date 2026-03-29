@@ -173,11 +173,12 @@ export default function PredictionDetailPage() {
   const { isRaceFavoriteInProfile, toggleRaceForProfile } = useFavorites();
 
   // メイン予想データ: SWRで即表示 + バックグラウンド再検証
-  const { data: predData, error: predError, isValidating, lastFetched } = useApi<{
+  const { data: predData, error: predError, isValidating, lastFetched, mutate } = useApi<{
     prediction: PredictionData | null;
     race: RaceData | null;
     verification: Verification | null;
     regeneratedWithBias?: boolean;
+    biasUpdateAvailable?: boolean;
     error?: string;
   }>(`/api/predictions/${raceId}`);
 
@@ -367,6 +368,25 @@ export default function PredictionDetailPage() {
           <span className="text-emerald-600 dark:text-emerald-400 ml-2">
             本日の完走レース結果から馬場傾向を分析し、予想を更新しました
           </span>
+        </div>
+      )}
+
+      {/* 馬場バイアス更新可能通知（タイムアウトで再生成スキップ時） */}
+      {predData?.biasUpdateAvailable && !predData?.regeneratedWithBias && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-lg px-4 py-3 text-sm text-amber-800 dark:text-amber-200 flex items-center justify-between">
+          <div>
+            <span className="font-medium">馬場バイアスの更新あり</span>
+            <span className="text-amber-600 dark:text-amber-400 ml-2">
+              新しい馬場データで予想を更新できます
+            </span>
+          </div>
+          <button
+            onClick={() => mutate()}
+            disabled={isValidating}
+            className="px-3 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-500 disabled:opacity-50 transition-colors whitespace-nowrap ml-3"
+          >
+            {isValidating ? '更新中...' : '更新する'}
+          </button>
         </div>
       )}
 

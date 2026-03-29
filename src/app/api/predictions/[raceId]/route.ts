@@ -49,6 +49,7 @@ export async function GET(
   { params }: { params: Promise<{ raceId: string }> }
 ) {
   try {
+    const apiStart = Date.now();
     const { raceId } = await params;
 
     const race = await getRaceById(raceId);
@@ -58,8 +59,11 @@ export async function GET(
 
     let prediction = await getPredictionByRaceId(raceId);
 
+    // タイムガード: 残り時間が少なければ重い処理をスキップ（maxDuration=60s）
+    const hasTimeForRegen = () => (Date.now() - apiStart) < 40_000; // 40秒以内
+
     // 壊れた予想を検出して再生成
-    if (prediction && isBrokenPrediction(prediction.topPicks) && race.entries.length > 0) {
+    if (prediction && isBrokenPrediction(prediction.topPicks) && race.entries.length > 0 && hasTimeForRegen()) {
       try {
         // 既存の壊れた予想を削除
         await dbRun('DELETE FROM predictions WHERE race_id = ?', [raceId]);
@@ -80,7 +84,7 @@ export async function GET(
     }
 
     // 予想が未生成の場合、オンデマンドで自動生成
-    if (!prediction && race.entries.length >= 2) {
+    if (!prediction && race.entries.length >= 2 && hasTimeForRegen()) {
       try {
         const newPrediction = await buildAndPredict(
           raceId, race.name, race.date,
@@ -99,22 +103,28 @@ export async function GET(
 
     // 馬場バイアス鮮度チェック: 当日レースで新しいバイアスデータがあれば再生成
     let regeneratedWithBias = false;
+    let biasUpdateAvailable = false;
     if (prediction && race.entries.length >= 2) {
       try {
         const biasCountAtGen = prediction.analysis?.biasRaceCount ?? 0;
         const needsRegen = await shouldRegenerateForBias(race, biasCountAtGen);
         if (needsRegen) {
-          const newPrediction = await buildAndPredict(
-            raceId, race.name, race.date,
-            race.trackType as '芝' | 'ダート' | '障害', race.distance,
-            race.trackCondition as '良' | '稍重' | '重' | '不良' | undefined,
-            race.racecourseName, race.grade, race.entries,
-            race.weather as string | undefined,
-            { includeTrainerStats: true },
-          );
-          await savePrediction(newPrediction);
-          prediction = newPrediction;
-          regeneratedWithBias = true;
+          if (hasTimeForRegen()) {
+            const newPrediction = await buildAndPredict(
+              raceId, race.name, race.date,
+              race.trackType as '芝' | 'ダート' | '障害', race.distance,
+              race.trackCondition as '良' | '稍重' | '重' | '不良' | undefined,
+              race.racecourseName, race.grade, race.entries,
+              race.weather as string | undefined,
+              { includeTrainerStats: true },
+            );
+            await savePrediction(newPrediction);
+            prediction = newPrediction;
+            regeneratedWithBias = true;
+          } else {
+            // 時間不足で再生成スキップ: 既存予想を返しつつフラグで通知
+            biasUpdateAvailable = true;
+          }
         }
       } catch (biasError) {
         console.error('馬場バイアス再生成失敗:', biasError);
@@ -319,6 +329,7 @@ export async function GET(
       race,
       verification,
       ...(regeneratedWithBias ? { regeneratedWithBias: true } : {}),
+      ...(biasUpdateAvailable ? { biasUpdateAvailable: true } : {}),
     }, { headers: getCacheHeaders(cachePreset) });
   } catch (error) {
     console.error('予想API エラー:', error);
