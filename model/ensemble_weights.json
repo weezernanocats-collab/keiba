@@ -3,8 +3,8 @@
   "catboost": 1.0,
   "per_category": {
     "turf_sprint": {
-      "xgb": 0.0,
-      "catboost": 1.0
+      "xgb": 0.1,
+      "catboost": 0.9
     },
     "turf_mile": {
       "xgb": 0.0,
@@ -19,8 +19,8 @@
       "catboost": 1.0
     },
     "dirt_long": {
-      "xgb": 0.0,
-      "catboost": 1.0
+      "xgb": 0.5,
+      "catboost": 0.5
     }
   }
 }
