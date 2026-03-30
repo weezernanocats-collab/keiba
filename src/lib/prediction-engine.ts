@@ -61,6 +61,21 @@ import { applyVenueMultipliers } from './racecourse-profiles';
 import { calcTimeFeatures } from './time-features';
 import { calcHorsePower, type HorsePowerInput, type HorsePowerContext } from './horse-power';
 
+// v13.0: コース形状（静的データ）
+const COURSE_GEOMETRY: Record<string, { straight: number; western: boolean }> = {
+  '東京': { straight: 525, western: false },
+  '中山': { straight: 310, western: false },
+  '阪神': { straight: 474, western: false },
+  '京都': { straight: 404, western: false },
+  '中京': { straight: 413, western: false },
+  '小倉': { straight: 293, western: false },
+  '新潟': { straight: 659, western: false },
+  '札幌': { straight: 266, western: true },
+  '函館': { straight: 262, western: true },
+  '福島': { straight: 292, western: false },
+};
+const MAX_STRAIGHT = 659;
+
 // v6.0: ML特徴量用ヘルパー
 function marginToSeconds(margin: string | undefined): number {
   if (!margin) return 0;
@@ -131,8 +146,6 @@ interface HorseAnalysisInput {
   trainerDistCatWinRate?: number;
   trainerCondWinRate?: number;
   trainerGradeWinRate?: number;
-  // v9.0: 通算賞金
-  totalEarnings?: number;
 }
 
 export async function generatePrediction(
@@ -372,6 +385,31 @@ export async function generatePrediction(
           jockeyTrainerWinRate,
           horseCourseWinRate,
           escaperCount,
+          // v13.0: no-oddsモデル用に復活
+          trainerDistCatWinRate: input?.trainerDistCatWinRate,
+          // v13.0: コース形状
+          straightLength: (() => {
+            const geo = COURSE_GEOMETRY[racecourseName];
+            return geo ? geo.straight / MAX_STRAIGHT : 0.5;
+          })(),
+          isWesternGrass: COURSE_GEOMETRY[racecourseName]?.western ? 1 : 0,
+          // v12.0: タイム指数
+          ...(() => {
+            const tiPerfs = pp.slice(0, 10).map(p => p.timeIndex).filter((ti): ti is number => ti != null);
+            if (tiPerfs.length === 0) return { avgTimeIndex: 0, bestTimeIndex: 0, timeIndexTrend: 0 };
+            const weights = tiPerfs.map((_, i) => Math.exp(-i * 0.3));
+            const wSum = weights.reduce((s, w) => s + w, 0);
+            const avgTimeIndex = tiPerfs.reduce((s, ti, i) => s + ti * weights[i], 0) / wSum;
+            const bestTimeIndex = Math.max(...tiPerfs);
+            let timeIndexTrend = 0;
+            if (tiPerfs.length >= 3) {
+              const recent = tiPerfs.slice(0, Math.ceil(tiPerfs.length / 2));
+              const older = tiPerfs.slice(Math.ceil(tiPerfs.length / 2));
+              timeIndexTrend = recent.reduce((s, v) => s + v, 0) / recent.length
+                - older.reduce((s, v) => s + v, 0) / older.length;
+            }
+            return { avgTimeIndex, bestTimeIndex, timeIndexTrend };
+          })(),
         },
       ),
     };

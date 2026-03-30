@@ -34,13 +34,14 @@ const db = createClient({
 // 特徴量名の順序定義（v7.0 SHAP分析後クリーニング）
 // 除去済み: courseAptitude, classPerformance, jockeyTrainerCombo,
 //          historicalPostBias, trackType_encoded, weightChange, odds (raw)
-// v11.0: ablation studyでノイズ特徴量22個を削除
-// 削除済み: jockeyAbility, trainerAbility (ファクタースコア)
-//           trainerWinRate, trainerPlaceRate, trainerDistCatWinRate, trainerCondWinRate, trainerGradeWinRate (trainer統計)
-//           jockeyDistanceWinRate, jockeyCourseWinRate, jockeySwitchQuality (jockey統計)
-//           weightXspeed, ageXdistance, jockeyXform, fieldSizeXpost, rotationXform, formXclassChange (交互作用)
-//           gradeXtrainer (Phase 3交互作用)
-//           earlyPositionRatio, positionGainAvg, l3fRelativeAvg, courseDistPaceAvg, paceStyleMatch (ペース)
+// v11.0: ablation studyでノイズ特徴量22個を削除（フルモデル=オッズあり で実施）
+// 注意: jockeyAbility, trainerDistCatWinRate はno-oddsモデルでは唯一のnon-zero permutation importance
+//       → v13.0でno-odds用に復活
+// 削除済み（オッズありモデルで冗長確認済み）: trainerAbility, trainerWinRate, trainerPlaceRate,
+//           trainerCondWinRate, trainerGradeWinRate,
+//           jockeyDistanceWinRate, jockeyCourseWinRate, jockeySwitchQuality,
+//           weightXspeed, ageXdistance, jockeyXform, fieldSizeXpost, rotationXform, formXclassChange,
+//           gradeXtrainer, earlyPositionRatio, positionGainAvg, l3fRelativeAvg, courseDistPaceAvg, paceStyleMatch
 const FEATURE_NAMES = [
   // ファクタースコア (SHAP分析で有効確認済み)
   'recentForm', 'distanceAptitude', 'trackConditionAptitude',
@@ -49,6 +50,9 @@ const FEATURE_NAMES = [
   'sireAptitude',
   'seasonalPattern', 'handicapAdvantage',
   'marginCompetitiveness',
+  // v13.0: no-oddsモデルで唯一permutation importance > 0 だった特徴量を復活
+  'jockeyAbility',           // perm_importance=0.20, Cohen's d=0.77
+  'trainerDistCatWinRate',   // perm_importance=0.089, Cohen's d=0.35
   // コンテキスト特徴量
   'fieldSize', 'popularity', 'age', 'sex_encoded',
   'handicapWeight', 'postPosition', 'grade_encoded',
@@ -90,12 +94,35 @@ const FEATURE_NAMES = [
   'horseCourseWinRate',       // #15: 競走馬×競馬場勝率
   'escaperCount',             // #16: 逃げ・先行馬数（先頭3番手以内）
   'jockeyXdistance',          // #17: 騎手距離別WR×距離
+  // v12.0: タイム指数特徴量（netkeiba外部データ）
+  'avgTimeIndex',             // 直近5走加重平均タイム指数
+  'bestTimeIndex',            // 過去最高タイム指数
+  'timeIndexTrend',           // タイム指数の傾き（上昇/下降）
+  // v13.0: コース形状特徴量（静的テーブル、DB不要）
+  'straightLength',           // 最終直線の長さ（正規化 0-1）
+  'isWesternGrass',           // 洋芝フラグ（札幌/函館）
+  'styleXstraight',           // 脚質×直線長交互作用（差し馬は長直線で有利）
 ];
 
 const SEX_ENCODE: Record<string, number> = { '牡': 0, '牝': 1, 'セ': 2 };
 const TRACK_TYPE_ENCODE: Record<string, number> = { '芝': 0, 'ダート': 1, '障害': 2 };
 const TRACK_CONDITION_ENCODE: Record<string, number> = { '良': 0, '稍重': 1, '重': 2, '不良': 3 };
 const WEATHER_ENCODE: Record<string, number> = { '晴': 0, '曇': 1, '小雨': 2, '雨': 3, '小雪': 4, '雪': 5 };
+// v13.0: コース形状（静的データ、直線長はメートル）
+const COURSE_GEOMETRY: Record<string, { straight: number; western: boolean }> = {
+  '東京': { straight: 525, western: false },
+  '中山': { straight: 310, western: false },
+  '阪神': { straight: 474, western: false },
+  '京都': { straight: 404, western: false },
+  '中京': { straight: 413, western: false },
+  '小倉': { straight: 293, western: false },
+  '新潟': { straight: 659, western: false },
+  '札幌': { straight: 266, western: true },
+  '函館': { straight: 262, western: true },
+  '福島': { straight: 292, western: false },
+};
+const MAX_STRAIGHT = 659; // 新潟外回り
+
 const GRADE_ENCODE: Record<string, number> = {
   '新馬': 0, '未勝利': 1, '1勝クラス': 2, '2勝クラス': 3,
   '3勝クラス': 4, 'リステッド': 5, 'オープン': 5,
@@ -192,6 +219,9 @@ interface PastPerfRow {
   time: string | null;
   last_three_furlongs: string | null;
   track_condition: string | null;
+  // v12.0: タイム指数
+  time_index: number | null;
+  track_index: number | null;
 }
 
 async function main() {
@@ -228,6 +258,7 @@ async function main() {
              pp.entries, pp.odds, pp.popularity, pp.race_name, pp.prize,
              pp.weight, pp.racecourse_name, pp.distance,
              pp.time, pp.last_three_furlongs, pp.track_condition,
+             pp.time_index, pp.track_index,
              r.grade, COALESCE(r.track_type, pp.track_type) as track_type
       FROM past_performances pp
       LEFT JOIN races r ON r.id = pp.race_id
@@ -240,7 +271,7 @@ async function main() {
       WHERE pace_type IS NOT NULL
     `),
     db.execute(
-      `SELECT id, father_name, total_earnings FROM horses WHERE father_name IS NOT NULL`
+      `SELECT id, father_name FROM horses WHERE father_name IS NOT NULL`
     ),
   ]);
   console.log(`過去成績: ${ppResult.rows.length}件`);
@@ -258,10 +289,8 @@ async function main() {
   }
 
   const horseFatherMap = new Map<string, string>();
-  const horseTotalEarningsMap = new Map<string, number>();
   for (const row of horseResult.rows) {
     horseFatherMap.set(row.id as string, row.father_name as string);
-    horseTotalEarningsMap.set(row.id as string, (row.total_earnings as number) ?? 0);
   }
 
   const entries = entryResult.rows as unknown as EntryRow[];
@@ -735,6 +764,27 @@ async function main() {
         }
       }
 
+      // === v12.0 タイム指数特徴量 ===
+      const tiPerfs = horsePerfs.slice(0, 10).map(pp => pp.time_index).filter((ti): ti is number => ti != null);
+      let avgTimeIndex = 0;
+      let bestTimeIndex = 0;
+      let timeIndexTrend = 0;
+      if (tiPerfs.length > 0) {
+        // 加重平均（直近重視）
+        const weights = tiPerfs.map((_, i) => Math.exp(-i * 0.3));
+        const wSum = weights.reduce((s, w) => s + w, 0);
+        avgTimeIndex = tiPerfs.reduce((s, ti, i) => s + ti * weights[i], 0) / wSum;
+        bestTimeIndex = Math.max(...tiPerfs);
+        // トレンド（直近 - 古い方の平均）
+        if (tiPerfs.length >= 3) {
+          const recent = tiPerfs.slice(0, Math.ceil(tiPerfs.length / 2));
+          const older = tiPerfs.slice(Math.ceil(tiPerfs.length / 2));
+          const recentAvg = recent.reduce((s, v) => s + v, 0) / recent.length;
+          const olderAvg = older.reduce((s, v) => s + v, 0) / older.length;
+          timeIndexTrend = recentAvg - olderAvg;
+        }
+      }
+
       // 交互作用特徴量
       const weightXspeed = (entry.handicap_weight ?? 54) * ((scores.speedRating ?? 50) / 100);
       const ageXdistance = (entry.age ?? 3) * (pred.distance / 1000);
@@ -820,6 +870,25 @@ async function main() {
           case 'gradeXtrainer': return gradeXtrainer;
           case 'jockeyXdistance': return jockeyXdistance;
           case 'formXclassChange': return formXclassChange;
+          // v12.0 タイム指数
+          case 'avgTimeIndex': return avgTimeIndex;
+          case 'bestTimeIndex': return bestTimeIndex;
+          case 'timeIndexTrend': return timeIndexTrend;
+          // v13.0 コース形状
+          case 'straightLength': {
+            const geo = COURSE_GEOMETRY[pred.racecourse_name ?? ''];
+            return geo ? geo.straight / MAX_STRAIGHT : 0.5;
+          }
+          case 'isWesternGrass': {
+            const geo = COURSE_GEOMETRY[pred.racecourse_name ?? ''];
+            return geo?.western ? 1 : 0;
+          }
+          case 'styleXstraight': {
+            const geo = COURSE_GEOMETRY[pred.racecourse_name ?? ''];
+            const straightNorm = geo ? geo.straight / MAX_STRAIGHT : 0.5;
+            const style = scores.runningStyle ?? 50;
+            return (style / 100) * straightNorm;
+          }
           default: return scores[name] ?? 50;
         }
       });

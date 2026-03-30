@@ -46,5 +46,13 @@
   "jockeyTrainerWinRate",
   "horseCourseWinRate",
   "escaperCount",
-  "jockeyXdistance"
+  "jockeyXdistance",
+  "avgTimeIndex",
+  "bestTimeIndex",
+  "timeIndexTrend",
+  "jockeyAbility",
+  "trainerDistCatWinRate",
+  "straightLength",
+  "isWesternGrass",
+  "styleXstraight"
 ]

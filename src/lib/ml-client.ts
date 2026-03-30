@@ -132,6 +132,15 @@ interface ContextualFeatures {
   jockeyTrainerWinRate?: number | undefined;
   horseCourseWinRate?: number | undefined;
   escaperCount?: number | undefined;
+  // v12.0: タイム指数
+  avgTimeIndex?: number | undefined;
+  bestTimeIndex?: number | undefined;
+  timeIndexTrend?: number | undefined;
+  // v13.0: no-oddsモデル用に復活
+  trainerDistCatWinRate?: number | undefined;
+  // v13.0: コース形状
+  straightLength?: number | undefined;
+  isWesternGrass?: number | undefined;
 }
 
 /**
@@ -146,14 +155,12 @@ export function buildMLFeatures(
 
   const condEncoded = TRACK_CONDITION_ENCODE[ctx.trackCondition] ?? 0;
 
-  // v11.0: ablation studyでノイズ特徴量22個を削除
-  // 削除済み: jockeyAbility, trainerAbility, trainerWinRate, trainerPlaceRate,
-  //           trainerDistCatWinRate, trainerCondWinRate, trainerGradeWinRate,
-  //           jockeyDistanceWinRate, jockeyCourseWinRate, jockeySwitchQuality,
-  //           weightXspeed, ageXdistance, jockeyXform, fieldSizeXpost, rotationXform, formXclassChange,
-  //           gradeXtrainer, earlyPositionRatio, positionGainAvg, l3fRelativeAvg, courseDistPaceAvg, paceStyleMatch
+  // v13.0: jockeyAbility, trainerDistCatWinRate をno-odds用に復活
+  // （factorScoresにjockeyAbilityが含まれるのでspread後に上書きは不要）
   const features: Record<string, number> = {
     ...factorScores,
+    // v13.0: no-oddsモデルで有効な特徴量（factorScoresのjockeyAbilityはspreadで含まれる）
+    trainerDistCatWinRate: ctx.trainerDistCatWinRate ?? 0.08,
     fieldSize: ctx.fieldSize,
     popularity,
     age: ctx.age,
@@ -197,6 +204,14 @@ export function buildMLFeatures(
     escaperCount: ctx.escaperCount ?? 0,
     // Phase 3 交互作用特徴量 (#17, 残留)
     jockeyXdistance: (ctx.jockeyDistanceWinRate ?? 0.08) * (ctx.distance / 1000),
+    // v12.0: タイム指数
+    avgTimeIndex: ctx.avgTimeIndex ?? 0,
+    bestTimeIndex: ctx.bestTimeIndex ?? 0,
+    timeIndexTrend: ctx.timeIndexTrend ?? 0,
+    // v13.0: コース形状
+    straightLength: ctx.straightLength ?? 0.5,
+    isWesternGrass: ctx.isWesternGrass ?? 0,
+    styleXstraight: ((factorScores.runningStyle ?? 50) / 100) * (ctx.straightLength ?? 0.5),
   };
 
   // NaN/Infinity ガード: 初出走馬やデータ欠損で特徴量が壊れるのを防止

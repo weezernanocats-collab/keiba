@@ -343,6 +343,9 @@ def main():
         group_id=eval_query_ids,
     )
 
+    # v13.0: PairLogitPairwise → YetiRank に変更
+    # YetiRankはリストワイズに近い損失関数で、段階ラベル(0-3)を活用可能
+    # PairLogitPairwiseはsample_weightを無視する問題もあった
     model = CatBoostRanker(
         iterations=1500,
         learning_rate=0.02,
