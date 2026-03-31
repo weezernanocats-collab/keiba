@@ -59,5 +59,6 @@
   "trainerDistCatWinRate",
   "straightLength",
   "isWesternGrass",
-  "styleXstraight"
+  "styleXstraight",
+  "drawBiasZScore"
 ]

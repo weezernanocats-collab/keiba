@@ -1,8 +1,8 @@
 """
 CatBoost No-Odds Ranker 学習スクリプト
 
-オッズ関連5特徴量を除外した48特徴量でCatBoost YetiRankを学習。
-AI独自推奨（市場非依存）用モデル。
+v14.0: 特徴量プルーニング適用 — 56→42特徴量
+feature_selection_result.jsonで選定された42特徴量のみ使用。
 
 出力:
   model/catboost_no_odds.json (TS互換)
@@ -31,8 +31,10 @@ ODDS_FEATURES = {
     "avgPastOdds",
 }
 
-# feature_names.json (本番推論で使う53特徴量)
+# feature_names.json (本番推論で使う全特徴量)
 PROD_FEATURE_NAMES_FILE = os.path.join(MODEL_DIR, "feature_names.json")
+# feature_selection_result.json (プルーニング済み42特徴量)
+FEATURE_SELECTION_FILE = os.path.join(MODEL_DIR, "feature_selection_result.json")
 
 
 def position_to_relevance(position):
@@ -239,15 +241,19 @@ def fit_calibration(model, X_cal, positions_cal, groups_cal):
 def main():
     print("=== CatBoost No-Odds Ranker ===\n")
 
-    # Load prod feature names (53 features)
-    with open(PROD_FEATURE_NAMES_FILE, 'r', encoding='utf-8') as f:
-        prod_feature_names = json.load(f)
-    print(f"Prod features: {len(prod_feature_names)}")
-
-    # Identify non-odds features
-    no_odds_features = [fn for fn in prod_feature_names if fn not in ODDS_FEATURES]
-    print(f"No-odds features: {len(no_odds_features)} (excluded {len(prod_feature_names) - len(no_odds_features)})")
-    print(f"Excluded: {[fn for fn in prod_feature_names if fn in ODDS_FEATURES]}")
+    # Load pruned feature set from feature selection experiment
+    if os.path.exists(FEATURE_SELECTION_FILE):
+        with open(FEATURE_SELECTION_FILE, 'r', encoding='utf-8') as f:
+            fs_result = json.load(f)
+        no_odds_features = fs_result['best_features']
+        print(f"Using pruned features from feature_selection_result.json: {len(no_odds_features)}")
+    else:
+        # Fallback: all non-odds features from prod feature_names.json
+        with open(PROD_FEATURE_NAMES_FILE, 'r', encoding='utf-8') as f:
+            prod_feature_names = json.load(f)
+        no_odds_features = [fn for fn in prod_feature_names if fn not in ODDS_FEATURES]
+        print(f"No feature selection result found, using all no-odds: {len(no_odds_features)}")
+    print(f"No-odds features: {len(no_odds_features)}")
 
     # Load training data
     print(f"\nLoading: {LOCAL_DATA_FILE}")

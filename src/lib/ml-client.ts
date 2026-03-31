@@ -141,6 +141,8 @@ interface ContextualFeatures {
   // v13.0: コース形状
   straightLength?: number | undefined;
   isWesternGrass?: number | undefined;
+  // v14.0: データ駆動枠順バイアス
+  drawBiasZScore?: number | undefined;
 }
 
 /**
@@ -212,6 +214,8 @@ export function buildMLFeatures(
     straightLength: ctx.straightLength ?? 0.5,
     isWesternGrass: ctx.isWesternGrass ?? 0,
     styleXstraight: ((factorScores.runningStyle ?? 50) / 100) * (ctx.straightLength ?? 0.5),
+    // v14.0: データ駆動枠順バイアス
+    drawBiasZScore: ctx.drawBiasZScore ?? 0,
   };
 
   // NaN/Infinity ガード: 初出走馬やデータ欠損で特徴量が壊れるのを防止

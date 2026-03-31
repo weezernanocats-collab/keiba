@@ -1,0 +1,303 @@
+{
+  "best_features": [
+    "jockeyAbility",
+    "trainerDistCatWinRate",
+    "sireTrackWinRate",
+    "grade_encoded",
+    "age",
+    "jockeyTrainerWinRate",
+    "relativePosition",
+    "lastRacePosition",
+    "distanceAptitude",
+    "rotation",
+    "distance",
+    "standardTimeDev",
+    "handicapWeight",
+    "careerWinRate",
+    "recentForm",
+    "sex_encoded",
+    "trackConditionAptitude",
+    "handicapAdvantage",
+    "last3WinRate",
+    "avgMarginWhenLosing",
+    "last3PlaceRate",
+    "upsetRate",
+    "lastThreeFurlongs",
+    "daysSinceLastRace",
+    "consistency",
+    "speedRating",
+    "timeConsistency",
+    "runningStyle",
+    "styleXstraight",
+    "fieldSize",
+    "distanceChange",
+    "straightLength",
+    "postPositionBias",
+    "bestTimeDev",
+    "jockeyXdistance",
+    "avgMarginWhenWinning",
+    "marginCompetitiveness",
+    "winStreak",
+    "postPosition",
+    "trackCondition_encoded",
+    "cornerDelta",
+    "meetDay"
+  ],
+  "n_features": 42,
+  "test_ndcg1": 0.42782426778242677,
+  "test_top1": 0.25732217573221755,
+  "test_top3": 0.5418410041841004,
+  "baseline_ndcg1": 0.42224546722454676,
+  "all_results": {
+    "baseline": {
+      "n": 56,
+      "ndcg1": 0.42224546722454676,
+      "top1": 0.24790794979079497,
+      "top3": 0.5292887029288703
+    },
+    "tier_a": {
+      "n": 2,
+      "ndcg1": 0.37935843793584384,
+      "top1": 0.22071129707112971,
+      "top3": 0.47175732217573224
+    },
+    "tier_b": {
+      "n": 39,
+      "ndcg1": 0.4147489539748954,
+      "top1": 0.24163179916317992,
+      "top3": 0.5146443514644351
+    },
+    "tier_c": {
+      "n": 42,
+      "ndcg1": 0.42782426778242677,
+      "top1": 0.25732217573221755,
+      "top3": 0.5418410041841004
+    }
+  },
+  "importance_ranking": [
+    [
+      "sireTrackWinRate",
+      27.34026781537701
+    ],
+    [
+      "jockeyAbility",
+      18.149062187837828
+    ],
+    [
+      "grade_encoded",
+      13.973544019410225
+    ],
+    [
+      "age",
+      10.8096050812236
+    ],
+    [
+      "jockeyTrainerWinRate",
+      3.2157865726227697
+    ],
+    [
+      "relativePosition",
+      3.1521698056191103
+    ],
+    [
+      "trainerDistCatWinRate",
+      3.093924235875099
+    ],
+    [
+      "lastRacePosition",
+      2.7275726730459704
+    ],
+    [
+      "distanceAptitude",
+      1.9244042482284287
+    ],
+    [
+      "rotation",
+      1.4784419279727972
+    ],
+    [
+      "distance",
+      1.4628657523025024
+    ],
+    [
+      "standardTimeDev",
+      1.305283903802122
+    ],
+    [
+      "handicapWeight",
+      1.0759382898555387
+    ],
+    [
+      "careerWinRate",
+      1.0337226571038844
+    ],
+    [
+      "recentForm",
+      1.0120177648230173
+    ],
+    [
+      "sex_encoded",
+      0.9741191698735717
+    ],
+    [
+      "trackConditionAptitude",
+      0.9577975574841676
+    ],
+    [
+      "handicapAdvantage",
+      0.876059262153507
+    ],
+    [
+      "last3WinRate",
+      0.6531850441721141
+    ],
+    [
+      "avgMarginWhenLosing",
+      0.639759007920103
+    ],
+    [
+      "last3PlaceRate",
+      0.594874149967616
+    ],
+    [
+      "upsetRate",
+      0.4890213908665691
+    ],
+    [
+      "lastThreeFurlongs",
+      0.410970045369568
+    ],
+    [
+      "daysSinceLastRace",
+      0.32607405168251924
+    ],
+    [
+      "consistency",
+      0.3070254405983091
+    ],
+    [
+      "speedRating",
+      0.3066898509377584
+    ],
+    [
+      "timeConsistency",
+      0.2951016744992506
+    ],
+    [
+      "runningStyle",
+      0.2618704958845248
+    ],
+    [
+      "styleXstraight",
+      0.24420196730728655
+    ],
+    [
+      "fieldSize",
+      0.23762340922375355
+    ],
+    [
+      "distanceChange",
+      0.1904843898122707
+    ],
+    [
+      "straightLength",
+      0.13352690229356845
+    ],
+    [
+      "postPositionBias",
+      0.09912044470150227
+    ],
+    [
+      "bestTimeDev",
+      0.07253959515837191
+    ],
+    [
+      "jockeyXdistance",
+      0.0703088845033168
+    ],
+    [
+      "avgMarginWhenWinning",
+      0.03437292874682141
+    ],
+    [
+      "marginCompetitiveness",
+      0.02439545407850457
+    ],
+    [
+      "winStreak",
+      0.02422535524466037
+    ],
+    [
+      "postPosition",
+      0.02204659242044109
+    ],
+    [
+      "sireAptitude",
+      0.0
+    ],
+    [
+      "seasonalPattern",
+      0.0
+    ],
+    [
+      "trackCondition_encoded",
+      0.0
+    ],
+    [
+      "weather_encoded",
+      0.0
+    ],
+    [
+      "cornerDelta",
+      0.0
+    ],
+    [
+      "meetDay",
+      0.0
+    ],
+    [
+      "conditionXsire",
+      0.0
+    ],
+    [
+      "weightStability",
+      0.0
+    ],
+    [
+      "weightTrendSlope",
+      0.0
+    ],
+    [
+      "weightOptimalDelta",
+      0.0
+    ],
+    [
+      "bodyWeightTrend",
+      0.0
+    ],
+    [
+      "horseCourseWinRate",
+      0.0
+    ],
+    [
+      "escaperCount",
+      0.0
+    ],
+    [
+      "avgTimeIndex",
+      0.0
+    ],
+    [
+      "bestTimeIndex",
+      0.0
+    ],
+    [
+      "timeIndexTrend",
+      0.0
+    ],
+    [
+      "isWesternGrass",
+      0.0
+    ]
+  ]
+}

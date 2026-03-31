@@ -98,6 +98,46 @@ function parseCornerDelta(cornerStr: string | undefined): number {
   return parts[parts.length - 2] - parts[parts.length - 1];
 }
 
+// v14.0: drawBiasZScore — 枠番別勝率Z-Scoreを計算
+async function getDrawBiasZScores(
+  racecourseName: string,
+  trackType: string,
+  distance: number,
+  date: string,
+): Promise<Map<number, number>> {
+  const distBucket = distance <= 1400 ? 'sprint' : distance <= 1800 ? 'mile' : 'long';
+  const [dMin, dMax] = distBucket === 'sprint' ? [0, 1400] : distBucket === 'mile' ? [1401, 1800] : [1801, 99999];
+  const rows = await dbAll<{ post_position: number; total: number; wins: number }>(
+    `SELECT re.post_position,
+            COUNT(*) as total,
+            SUM(CASE WHEN re.result_position = 1 THEN 1 ELSE 0 END) as wins
+     FROM race_entries re
+     JOIN races r ON re.race_id = r.id
+     WHERE r.racecourse_name = ?
+       AND r.track_type = ?
+       AND r.distance >= ? AND r.distance <= ?
+       AND r.date < ?
+       AND re.result_position IS NOT NULL
+       AND re.result_position > 0
+     GROUP BY re.post_position
+     HAVING COUNT(*) >= 5`,
+    [racecourseName, trackType, dMin, dMax, date],
+  );
+
+  if (rows.length < 3) return new Map();
+
+  const winRates = rows.map(r => r.wins / r.total);
+  const mean = winRates.reduce((a, b) => a + b, 0) / winRates.length;
+  const std = Math.sqrt(winRates.reduce((a, b) => a + (b - mean) ** 2, 0) / winRates.length);
+
+  const result = new Map<number, number>();
+  if (std < 0.001) return result;
+  for (const r of rows) {
+    result.set(r.post_position, (r.wins / r.total - mean) / std);
+  }
+  return result;
+}
+
 // v9.0: classChange 計算用グレードエンコード
 const GRADE_ENCODE: Record<string, number> = {
   '新馬': 0, '未勝利': 1, '1勝クラス': 2, '2勝クラス': 3,
@@ -165,8 +205,8 @@ export async function generatePrediction(
   const month = new Date(date).getMonth() + 1;
   const t0 = Date.now();
 
-  // 統計コンテキスト + オッズ + 馬場バイアスを並列取得
-  const [ctx, oddsMap, todayBias] = await Promise.all([
+  // 統計コンテキスト + オッズ + 馬場バイアス + 枠バイアスを並列取得
+  const [ctx, oddsMap, todayBias, drawBiasMap] = await Promise.all([
     buildRaceContext(
       racecourseName, trackType, distance, month,
       horses.map(h => ({
@@ -179,6 +219,7 @@ export async function generatePrediction(
     ),
     getWinOddsMap(raceId),
     calculateTodayTrackBias(racecourseName, date, trackType),
+    getDrawBiasZScores(racecourseName, trackType, distance, date),
   ]);
   console.log(`[perf] ${raceId} DB並列取得: ${Date.now() - t0}ms`);
 
@@ -393,6 +434,8 @@ export async function generatePrediction(
             return geo ? geo.straight / MAX_STRAIGHT : 0.5;
           })(),
           isWesternGrass: COURSE_GEOMETRY[racecourseName]?.western ? 1 : 0,
+          // v14.0: データ駆動枠順バイアス
+          drawBiasZScore: drawBiasMap.get(sh.entry.postPosition) ?? 0,
           // v12.0: タイム指数
           ...(() => {
             const tiPerfs = pp.slice(0, 10).map(p => p.timeIndex).filter((ti): ti is number => ti != null);

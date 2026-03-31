@@ -102,6 +102,8 @@ const FEATURE_NAMES = [
   'straightLength',           // 最終直線の長さ（正規化 0-1）
   'isWesternGrass',           // 洋芝フラグ（札幌/函館）
   'styleXstraight',           // 脚質×直線長交互作用（差し馬は長直線で有利）
+  // v14.0: データ駆動枠順バイアス
+  'drawBiasZScore',           // (競馬場,距離バケット,トラック)別の枠勝率Z-Score
 ];
 
 const SEX_ENCODE: Record<string, number> = { '牡': 0, '牝': 1, 'セ': 2 };
@@ -222,6 +224,8 @@ interface PastPerfRow {
   // v12.0: タイム指数
   time_index: number | null;
   track_index: number | null;
+  // v14.0: 枠順
+  post_position: number | null;
 }
 
 async function main() {
@@ -256,7 +260,7 @@ async function main() {
     db.execute(`
       SELECT pp.horse_id, pp.race_id, pp.date, pp.position, pp.jockey_name, pp.margin, pp.corner_positions,
              pp.entries, pp.odds, pp.popularity, pp.race_name, pp.prize,
-             pp.weight, pp.racecourse_name, pp.distance,
+             pp.weight, pp.racecourse_name, pp.distance, pp.post_position,
              pp.time, pp.last_three_furlongs, pp.track_condition,
              pp.time_index, pp.track_index,
              r.grade, COALESCE(r.track_type, pp.track_type) as track_type
@@ -340,6 +344,8 @@ async function main() {
   const jockeyDistAccum = new Map<string, { total: number; wins: number }>();
   const jockeyCourseAccum = new Map<string, { total: number; wins: number }>();
   const sireTrackAccum = new Map<string, { total: number; wins: number }>();
+  // v14.0: drawBiasZScore — (racecourse, distBucket, trackType, postPosition) 別勝率
+  const drawBiasAccum = new Map<string, { total: number; wins: number }>();
 
   // レースごとの「その時点の」統計スナップショット
   const trainerSnap = new Map<string, Map<string, { winRate: number; placeRate: number }>>();
@@ -351,6 +357,8 @@ async function main() {
   const sireTrackSnap = new Map<string, Map<string, number>>();
   // v7.0: コース×距離ペース累積スナップショット
   const coursePaceSnap = new Map<string, Map<string, number>>();
+  // v14.0: drawBiasZScoreスナップショット — key=(course__distBucket__trackType__postPos) → winRate
+  const drawBiasSnap = new Map<string, Map<string, number>>();
 
   // 日付順にスナップショットを構築
   const processedDates = new Set<string>();
@@ -407,6 +415,13 @@ async function main() {
       if (s.total >= 5) cpSnap.set(key, s.sum / s.total);
     }
     coursePaceSnap.set(pred.date, cpSnap);
+
+    // v14.0: drawBiasスナップショット
+    const dbSnap = new Map<string, number>();
+    for (const [key, s] of drawBiasAccum) {
+      if (s.total >= 5) dbSnap.set(key, s.wins / s.total);
+    }
+    drawBiasSnap.set(pred.date, dbSnap);
 
     // この日付のレース結果で累積統計を更新
     for (const p of predictions.filter(pp => pp.date === pred.date)) {
@@ -477,6 +492,17 @@ async function main() {
             s.total++; if (e.result_position === 1) s.wins++;
             sireTrackAccum.set(key, s);
           }
+        }
+        // v14.0: drawBias — (course, distBucket, trackType, postPosition) 別勝率
+        if (e.post_position) {
+          const course = raceCourseMap.get(e.race_id) ?? '';
+          const dist = raceDistMap.get(e.race_id) ?? 0;
+          const distBucket = dist <= 1400 ? 'sprint' : dist <= 1800 ? 'mile' : 'long';
+          const trackType = raceTrackTypeMap.get(e.race_id) ?? '';
+          const dbKey = `${course}__${distBucket}__${trackType}__${e.post_position}`;
+          const db2 = drawBiasAccum.get(dbKey) || { total: 0, wins: 0 };
+          db2.total++; if (e.result_position === 1) db2.wins++;
+          drawBiasAccum.set(dbKey, db2);
         }
       }
 
@@ -888,6 +914,29 @@ async function main() {
             const straightNorm = geo ? geo.straight / MAX_STRAIGHT : 0.5;
             const style = scores.runningStyle ?? 50;
             return (style / 100) * straightNorm;
+          }
+          // v14.0: データ駆動枠順バイアスZ-Score
+          case 'drawBiasZScore': {
+            const dbS = drawBiasSnap.get(pred.date);
+            if (!dbS) return 0;
+            const course = pred.racecourse_name ?? '';
+            const distBucket2 = pred.distance <= 1400 ? 'sprint' : pred.distance <= 1800 ? 'mile' : 'long';
+            const tt = pred.track_type ?? '';
+            const prefix = `${course}__${distBucket2}__${tt}__`;
+            // Collect win rates for all post positions in this (course, distBucket, trackType)
+            const winRates: number[] = [];
+            let thisWR = 0;
+            for (const [k, wr] of dbS) {
+              if (k.startsWith(prefix)) {
+                winRates.push(wr);
+                const pos = parseInt(k.split('__')[3]);
+                if (pos === entry.post_position) thisWR = wr;
+              }
+            }
+            if (winRates.length < 3) return 0;
+            const mean = winRates.reduce((a, b) => a + b, 0) / winRates.length;
+            const std = Math.sqrt(winRates.reduce((a, b) => a + (b - mean) ** 2, 0) / winRates.length);
+            return std > 0.001 ? (thisWR - mean) / std : 0;
           }
           default: return scores[name] ?? 50;
         }
