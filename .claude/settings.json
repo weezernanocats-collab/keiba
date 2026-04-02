@@ -1,0 +1,73 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"[keiba env] Node: $(node -v) | Branch: $(git branch --show-current 2>/dev/null || echo 'N/A') | DB: $(grep TURSO_DATABASE_URL .env.local 2>/dev/null | cut -d= -f2 | cut -d/ -f3 || echo 'not configured')\"",
+            "statusMessage": "環境チェック中..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Check if the edited code contains any of these dangerous patterns:\n1. DELETE FROM without a WHERE clause\n2. libsql:// protocol (should be https://)\n3. db.batch() calls (should use sequential execute)\n4. clearAllData() or clearExisting=true without explicit user approval\n\nEdited content: $ARGUMENTS\n\nIf any dangerous pattern is found, respond with 'BLOCK: [explanation]'. If safe, respond with 'PASS'.",
+            "statusMessage": "データ安全チェック中..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Check if the written file contains any of these dangerous patterns:\n1. DELETE FROM without a WHERE clause\n2. libsql:// protocol (should be https://)\n3. db.batch() calls (should use sequential execute)\n4. clearAllData() or clearExisting=true without explicit user approval\n\nFile content: $ARGUMENTS\n\nIf any dangerous pattern is found, respond with 'BLOCK: [explanation]'. If safe, respond with 'PASS'.",
+            "statusMessage": "データ安全チェック中..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Edit(*.ts)",
+            "command": "FILE=$(echo '$ARGUMENTS' | jq -r '.file_path // empty' 2>/dev/null) && [ -n \"$FILE\" ] && npx prettier --write \"$FILE\" 2>/dev/null; exit 0",
+            "statusMessage": "自動フォーマット中...",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "afplay /System/Library/Sounds/Glass.aiff",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(rm -rf *)",
+            "command": "echo 'BLOCK: rm -rf は禁止されています' && exit 2",
+            "statusMessage": "コマンド安全チェック..."
+          }
+        ]
+      }
+    ]
+  }
+}
