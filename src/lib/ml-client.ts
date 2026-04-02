@@ -143,6 +143,8 @@ interface ContextualFeatures {
   isWesternGrass?: number | undefined;
   // v14.0: データ駆動枠順バイアス
   drawBiasZScore?: number | undefined;
+  // v15.0: 追い切り評価
+  oikiriRank?: number | undefined;
 }
 
 /**
@@ -216,6 +218,8 @@ export function buildMLFeatures(
     styleXstraight: ((factorScores.runningStyle ?? 50) / 100) * (ctx.straightLength ?? 0.5),
     // v14.0: データ駆動枠順バイアス
     drawBiasZScore: ctx.drawBiasZScore ?? 0,
+    // v15.0: 追い切り評価 (A=3, B=2, C=1, D=0, 不明=1.5)
+    oikiriRank: ctx.oikiriRank ?? 1.5,
   };
 
   // NaN/Infinity ガード: 初出走馬やデータ欠損で特徴量が壊れるのを防止

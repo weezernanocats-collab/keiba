@@ -160,6 +160,20 @@ export interface AIOnlyRanking {
   modelAccuracy: number;
 }
 
+/** AI独自ランキングからの推奨買い目 */
+export interface AIRankingBet {
+  type: '馬連' | 'ワイド' | '単勝' | '見送り';
+  horses: { horseNumber: number; horseName: string; aiRank: number; aiProb: number }[];
+  reasoning: string;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+export interface AIRankingBets {
+  bets: AIRankingBet[];
+  pattern: string;
+  summary: string;
+}
+
 export interface Prediction {
   raceId: string;
   raceName: string;
@@ -172,6 +186,7 @@ export interface Prediction {
   recommendedBets: RecommendedBet[];
   aiIndependentBets?: AIIndependentBet[];
   aiOnlyRanking?: AIOnlyRanking;
+  aiRankingBets?: AIRankingBets;
 }
 
 export interface PredictionPick {

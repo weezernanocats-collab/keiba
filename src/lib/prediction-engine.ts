@@ -35,7 +35,7 @@
  */
 
 import type {
-  Prediction, PredictionPick, RaceAnalysis, AIIndependentBet, AIOnlyRanking,
+  Prediction, PredictionPick, RaceAnalysis, AIIndependentBet, AIOnlyRanking, AIRankingBets, AIRankingBet,
   RaceEntry, PastPerformance, TrackType, TrackCondition,
 } from '@/types';
 
@@ -60,6 +60,7 @@ import { calcWeatherScore } from './weather-score';
 import { applyVenueMultipliers } from './racecourse-profiles';
 import { calcTimeFeatures } from './time-features';
 import { calcHorsePower, type HorsePowerInput, type HorsePowerContext } from './horse-power';
+import { scrapeOikiri } from './scraper';
 
 // v13.0: コース形状（静的データ）
 const COURSE_GEOMETRY: Record<string, { straight: number; western: boolean }> = {
@@ -206,7 +207,7 @@ export async function generatePrediction(
   const t0 = Date.now();
 
   // 統計コンテキスト + オッズ + 馬場バイアス + 枠バイアスを並列取得
-  const [ctx, oddsMap, todayBias, drawBiasMap] = await Promise.all([
+  const [ctx, oddsMap, todayBias, drawBiasMap, oikiriEntries] = await Promise.all([
     buildRaceContext(
       racecourseName, trackType, distance, month,
       horses.map(h => ({
@@ -220,8 +221,16 @@ export async function generatePrediction(
     getWinOddsMap(raceId),
     calculateTodayTrackBias(racecourseName, date, trackType),
     getDrawBiasZScores(racecourseName, trackType, distance, date),
+    scrapeOikiri(raceId).catch(() => [] as import('./scraper').OikiriEntry[]),
   ]);
   console.log(`[perf] ${raceId} DB並列取得: ${Date.now() - t0}ms`);
+
+  // v15.0: 追い切り評価マップ (horseNumber -> rank score)
+  const OIKIRI_RANK_SCORE: Record<string, number> = { 'A': 3, 'B': 2, 'C': 1, 'D': 0 };
+  const oikiriMap = new Map<number, number>();
+  for (const entry of oikiriEntries) {
+    oikiriMap.set(entry.horseNumber, OIKIRI_RANK_SCORE[entry.rank] ?? 1.5);
+  }
 
   // 平均斤量を算出（斤量ファクター用）
   const avgHandicapWeight = horses.length > 0
@@ -436,6 +445,8 @@ export async function generatePrediction(
           isWesternGrass: COURSE_GEOMETRY[racecourseName]?.western ? 1 : 0,
           // v14.0: データ駆動枠順バイアス
           drawBiasZScore: drawBiasMap.get(sh.entry.postPosition) ?? 0,
+          // v15.0: 追い切り評価
+          oikiriRank: oikiriMap.get(sh.entry.horseNumber) ?? 1.5,
           // v12.0: タイム指数
           ...(() => {
             const tiPerfs = pp.slice(0, 10).map(p => p.timeIndex).filter((ti): ti is number => ti != null);
@@ -665,6 +676,9 @@ export async function generatePrediction(
 
   const aiOnlyRanking = generateAIOnlyRanking(noOddsProbs, scoredHorses, oddsMap);
 
+  // AI独自ランキングからの推奨買い目
+  const aiRankingBets = generateAIRankingBets(noOddsProbs, scoredHorses, confidence);
+
   // サマリー生成
   const summary = generateSummary(topPicks, analysis, raceName, confidence, todayBias, options?.isAfternoon);
 
@@ -676,6 +690,10 @@ export async function generatePrediction(
   if (aiOnlyRanking) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (analysis as any).aiOnlyRanking = aiOnlyRanking;
+  }
+  if (aiRankingBets) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (analysis as any).aiRankingBets = aiRankingBets;
   }
 
   const rawPrediction: Prediction = {
@@ -690,6 +708,7 @@ export async function generatePrediction(
     recommendedBets,
     ...(aiIndependentBets.length > 0 ? { aiIndependentBets } : {}),
     ...(aiOnlyRanking ? { aiOnlyRanking } : {}),
+    ...(aiRankingBets ? { aiRankingBets } : {}),
   };
 
   return rawPrediction;
@@ -826,6 +845,134 @@ function generateAIOnlyRanking(
     entries,
     modelAccuracy: 0.231,
   };
+}
+
+// ==================== AI推奨買い目（AI独自ランキングベース） ====================
+
+/**
+ * AI独自ランキング（no-oddsモデル）から具体的な買い目を生成。
+ * オッズに依存せず、AIのランキング上位から馬連・ワイドを推奨する。
+ *
+ * ロジック:
+ * - AI確率の上位間の差（gap）でレースパターンを判定
+ * - 高信頼度（一強/二強）→ 馬連 + ワイドボックス
+ * - 中信頼度（三つ巴）→ 馬連ボックス
+ * - 低信頼度（混戦）→ ワイド1点 or 見送り
+ */
+function generateAIRankingBets(
+  noOddsProbs: Map<number, number> | null,
+  scoredHorses: ScoredHorse[],
+  confidence: number,
+): AIRankingBets | undefined {
+  if (!noOddsProbs || noOddsProbs.size < 3) return undefined;
+
+  const sorted = [...noOddsProbs.entries()].sort((a, b) => b[1] - a[1]);
+  const top = sorted.slice(0, 5).map(([hn, prob], idx) => {
+    const horse = scoredHorses.find(sh => sh.entry.horseNumber === hn);
+    return {
+      horseNumber: hn,
+      horseName: horse?.entry.horseName ?? `馬番${hn}`,
+      aiRank: idx + 1,
+      aiProb: Math.round(prob * 10000) / 10000,
+    };
+  });
+
+  // Gap分析でパターン判定
+  const gap12 = top[0].aiProb - top[1].aiProb;  // 1位-2位の差
+  const gap23 = top[1].aiProb - top[2].aiProb;  // 2位-3位の差
+  const gap34 = top.length > 3 ? top[2].aiProb - top[3].aiProb : 0;
+
+  let pattern: string;
+  let bets: AIRankingBet[];
+
+  if (gap12 > 0.08) {
+    // 一強: 1位が突出
+    pattern = '一強';
+    bets = [
+      {
+        type: '馬連',
+        horses: [top[0], top[1]],
+        reasoning: `AI 1位 ${top[0].horseName}が突出（確率差${(gap12 * 100).toFixed(1)}%）。2位との馬連。`,
+        confidence: 'high',
+      },
+      {
+        type: '馬連',
+        horses: [top[0], top[2]],
+        reasoning: `AI 1位から3位への押さえ。`,
+        confidence: 'medium',
+      },
+      {
+        type: 'ワイド',
+        horses: [top[0], top[1], top[2]],
+        reasoning: `AI上位3頭のワイドボックス（3点）。的中率重視。`,
+        confidence: 'high',
+      },
+    ];
+  } else if (gap23 > 0.05) {
+    // 二強: 1位と2位が接近、3位以下と差
+    pattern = '二強';
+    bets = [
+      {
+        type: '馬連',
+        horses: [top[0], top[1]],
+        reasoning: `AI上位2頭が接近（差${(gap12 * 100).toFixed(1)}%）。本線。`,
+        confidence: 'high',
+      },
+      {
+        type: 'ワイド',
+        horses: [top[0], top[1], top[2]],
+        reasoning: `AI上位3頭ワイドボックス。3位の割り込みをカバー。`,
+        confidence: 'medium',
+      },
+    ];
+  } else if (gap34 > 0.03) {
+    // 三つ巴: 上位3頭が接近
+    pattern = '三つ巴';
+    bets = [
+      {
+        type: '馬連',
+        horses: [top[0], top[1], top[2]],
+        reasoning: `AI上位3頭が接戦。馬連ボックス（3点）。`,
+        confidence: 'medium',
+      },
+      {
+        type: 'ワイド',
+        horses: [top[0], top[1]],
+        reasoning: `AI 1-2位のワイド。最も的中期待が高い1点。`,
+        confidence: 'medium',
+      },
+    ];
+  } else {
+    // 混戦: 差が小さい
+    pattern = '混戦';
+    if (confidence >= 50) {
+      bets = [
+        {
+          type: 'ワイド',
+          horses: [top[0], top[1]],
+          reasoning: `混戦レース。AI上位2頭のワイド1点に絞る。`,
+          confidence: 'low',
+        },
+      ];
+    } else {
+      bets = [
+        {
+          type: '見送り',
+          horses: [],
+          reasoning: `混戦かつ信頼度が低い（${confidence}%）。見送り推奨。`,
+          confidence: 'low',
+        },
+      ];
+    }
+  }
+
+  // サマリー
+  const betCount = bets.filter(b => b.type !== '見送り').length;
+  const summary = betCount > 0
+    ? `${pattern}パターン: AI上位から${betCount}点推奨`
+    : `${pattern}パターン: 見送り推奨`;
+
+  return { bets, pattern, summary };
 }
 
 // ==================== メインスコアリング ====================
@@ -1239,6 +1386,20 @@ function applyTodayTrackBias(
         adjustment += styleAdj;
         if (Math.abs(styleAdj) >= 0.5) {
           reasons.push(match ? '本日の馬場で脚質有利' : '本日の馬場で脚質不利');
+        }
+      }
+    }
+
+    // 騎手当日フォーム
+    if (bias.jockeyDayForms && bias.jockeyDayForms.length > 0) {
+      const jForm = bias.jockeyDayForms.find(j => j.jockeyName === horse.entry.jockeyName);
+      if (jForm && Math.abs(jForm.formBonus) > 0.05) {
+        const jockeyAdj = jForm.formBonus * bias.confidence * SCALE * 3; // formBonus ±0.3 × 信頼度 × SCALE × 3 → 最大±1.8点
+        adjustment += jockeyAdj;
+        if (jForm.formBonus > 0.1) {
+          reasons.push(`${jForm.jockeyName}本日好調(${jForm.rides}騎乗${jForm.wins}勝)`);
+        } else if (jForm.formBonus < -0.1) {
+          reasons.push(`${jForm.jockeyName}本日不調(${jForm.rides}騎乗${jForm.places}着内)`);
         }
       }
     }

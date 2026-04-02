@@ -120,15 +120,18 @@ export async function GET(
       }
     }
 
-    // 馬場バイアス鮮度チェック: 当日レースで新しいバイアスデータがあれば再生成
+    // 馬場バイアス鮮度チェック: 当日レースで新しいバイアスデータがあれば通知
+    // 初回表示はブロックせず、biasUpdateAvailableフラグで通知→ユーザーが「更新する」を押したら再リクエスト
     let regeneratedWithBias = false;
     let biasUpdateAvailable = false;
+    const forceUpdate = _request.nextUrl.searchParams.get('biasUpdate') === '1';
     if (prediction && race.entries.length >= 2) {
       try {
         const biasCountAtGen = prediction.analysis?.biasRaceCount ?? 0;
         const needsRegen = await shouldRegenerateForBias(race, biasCountAtGen);
         if (needsRegen) {
-          if (hasTimeForRegen()) {
+          if (forceUpdate && hasTimeForRegen()) {
+            // ユーザーが明示的に「更新する」を押した場合のみ再生成
             const newPrediction = await buildWithTimeout(
               raceId, race.name, race.date,
               race.trackType as '芝' | 'ダート' | '障害', race.distance,
@@ -141,13 +144,12 @@ export async function GET(
             prediction = newPrediction;
             regeneratedWithBias = true;
           } else {
-            // 時間不足で再生成スキップ: 既存予想を返しつつフラグで通知
+            // 初回アクセス: 既存予想を即返し、バイアス更新可能フラグで通知
             biasUpdateAvailable = true;
           }
         }
       } catch (biasError) {
         console.error('馬場バイアス再生成失敗:', biasError);
-        // 失敗しても既存予想をそのまま返す
       }
     }
 
@@ -244,6 +246,7 @@ export async function GET(
     const analysisAny = prediction.analysis as any;
     const aiIndependentBets = analysisAny?.aiIndependentBets || undefined;
     const aiOnlyRanking = analysisAny?.aiOnlyRanking || undefined;
+    const aiRankingBets = analysisAny?.aiRankingBets || undefined;
 
     const augmentedPrediction = {
       ...prediction,
@@ -251,6 +254,7 @@ export async function GET(
       recommendedBets: augmentedBets,
       ...(aiIndependentBets ? { aiIndependentBets } : {}),
       ...(aiOnlyRanking ? { aiOnlyRanking } : {}),
+      ...(aiRankingBets ? { aiRankingBets } : {}),
     };
 
     // 結果確定済みの場合は答え合わせデータを追加

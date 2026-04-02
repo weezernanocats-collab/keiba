@@ -60,5 +60,12 @@
   "straightLength",
   "isWesternGrass",
   "styleXstraight",
-  "drawBiasZScore"
+  "drawBiasZScore",
+  "sireDistWinRate",
+  "sireCondWinRate",
+  "pciAvg",
+  "jockeyRecentWinRate",
+  "trainerRecentWinRate",
+  "conditionXstyle",
+  "oikiriRank"
 ]

@@ -153,7 +153,22 @@ export default function StatsPage() {
   const [venueDetails, setVenueDetails] = useState<VenueDetail[]>([]);
   const [trackDetails, setTrackDetails] = useState<TrackDetail[]>([]);
   const [highConfEvStats, setHighConfEvStats] = useState<HighConfEvStats | null>(null);
-  const [aiBetStats, setAiBetStats] = useState<{ totalRaces: number; totalBets: number; place: { bets: number; hits: number; hitRate: number; investment: number; returnAmount: number; roi: number }; win: { bets: number; hits: number; hitRate: number; investment: number; returnAmount: number; roi: number } } | null>(null);
+  interface AiCumPoint { date: string; bets: number; hits: number; hitRate: number; investment: number; returnAmount: number; roi: number; profit: number }
+  interface AiBetStatsType {
+    totalRaces: number; totalBets: number;
+    place: { bets: number; hits: number; hitRate: number; investment: number; returnAmount: number; roi: number };
+    win: { bets: number; hits: number; hitRate: number; investment: number; returnAmount: number; roi: number };
+    cumulativePlace?: AiCumPoint[];
+    cumulativeWin?: AiCumPoint[];
+  }
+  const [aiBetStats, setAiBetStats] = useState<AiBetStatsType | null>(null);
+  interface AiRankingBetTypeStats { bets: number; hits: number; hitRate: number; investment: number; returnAmount: number; roi: number }
+  interface AiRankingBetStatsType {
+    totalRaces: number; totalBets: number;
+    byType: Record<string, AiRankingBetTypeStats>;
+    cumulative?: AiCumPoint[];
+  }
+  const [aiRankingBetStats, setAiRankingBetStats] = useState<AiRankingBetStatsType | null>(null);
 
   useEffect(() => {
     async function fetchData() {
@@ -179,6 +194,7 @@ export default function StatsPage() {
         setPeriodLabel(data.period || '全期間');
         setHighConfEvStats(data.highConfEvStats || null);
         setAiBetStats(data.aiIndependentBetStats || null);
+        setAiRankingBetStats(data.aiRankingBetStats || null);
 
         const trendJson = await trendRes.json();
         setTrendData(trendJson.trend || []);
@@ -654,6 +670,198 @@ export default function StatsPage() {
           <p className="text-xs text-muted mt-3">
             100円均一ベット基準。AI独自推奨はオッズ情報を一切使わないNo-Oddsモデルの判断に基づく。
           </p>
+
+          {/* 累積収支推移グラフ */}
+          {aiBetStats.cumulativePlace && aiBetStats.cumulativePlace.length >= 3 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-bold mb-3">複勝を買い続けた場合の収支推移</h3>
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={aiBetStats.cumulativePlace}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }} angle={-30} textAnchor="end" height={50} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip
+                    contentStyle={{ fontSize: 12 }}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    formatter={(value: any, name: any) =>
+                      name === 'profit' ? `${Number(value).toLocaleString()}円`
+                        : name === 'roi' ? `${value}%`
+                          : name === 'hitRate' ? `${value}%`
+                            : `${value}`
+                    }
+                  />
+                  <Legend formatter={(v) => v === 'profit' ? '累積収支(円)' : v === 'roi' ? 'ROI(%)' : v === 'hitRate' ? '的中率(%)' : v} />
+                  <ReferenceLine y={0} stroke="#666" strokeDasharray="3 3" />
+                  <Line type="monotone" dataKey="profit" stroke="#10b981" strokeWidth={2} dot={false} name="profit" />
+                  <Line type="monotone" dataKey="roi" stroke="#3b82f6" strokeWidth={1.5} dot={false} name="roi" />
+                  <Line type="monotone" dataKey="hitRate" stroke="#f59e0b" strokeWidth={1.5} dot={false} name="hitRate" />
+                </LineChart>
+              </ResponsiveContainer>
+              <div className="flex flex-wrap gap-4 mt-2 text-xs text-muted">
+                <span>最新: {aiBetStats.cumulativePlace[aiBetStats.cumulativePlace.length - 1].bets}ベット</span>
+                <span>的中率: {aiBetStats.cumulativePlace[aiBetStats.cumulativePlace.length - 1].hitRate}%</span>
+                <span>ROI: {aiBetStats.cumulativePlace[aiBetStats.cumulativePlace.length - 1].roi}%</span>
+                <span className={aiBetStats.cumulativePlace[aiBetStats.cumulativePlace.length - 1].profit >= 0 ? 'text-green-500' : 'text-red-500'}>
+                  収支: {aiBetStats.cumulativePlace[aiBetStats.cumulativePlace.length - 1].profit >= 0 ? '+' : ''}{aiBetStats.cumulativePlace[aiBetStats.cumulativePlace.length - 1].profit.toLocaleString()}円
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* 単勝の累積推移 */}
+          {aiBetStats.cumulativeWin && aiBetStats.cumulativeWin.length >= 3 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-bold mb-3">単勝を買い続けた場合の収支推移</h3>
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={aiBetStats.cumulativeWin}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }} angle={-30} textAnchor="end" height={50} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip
+                    contentStyle={{ fontSize: 12 }}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    formatter={(value: any, name: any) =>
+                      name === 'profit' ? `${Number(value).toLocaleString()}円`
+                        : name === 'roi' ? `${value}%`
+                          : name === 'hitRate' ? `${value}%`
+                            : `${value}`
+                    }
+                  />
+                  <Legend formatter={(v) => v === 'profit' ? '累積収支(円)' : v === 'roi' ? 'ROI(%)' : v === 'hitRate' ? '的中率(%)' : v} />
+                  <ReferenceLine y={0} stroke="#666" strokeDasharray="3 3" />
+                  <Line type="monotone" dataKey="profit" stroke="#10b981" strokeWidth={2} dot={false} name="profit" />
+                  <Line type="monotone" dataKey="roi" stroke="#3b82f6" strokeWidth={1.5} dot={false} name="roi" />
+                  <Line type="monotone" dataKey="hitRate" stroke="#f59e0b" strokeWidth={1.5} dot={false} name="hitRate" />
+                </LineChart>
+              </ResponsiveContainer>
+              <div className="flex flex-wrap gap-4 mt-2 text-xs text-muted">
+                <span>最新: {aiBetStats.cumulativeWin[aiBetStats.cumulativeWin.length - 1].bets}ベット</span>
+                <span>的中率: {aiBetStats.cumulativeWin[aiBetStats.cumulativeWin.length - 1].hitRate}%</span>
+                <span>ROI: {aiBetStats.cumulativeWin[aiBetStats.cumulativeWin.length - 1].roi}%</span>
+                <span className={aiBetStats.cumulativeWin[aiBetStats.cumulativeWin.length - 1].profit >= 0 ? 'text-green-500' : 'text-red-500'}>
+                  収支: {aiBetStats.cumulativeWin[aiBetStats.cumulativeWin.length - 1].profit >= 0 ? '+' : ''}{aiBetStats.cumulativeWin[aiBetStats.cumulativeWin.length - 1].profit.toLocaleString()}円
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* AI推奨買い目（馬連/ワイド）の成績 */}
+      {aiRankingBetStats && aiRankingBetStats.totalBets > 0 && (
+        <div className="bg-card-bg border border-emerald-700/40 rounded-xl p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="px-2 py-0.5 rounded text-xs font-bold bg-emerald-900/40 text-emerald-300 border border-emerald-700/40">AI買い目</span>
+            <h2 className="text-lg font-bold">AI推奨買い目の成績</h2>
+          </div>
+          <p className="text-xs text-muted mb-4">
+            AI独自ランキング（オッズ不使用）から自動生成した馬連・ワイドを買い続けた場合の実績
+          </p>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <StatCard label="発動レース数" value={`${aiRankingBetStats.totalRaces}`} color="text-emerald-400" />
+            <StatCard label="総ベット数" value={`${aiRankingBetStats.totalBets}`} color="text-emerald-400" />
+            {Object.entries(aiRankingBetStats.byType).map(([type, s]) => (
+              <StatCard key={type} label={`${type} 的中率`} value={`${s.hitRate}%`} color={s.hitRate >= 20 ? 'text-green-600' : 'text-red-500'} />
+            ))}
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b dark:border-gray-700 text-left">
+                  <th className="py-2 pr-3 font-medium">券種</th>
+                  <th className="py-2 px-3 font-medium text-center">ベット数</th>
+                  <th className="py-2 px-3 font-medium text-center">的中</th>
+                  <th className="py-2 px-3 font-medium text-center">的中率</th>
+                  <th className="py-2 px-3 font-medium text-right">投資額</th>
+                  <th className="py-2 px-3 font-medium text-right">回収額</th>
+                  <th className="py-2 px-3 font-medium text-center">ROI</th>
+                  <th className="py-2 px-3 font-medium text-right">収支</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(aiRankingBetStats.byType).map(([type, s]) => {
+                  const profit = s.returnAmount - s.investment;
+                  return (
+                    <tr key={type} className="border-b dark:border-gray-800">
+                      <td className="py-2 pr-3">
+                        <span className="inline-block bg-emerald-700 text-white px-2 py-0.5 rounded text-xs font-bold">
+                          {type}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-center">{s.bets}</td>
+                      <td className="py-2 px-3 text-center">{s.hits}</td>
+                      <td className="py-2 px-3 text-center">
+                        <span className={s.hitRate >= 20 ? 'text-green-600 font-bold' : ''}>{s.hitRate}%</span>
+                      </td>
+                      <td className="py-2 px-3 text-right font-mono text-xs">{s.investment.toLocaleString()}円</td>
+                      <td className="py-2 px-3 text-right font-mono text-xs">{s.returnAmount.toLocaleString()}円</td>
+                      <td className="py-2 px-3 text-center">
+                        <span className={`font-bold ${s.roi >= 100 ? 'text-green-600' : 'text-red-500'}`}>{s.roi}%</span>
+                      </td>
+                      <td className={`py-2 px-3 text-right font-bold font-mono ${profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                        {profit >= 0 ? '+' : ''}{profit.toLocaleString()}円
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-muted mt-3">
+            100円均一ベット基準。AI推奨買い目はオッズ情報を使わないNo-Oddsモデルの上位馬から自動生成。
+          </p>
+
+          {/* 累積収支推移グラフ */}
+          {aiRankingBetStats.cumulative && aiRankingBetStats.cumulative.length >= 3 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-bold mb-3">AI推奨買い目を買い続けた場合の収支推移</h3>
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={aiRankingBetStats.cumulative}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }} angle={-30} textAnchor="end" height={50} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip
+                    contentStyle={{ fontSize: 12 }}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    formatter={(value: any, name: any) =>
+                      name === 'profit' ? `${Number(value).toLocaleString()}円`
+                        : name === 'roi' ? `${value}%`
+                          : name === 'hitRate' ? `${value}%`
+                            : `${value}`
+                    }
+                  />
+                  <Legend formatter={(v) => v === 'profit' ? '累積収支(円)' : v === 'roi' ? 'ROI(%)' : v === 'hitRate' ? '的中率(%)' : v} />
+                  <ReferenceLine y={0} stroke="#666" strokeDasharray="3 3" />
+                  <Line type="monotone" dataKey="profit" stroke="#10b981" strokeWidth={2} dot={false} name="profit" />
+                  <Line type="monotone" dataKey="roi" stroke="#3b82f6" strokeWidth={1.5} dot={false} name="roi" />
+                  <Line type="monotone" dataKey="hitRate" stroke="#f59e0b" strokeWidth={1.5} dot={false} name="hitRate" />
+                </LineChart>
+              </ResponsiveContainer>
+              <div className="flex flex-wrap gap-4 mt-2 text-xs text-muted">
+                {(() => {
+                  const last = aiRankingBetStats.cumulative![aiRankingBetStats.cumulative!.length - 1];
+                  return (
+                    <>
+                      <span>最新: {last.bets}ベット</span>
+                      <span>的中率: {last.hitRate}%</span>
+                      <span>ROI: {last.roi}%</span>
+                      <span className={last.profit >= 0 ? 'text-green-500' : 'text-red-500'}>
+                        収支: {last.profit >= 0 ? '+' : ''}{last.profit.toLocaleString()}円
+                      </span>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+
+          {aiRankingBetStats.totalBets > 0 && (!aiRankingBetStats.cumulative || aiRankingBetStats.cumulative.length < 3) && (
+            <p className="text-xs text-muted mt-4">
+              データが3日分以上溜まると推移グラフが表示されます。
+            </p>
+          )}
         </div>
       )}
 

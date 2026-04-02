@@ -7,8 +7,7 @@ import ConfidenceBadge from '@/components/ConfidenceBadge';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import FavoriteProfilePopover from '@/components/FavoriteProfilePopover';
 import { useFavorites } from '@/lib/use-favorites';
-import { useApi, useDeferredApi, formatLastFetched } from '@/hooks/use-api';
-import type { BetTypeStat } from '@/types';
+import { useApi, formatLastFetched } from '@/hooks/use-api';
 import { PredictionHistoryContent } from './history/page';
 
 interface RaceRow {
@@ -49,10 +48,31 @@ interface PredPick {
   runningStyle?: string;
 }
 
+interface AIRankingBetHorse {
+  horseNumber: number;
+  horseName: string;
+  aiRank: number;
+  aiProb: number;
+}
+
+interface AIRankingBetItem {
+  type: string;
+  horses: AIRankingBetHorse[];
+  reasoning: string;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+interface AIRankingBetsData {
+  bets: AIRankingBetItem[];
+  pattern: string;
+  summary: string;
+}
+
 interface PredCache {
   topPicks: PredPick[];
   recommendedBets: PredBet[];
   confidence: number;
+  aiRankingBets?: AIRankingBetsData;
 }
 
 
@@ -127,10 +147,7 @@ const rankLabels = ['\u25CE', '\u25CB', '\u25B2', '\u25B3', '\u00D7', '\u2606'];
 
 function UpcomingRaces() {
   const { data: racesData, isValidating, lastFetched } = useApi<{ races: RaceRow[] }>('/api/races?type=upcoming');
-  const { data: statsData } = useDeferredApi<{ betTypeStats: BetTypeStat[] }>('/api/accuracy-stats');
-
   const races = racesData?.races || [];
-  const betTypeStats = statsData?.betTypeStats || [];
   const loading = !racesData;
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -138,11 +155,6 @@ function UpcomingRaces() {
   const [loadingPred, setLoadingPred] = useState<string | null>(null);
   const [confidenceFilter, setConfidenceFilter] = useState<string>('all');
   const { isRaceFavoriteInProfile, toggleRaceForProfile } = useFavorites();
-
-  const betTypeStatsMap = useMemo(
-    () => new Map(betTypeStats.map(s => [s.type, s])),
-    [betTypeStats],
-  );
 
   const handleExpand = useCallback(async (raceId: string) => {
     if (expandedId === raceId) {
@@ -163,6 +175,7 @@ function UpcomingRaces() {
             topPicks: data.prediction.topPicks || [],
             recommendedBets: data.prediction.recommendedBets || [],
             confidence: data.prediction.confidence || 0,
+            aiRankingBets: data.prediction.aiRankingBets || undefined,
           });
           return next;
         });
@@ -297,132 +310,49 @@ function UpcomingRaces() {
                         <div className="text-center py-4 text-muted text-sm">読み込み中...</div>
                       ) : pred ? (
                         <>
-                          {/* 予想印サマリー */}
+                          {/* 予想印サマリー（コンパクト） */}
                           {pred.topPicks.length > 0 && (
-                            <div>
-                              <h3 className="text-sm font-bold text-muted mb-2">AI予想印</h3>
-                              <div className="flex flex-wrap gap-2">
-                                {pred.topPicks.slice(0, 6).map((pick, idx) => (
-                                  <div
-                                    key={pick.horseNumber}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-gray-50 dark:bg-gray-800/30 border-gray-200 dark:border-gray-700"
-                                  >
-                                    <span className="font-bold text-sm">{rankLabels[idx] || '\u2606'}</span>
-                                    <span className="font-mono text-xs">{pick.horseNumber}</span>
-                                    <span className="text-sm truncate max-w-[8rem]">{pick.horseName}</span>
-                                    {pick.runningStyle && (
-                                      <span className="text-xs text-muted">({pick.runningStyle})</span>
-                                    )}
+                            <div className="flex flex-wrap gap-2">
+                              {pred.topPicks.slice(0, 6).map((pick, idx) => (
+                                <div
+                                  key={pick.horseNumber}
+                                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-gray-50 dark:bg-gray-800/30 border-gray-200 dark:border-gray-700"
+                                >
+                                  <span className="font-bold text-sm">{rankLabels[idx] || '\u2606'}</span>
+                                  <span className="font-mono text-xs">{pick.horseNumber}</span>
+                                  <span className="text-sm truncate max-w-[7rem]">{pick.horseName}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* AI推奨買い目（コンパクト） */}
+                          {pred.aiRankingBets && pred.aiRankingBets.bets.length > 0 && (
+                            <div className="border border-emerald-300 dark:border-emerald-700 rounded-lg p-3 bg-emerald-50/50 dark:bg-emerald-900/20">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-sm font-bold">AI買い目</span>
+                                <span className="text-xs bg-emerald-200 dark:bg-emerald-800 text-emerald-800 dark:text-emerald-200 px-1.5 py-0.5 rounded">
+                                  {pred.aiRankingBets.pattern}
+                                </span>
+                              </div>
+                              <div className="space-y-1.5">
+                                {pred.aiRankingBets.bets.map((bet, idx) => (
+                                  <div key={idx} className="flex items-center gap-2 text-sm">
+                                    <span className={`px-2 py-0.5 rounded text-xs font-bold text-white ${
+                                      bet.confidence === 'high' ? 'bg-emerald-600' : bet.confidence === 'medium' ? 'bg-blue-600' : 'bg-gray-500'
+                                    }`}>
+                                      {bet.type}
+                                    </span>
+                                    <span className="font-bold">
+                                      {bet.horses.map(h => `${h.horseNumber} ${h.horseName}`).join(' - ')}
+                                    </span>
+                                    <span className="text-xs text-muted">
+                                      {bet.confidence === 'high' ? '本線' : bet.confidence === 'medium' ? '押さえ' : ''}
+                                    </span>
                                   </div>
                                 ))}
                               </div>
                             </div>
-                          )}
-
-                          {/* 推奨馬券 */}
-                          {pred.recommendedBets.length > 0 && (
-                            <div>
-                              <h3 className="text-sm font-bold text-muted mb-1">推奨馬券</h3>
-                              <p className="text-xs text-muted mb-2">
-                                的中率算出要素: 過去成績・騎手適性・競馬場相性・脚質相性・安定性・買い方実績
-                              </p>
-                              <div className="overflow-x-auto">
-                                <table className="w-full text-sm">
-                                  <thead>
-                                    <tr className="border-b dark:border-gray-700 text-left text-xs text-muted">
-                                      <th className="py-1 pr-2">券種</th>
-                                      <th className="py-1 px-2">買い目</th>
-                                      <th className="py-1 px-2 text-right">オッズ</th>
-                                      <th className="py-1 px-2 text-right">予想ROI</th>
-                                      <th className="py-1 px-2 text-right">期待値</th>
-                                      <th className="py-1 px-2 text-right">的中率</th>
-                                      <th className="py-1 px-2 text-right">Kelly</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {pred.recommendedBets.map((bet, idx) => {
-                                      const stat = betTypeStatsMap.get(bet.type);
-                                      // 馬券固有の的中率（モデル推定）を優先、なければ券種全体統計
-                                      const hasModelProb = bet.hitProbability != null;
-                                      const betHitProb = hasModelProb ? bet.hitProbability! * 100 : 0;
-                                      const typeHitRate = stat?.hitRate || 0;
-                                      const odds = bet.odds || 0;
-                                      // モデル推定と買い方実績をブレンド（モデル70% + 実績30%）
-                                      const blendedHitRate = hasModelProb && typeHitRate > 0
-                                        ? betHitProb * 0.7 + typeHitRate * 0.3
-                                        : hasModelProb ? betHitProb : typeHitRate;
-                                      // 期待値 = ブレンド的中率 × オッズ（100が損益分岐点）
-                                      const evScore = odds > 0 && blendedHitRate > 0 ? Math.round(odds * blendedHitRate) : 0;
-                                      // 予想ROI = モデル推定勝率 × オッズ × 100
-                                      const predRoi = bet.expectedValue > 0 ? Math.round(bet.expectedValue * 100) : 0;
-                                      const isMain = bet.reasoning.startsWith('\u3010\u4E3B\u529B\u3011');
-                                      const isValue = bet.reasoning.startsWith('\u3010\u30D0\u30EA\u30E5\u30FC\u3011');
-                                      return (
-                                        <tr key={idx} className="border-b dark:border-gray-800">
-                                          <td className="py-1.5 pr-2">
-                                            <span className="font-medium">{bet.type}</span>
-                                            {isMain && (
-                                              <span className="ml-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-1 rounded">主力</span>
-                                            )}
-                                            {isValue && (
-                                              <span className="ml-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1 rounded">妙味</span>
-                                            )}
-                                          </td>
-                                          <td className="py-1.5 px-2 font-mono font-bold">{bet.selections.join('-')}</td>
-                                          <td className="py-1.5 px-2 text-right font-mono">
-                                            {odds > 0 ? `${odds.toFixed(1)}倍` : '-'}
-                                          </td>
-                                          <td className="py-1.5 px-2 text-right">
-                                            {predRoi > 0 ? (
-                                              <span className={`font-bold ${predRoi >= 100 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                                                {predRoi}%
-                                              </span>
-                                            ) : '-'}
-                                          </td>
-                                          <td className="py-1.5 px-2 text-right">
-                                            {evScore > 0 ? (
-                                              <span className={`font-bold ${evScore >= 100 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                                                {evScore}
-                                              </span>
-                                            ) : '-'}
-                                          </td>
-                                          <td className="py-1.5 px-2 text-right">
-                                            {hasModelProb ? (
-                                              <span className="text-foreground font-bold">
-                                                {blendedHitRate.toFixed(1)}%
-                                              </span>
-                                            ) : typeHitRate > 0 ? (
-                                              <span className="text-muted">
-                                                {typeHitRate.toFixed(1)}%
-                                                <span className="text-xs ml-0.5">({stat?.total || 0})</span>
-                                              </span>
-                                            ) : '-'}
-                                          </td>
-                                          <td className="py-1.5 px-2 text-right">
-                                            {bet.kellyFraction != null && bet.kellyFraction > 0 ? (
-                                              <div>
-                                                <span className="font-mono text-purple-600 dark:text-purple-400">
-                                                  {(bet.kellyFraction * 100).toFixed(1)}%
-                                                </span>
-                                                {bet.valueEdge != null && bet.valueEdge > 0 && (
-                                                  <div className="text-xs text-green-600 dark:text-green-400">
-                                                    +{(bet.valueEdge * 100).toFixed(0)}%
-                                                  </div>
-                                                )}
-                                              </div>
-                                            ) : '-'}
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          )}
-
-                          {pred.recommendedBets.length === 0 && (
-                            <div className="text-center py-2 text-muted text-sm">推奨馬券なし</div>
                           )}
                         </>
                       ) : (

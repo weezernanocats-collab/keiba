@@ -1,0 +1,8 @@
+{
+  "catboost": 0.85,
+  "lightgbm": 0.15,
+  "val_ndcg1": 0.4038,
+  "test_ndcg1": 0.4306,
+  "test_top1": 0.2573,
+  "test_top3": 0.5366
+}

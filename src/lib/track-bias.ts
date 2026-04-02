@@ -8,6 +8,18 @@ import { dbAll } from './database';
 
 // ==================== 型定義 ====================
 
+export interface JockeyDayForm {
+  jockeyId: string;
+  jockeyName: string;
+  rides: number;
+  wins: number;
+  places: number;  // 3着以内
+  winRate: number;
+  placeRate: number;
+  /** 当日の調子補正値: -0.3(不調) 〜 +0.3(好調) */
+  formBonus: number;
+}
+
 export interface TodayTrackBias {
   /** 内枠有利度: -1(外有利) 〜 +1(内有利) */
   innerAdvantage: number;
@@ -19,6 +31,8 @@ export interface TodayTrackBias {
   confidence: number;
   /** 分析詳細テキスト */
   summary: string;
+  /** 騎手当日フォーム（2騎乗以上） */
+  jockeyDayForms?: JockeyDayForm[];
 }
 
 interface CompletedRaceEntry {
@@ -28,6 +42,8 @@ interface CompletedRaceEntry {
   result_position: number;
   field_size: number;
   result_corner_positions: string | null;
+  jockey_id: string | null;
+  jockey_name: string | null;
 }
 
 // ==================== メイン関数 ====================
@@ -57,7 +73,9 @@ export async function calculateTodayTrackBias(
        re.horse_number,
        re.result_position,
        fs.field_size,
-       re.result_corner_positions
+       re.result_corner_positions,
+       re.jockey_id,
+       re.jockey_name
      FROM race_entries re
      JOIN races r ON re.race_id = r.id
      JOIN (
@@ -95,6 +113,9 @@ export async function calculateTodayTrackBias(
   // 信頼度: 3レース→0.3, 5レース→0.6, 8+レース→1.0
   const confidence = Math.min(1.0, sampleRaces / 8);
 
+  // ---------- 騎手当日フォーム分析 ----------
+  const jockeyDayForms = analyzeJockeyDayForm(rows);
+
   const summaryParts: string[] = [];
   if (Math.abs(innerAdvantage) > 0.2) {
     summaryParts.push(innerAdvantage > 0 ? '内枠有利傾向' : '外枠有利傾向');
@@ -102,11 +123,24 @@ export async function calculateTodayTrackBias(
   if (Math.abs(frontRunnerAdvantage) > 0.2) {
     summaryParts.push(frontRunnerAdvantage > 0 ? '先行有利傾向' : '差し追込有利傾向');
   }
+  // 騎手フォームのサマリー
+  const hotJockeys = jockeyDayForms.filter(j => j.formBonus > 0.1);
+  const coldJockeys = jockeyDayForms.filter(j => j.formBonus < -0.1);
+  if (hotJockeys.length > 0) {
+    summaryParts.push(`好調: ${hotJockeys.map(j => j.jockeyName).join('/')}`);
+  }
+  if (coldJockeys.length > 0) {
+    summaryParts.push(`不調: ${coldJockeys.map(j => j.jockeyName).join('/')}`);
+  }
+
   const summary = summaryParts.length > 0
     ? `本日${racecourseName}: ${summaryParts.join('・')}（${sampleRaces}R分析）`
     : `本日${racecourseName}: バイアス中立（${sampleRaces}R分析）`;
 
-  return { innerAdvantage, frontRunnerAdvantage, sampleRaces, confidence, summary };
+  return {
+    innerAdvantage, frontRunnerAdvantage, sampleRaces, confidence, summary,
+    jockeyDayForms: jockeyDayForms.length > 0 ? jockeyDayForms : undefined,
+  };
 }
 
 // ==================== 枠順バイアス分析 ====================
@@ -188,6 +222,61 @@ function analyzeRunningStyleBias(raceMap: Map<string, CompletedRaceEntry[]>): nu
   const total = frontRunnerWins + closerWins;
   const frontRatio = frontRunnerWins / total;
   return Math.max(-1, Math.min(1, (frontRatio - 0.5) * 2.5));
+}
+
+// ==================== 騎手当日フォーム分析 ====================
+
+/**
+ * 当日の全結果から騎手ごとの成績を集計し、好不調を判定する。
+ * 2騎乗以上の騎手のみ返す。
+ *
+ * formBonus:
+ * - 複勝率50%以上 & 2騎乗以上 → +0.2〜+0.3（好調）
+ * - 複勝率0%   & 2騎乗以上 → -0.2〜-0.3（不調）
+ * - 中間は線形スケール
+ */
+function analyzeJockeyDayForm(rows: CompletedRaceEntry[]): JockeyDayForm[] {
+  const jockeyStats = new Map<string, { name: string; rides: number; wins: number; places: number }>();
+
+  for (const row of rows) {
+    if (!row.jockey_id || !row.jockey_name) continue;
+
+    const stats = jockeyStats.get(row.jockey_id) || { name: row.jockey_name, rides: 0, wins: 0, places: 0 };
+    stats.rides++;
+    if (row.result_position === 1) stats.wins++;
+    if (row.result_position <= 3) stats.places++;
+    jockeyStats.set(row.jockey_id, stats);
+  }
+
+  const forms: JockeyDayForm[] = [];
+  for (const [jockeyId, stats] of jockeyStats) {
+    if (stats.rides < 2) continue;
+
+    const winRate = stats.wins / stats.rides;
+    const placeRate = stats.places / stats.rides;
+
+    // formBonus: 複勝率ベースで -0.3 〜 +0.3
+    // 期待複勝率 ≈ 30%（3着以内/出走数）として、それとの乖離でスケール
+    const expectedPlaceRate = 0.3;
+    const formBonus = Math.max(-0.3, Math.min(0.3,
+      (placeRate - expectedPlaceRate) * 1.0,
+    ));
+
+    forms.push({
+      jockeyId,
+      jockeyName: stats.name,
+      rides: stats.rides,
+      wins: stats.wins,
+      places: stats.places,
+      winRate: Math.round(winRate * 1000) / 1000,
+      placeRate: Math.round(placeRate * 1000) / 1000,
+      formBonus: Math.round(formBonus * 1000) / 1000,
+    });
+  }
+
+  // formBonusの絶対値降順
+  forms.sort((a, b) => Math.abs(b.formBonus) - Math.abs(a.formBonus));
+  return forms;
 }
 
 /**

@@ -819,3 +819,59 @@ export async function debugScrapeRaceCard(raceId: string): Promise<Record<string
     parsedEntriesSample: result.entries.slice(0, 3),
   };
 }
+
+/**
+ * 追い切り評価を取得（レース単位）
+ * 各馬のA/B/C/D評価とコメントを返す。
+ */
+export interface OikiriEntry {
+  horseNumber: number;
+  rank: 'A' | 'B' | 'C' | 'D';
+  comment: string;
+}
+
+export async function scrapeOikiri(raceId: string): Promise<OikiriEntry[]> {
+  const url = `${BASE_URL}/race/oikiri.html?race_id=${raceId}`;
+
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': USER_AGENT,
+      'Accept': 'text/html,application/xhtml+xml',
+      'Accept-Language': 'ja,en;q=0.9',
+    },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+
+  if (!response.ok) return [];
+
+  const buffer = await response.arrayBuffer();
+  const encoding = detectEncoding(url, buffer);
+  const html = iconv.decode(Buffer.from(buffer), encoding);
+  const $ = cheerio.load(html);
+
+  const entries: OikiriEntry[] = [];
+  $('tr').each((_, row) => {
+    const $row = $(row);
+    const umabanEl = $row.find('td.Umaban');
+    const criticEl = $row.find('td.Training_Critic');
+
+    if (umabanEl.length && criticEl.length) {
+      const horseNumber = parseInt(umabanEl.text().trim(), 10);
+      const comment = criticEl.text().trim();
+
+      let rank: 'A' | 'B' | 'C' | 'D' | null = null;
+      $row.find('td[class*="Rank_"]').each((_, td) => {
+        const text = $(td).text().trim();
+        if (['A', 'B', 'C', 'D'].includes(text)) {
+          rank = text as 'A' | 'B' | 'C' | 'D';
+        }
+      });
+
+      if (horseNumber && rank) {
+        entries.push({ horseNumber, rank, comment });
+      }
+    }
+  });
+
+  return entries;
+}

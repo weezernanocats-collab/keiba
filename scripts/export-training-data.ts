@@ -24,7 +24,7 @@ for (const line of envContent.split('\n')) {
 }
 
 import { createClient } from '@libsql/client';
-import { calcTimeFeatures, calcPaceFeatures, calcL3fRelative } from '../src/lib/time-features';
+import { calcTimeFeatures, calcPaceFeatures, calcL3fRelative, parseTimeToSeconds, parseLastThreeFurlongs } from '../src/lib/time-features';
 
 const db = createClient({
   url: process.env.TURSO_DATABASE_URL!,
@@ -104,6 +104,18 @@ const FEATURE_NAMES = [
   'styleXstraight',           // 脚質×直線長交互作用（差し馬は長直線で有利）
   // v14.0: データ駆動枠順バイアス
   'drawBiasZScore',           // (競馬場,距離バケット,トラック)別の枠勝率Z-Score
+  // v14.1: 種牡馬バリエーション
+  'sireDistWinRate',          // 種牡馬×距離カテゴリ別勝率
+  'sireCondWinRate',          // 種牡馬×馬場状態別勝率
+  // v14.1: PCI (ペースチェンジ指数)
+  'pciAvg',                   // 直近5走のPCI加重平均（高い=前傾ラップ傾向）
+  // v15.0: 直近フォーム（30日窓）
+  'jockeyRecentWinRate',      // 騎手の直近30日勝率
+  'trainerRecentWinRate',     // 調教師の直近30日勝率
+  // v15.0: 馬場×脚質交互作用
+  'conditionXstyle',          // 馬場状態×脚質（重馬場での逃げ馬有利度など）
+  // v15.0: 追い切り評価
+  'oikiriRank',               // 追い切り評価 (A=3, B=2, C=1, D=0, 不明=1.5)
 ];
 
 const SEX_ENCODE: Record<string, number> = { '牡': 0, '牝': 1, 'セ': 2 };
@@ -332,6 +344,25 @@ async function main() {
     entriesByRace.set(e.race_id, arr);
   }
 
+  // v15.0: 追い切り評価データ読み込み
+  const OIKIRI_FILE = join(process.cwd(), 'model', 'oikiri_data.json');
+  const OIKIRI_RANK_ENCODE: Record<string, number> = { 'A': 3, 'B': 2, 'C': 1, 'D': 0 };
+  const oikiriMap = new Map<string, number>(); // key: raceId__horseNumber -> rank score
+  try {
+    const oikiriRaw = JSON.parse(readFileSync(OIKIRI_FILE, 'utf-8'));
+    let oikiriCount = 0;
+    for (const [raceId, race] of Object.entries(oikiriRaw) as any) {
+      for (const entry of race.entries || []) {
+        const key = `${raceId}__${entry.horseNumber}`;
+        oikiriMap.set(key, OIKIRI_RANK_ENCODE[entry.rank] ?? 1.5);
+        oikiriCount++;
+      }
+    }
+    console.log(`追い切りデータ: ${oikiriCount}件 (${Object.keys(oikiriRaw).length}レース)`);
+  } catch {
+    console.log('追い切りデータなし（oikiri_data.json未生成）');
+  }
+
   // リーケージ修正: 統計を日付順に累積計算
   // 各レースの時点で「そのレース以前のデータのみ」から統計を算出
   console.log('\n統計量の累積計算（リーケージ対応）...');
@@ -344,8 +375,14 @@ async function main() {
   const jockeyDistAccum = new Map<string, { total: number; wins: number }>();
   const jockeyCourseAccum = new Map<string, { total: number; wins: number }>();
   const sireTrackAccum = new Map<string, { total: number; wins: number }>();
+  // v14.1: 種牡馬バリエーション
+  const sireDistAccum = new Map<string, { total: number; wins: number }>();  // sire__distBucket
+  const sireCondAccum = new Map<string, { total: number; wins: number }>();  // sire__condition(heavy/good)
   // v14.0: drawBiasZScore — (racecourse, distBucket, trackType, postPosition) 別勝率
   const drawBiasAccum = new Map<string, { total: number; wins: number }>();
+  // v15.0: 直近30日フォーム（スライディングウィンドウ）
+  const jockeyRecentEvents = new Map<string, Array<{ date: string; won: boolean }>>();
+  const trainerRecentEvents = new Map<string, Array<{ date: string; won: boolean }>>();
 
   // レースごとの「その時点の」統計スナップショット
   const trainerSnap = new Map<string, Map<string, { winRate: number; placeRate: number }>>();
@@ -355,10 +392,16 @@ async function main() {
   const jockeyDistSnap = new Map<string, Map<string, number>>();
   const jockeyCourseSnap = new Map<string, Map<string, number>>();
   const sireTrackSnap = new Map<string, Map<string, number>>();
+  // v14.1: 種牡馬バリエーションスナップショット
+  const sireDistSnap = new Map<string, Map<string, number>>();
+  const sireCondSnap = new Map<string, Map<string, number>>();
   // v7.0: コース×距離ペース累積スナップショット
   const coursePaceSnap = new Map<string, Map<string, number>>();
   // v14.0: drawBiasZScoreスナップショット — key=(course__distBucket__trackType__postPos) → winRate
   const drawBiasSnap = new Map<string, Map<string, number>>();
+  // v15.0: 直近30日フォームスナップショット
+  const jockeyRecentSnap = new Map<string, Map<string, number>>();
+  const trainerRecentSnap = new Map<string, Map<string, number>>();
 
   // 日付順にスナップショットを構築
   const processedDates = new Set<string>();
@@ -409,6 +452,19 @@ async function main() {
     }
     sireTrackSnap.set(pred.date, stSnap);
 
+    // v14.1: 種牡馬バリエーションスナップショット
+    const sdSnap = new Map<string, number>();
+    for (const [key, s] of sireDistAccum) {
+      if (s.total >= 10) sdSnap.set(key, s.wins / s.total);
+    }
+    sireDistSnap.set(pred.date, sdSnap);
+
+    const scSnap = new Map<string, number>();
+    for (const [key, s] of sireCondAccum) {
+      if (s.total >= 10) scSnap.set(key, s.wins / s.total);
+    }
+    sireCondSnap.set(pred.date, scSnap);
+
     // v7.0: コース×距離ペーススナップショット
     const cpSnap = new Map<string, number>();
     for (const [key, s] of coursePaceAccum) {
@@ -422,6 +478,27 @@ async function main() {
       if (s.total >= 5) dbSnap.set(key, s.wins / s.total);
     }
     drawBiasSnap.set(pred.date, dbSnap);
+
+    // v15.0: 騎手直近30日勝率スナップショット
+    const jrSnap = new Map<string, number>();
+    const cutoff30 = new Date(new Date(pred.date).getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    for (const [jid, events] of jockeyRecentEvents) {
+      const recent = events.filter(e => e.date >= cutoff30 && e.date < pred.date);
+      if (recent.length >= 5) {
+        jrSnap.set(jid, recent.filter(e => e.won).length / recent.length);
+      }
+    }
+    jockeyRecentSnap.set(pred.date, jrSnap);
+
+    // v15.0: 調教師直近30日勝率スナップショット
+    const trSnap = new Map<string, number>();
+    for (const [name, events] of trainerRecentEvents) {
+      const recent = events.filter(e => e.date >= cutoff30 && e.date < pred.date);
+      if (recent.length >= 5) {
+        trSnap.set(name, recent.filter(e => e.won).length / recent.length);
+      }
+    }
+    trainerRecentSnap.set(pred.date, trSnap);
 
     // この日付のレース結果で累積統計を更新
     for (const p of predictions.filter(pp => pp.date === pred.date)) {
@@ -491,6 +568,22 @@ async function main() {
             const s = sireTrackAccum.get(key) || { total: 0, wins: 0 };
             s.total++; if (e.result_position === 1) s.wins++;
             sireTrackAccum.set(key, s);
+
+            // v14.1: 種牡馬距離別
+            const rDist = raceDistMap.get(e.race_id) ?? 0;
+            const dCat = rDist <= 1400 ? 'sprint' : rDist <= 1800 ? 'mile' : 'long';
+            const sdKey = `${father}__${dCat}`;
+            const sd = sireDistAccum.get(sdKey) || { total: 0, wins: 0 };
+            sd.total++; if (e.result_position === 1) sd.wins++;
+            sireDistAccum.set(sdKey, sd);
+
+            // v14.1: 種牡馬馬場状態別
+            const cond = p.track_condition ?? '良';
+            const isHeavy = cond === '重' || cond === '不良';
+            const scKey = `${father}__${isHeavy ? 'heavy' : 'good'}`;
+            const sc = sireCondAccum.get(scKey) || { total: 0, wins: 0 };
+            sc.total++; if (e.result_position === 1) sc.wins++;
+            sireCondAccum.set(scKey, sc);
           }
         }
         // v14.0: drawBias — (course, distBucket, trackType, postPosition) 別勝率
@@ -503,6 +596,17 @@ async function main() {
           const db2 = drawBiasAccum.get(dbKey) || { total: 0, wins: 0 };
           db2.total++; if (e.result_position === 1) db2.wins++;
           drawBiasAccum.set(dbKey, db2);
+        }
+        // v15.0: 騎手・調教師の直近イベント記録（30日窓用）
+        if (e.jockey_id) {
+          const events = jockeyRecentEvents.get(e.jockey_id) || [];
+          events.push({ date: p.date, won: e.result_position === 1 });
+          jockeyRecentEvents.set(e.jockey_id, events);
+        }
+        if (e.trainer_name) {
+          const events = trainerRecentEvents.get(e.trainer_name) || [];
+          events.push({ date: p.date, won: e.result_position === 1 });
+          trainerRecentEvents.set(e.trainer_name, events);
         }
       }
 
@@ -564,6 +668,8 @@ async function main() {
     const jdStats = jockeyDistSnap.get(pred.date) || new Map();
     const jcStats = jockeyCourseSnap.get(pred.date) || new Map();
     const stStats = sireTrackSnap.get(pred.date) || new Map();
+    const sdStats = sireDistSnap.get(pred.date) || new Map();
+    const scStats = sireCondSnap.get(pred.date) || new Map();
     const cpStats = coursePaceSnap.get(pred.date) || new Map();
 
     // meetDay extraction from raceId
@@ -582,6 +688,11 @@ async function main() {
       const jockeyDistWR = entry.jockey_id ? (jdStats.get(`${entry.jockey_id}__${distBucket}`) ?? 0.08) : 0.08;
       const jockeyCourseWR = entry.jockey_id ? (jcStats.get(`${entry.jockey_id}__${pred.racecourse_name}`) ?? 0.08) : 0.08;
       const sireTrackWR = fatherName ? (stStats.get(`${fatherName}__${pred.track_type}`) ?? 0.07) : 0.07;
+      // v14.1: 種牡馬バリエーション
+      const sireDistCat = pred.distance <= 1400 ? 'sprint' : pred.distance <= 1800 ? 'mile' : 'long';
+      const sireDistWR = fatherName ? (sdStats.get(`${fatherName}__${sireDistCat}`) ?? 0.07) : 0.07;
+      const sireCondHeavy = (pred.track_condition === '重' || pred.track_condition === '不良');
+      const sireCondWR = fatherName ? (scStats.get(`${fatherName}__${sireCondHeavy ? 'heavy' : 'good'}`) ?? 0.07) : 0.07;
 
       // === v6.0 新特徴量 ===
       const horsePerfs = entry.horse_id
@@ -756,6 +867,25 @@ async function main() {
       }));
       const timeFeats = calcTimeFeatures(ppForTimeFeatures);
 
+      // v14.1: PCI (ペースチェンジ指数) = front_time / l3f_time
+      let pciAvg = 1.0; // デフォルト: ニュートラルペース
+      {
+        const pciValues: number[] = [];
+        for (const pp of horsePerfs.slice(0, 5)) {
+          const totalSec = parseTimeToSeconds(pp.time);
+          const l3fSec = parseLastThreeFurlongs(pp.last_three_furlongs);
+          if (totalSec > 0 && l3fSec > 0 && totalSec > l3fSec) {
+            const frontSec = totalSec - l3fSec;
+            pciValues.push(frontSec / l3fSec);
+          }
+        }
+        if (pciValues.length > 0) {
+          const weights = pciValues.map((_, i) => Math.exp(-i * 0.3));
+          const wSum = weights.reduce((a, b) => a + b, 0);
+          pciAvg = pciValues.reduce((s, v, i) => s + v * weights[i], 0) / wSum;
+        }
+      }
+
       const ppForPaceFeatures = horsePerfs.map(pp => ({
         cornerPositions: pp.corner_positions,
         entries: pp.entries || 0,
@@ -824,6 +954,15 @@ async function main() {
       const jockeyXdistance = jockeyDistWR * (pred.distance / 1000);
       const formXclassChange = ((scores.recentForm ?? 50) / 100) * ((scores.classPerformance ?? 50) / 100);
 
+      // v15.0: 騎手・調教師直近30日フォーム
+      const jrS = jockeyRecentSnap.get(pred.date);
+      const jockeyRecentWinRate = (jrS && entry.jockey_id) ? (jrS.get(entry.jockey_id) ?? 0) : 0;
+      const trS = trainerRecentSnap.get(pred.date);
+      const trainerRecentWinRate = (trS && entry.trainer_name) ? (trS.get(entry.trainer_name) ?? 0) : 0;
+
+      // v15.0: 馬場×脚質交互作用
+      const conditionXstyle = (TRACK_CONDITION_ENCODE[pred.track_condition ?? '良'] ?? 0) * ((scores.runningStyle ?? 50) / 100);
+
       const features = FEATURE_NAMES.map(name => {
         switch (name) {
           case 'fieldSize': return fieldSize;
@@ -843,6 +982,16 @@ async function main() {
           case 'trainerWinRate': return trainerStat.winRate;
           case 'trainerPlaceRate': return trainerStat.placeRate;
           case 'sireTrackWinRate': return sireTrackWR;
+          case 'sireDistWinRate': return sireDistWR;
+          case 'sireCondWinRate': return sireCondWR;
+          case 'pciAvg': return pciAvg;
+          case 'jockeyRecentWinRate': return jockeyRecentWinRate;
+          case 'trainerRecentWinRate': return trainerRecentWinRate;
+          case 'conditionXstyle': return conditionXstyle;
+          case 'oikiriRank': {
+            const oKey = `${pred.race_id}__${entry.horse_number}`;
+            return oikiriMap.get(oKey) ?? 1.5; // 不明時は中間値
+          }
           case 'jockeyDistanceWinRate': return jockeyDistWR;
           case 'jockeyCourseWinRate': return jockeyCourseWR;
           // v6.0 新特徴量

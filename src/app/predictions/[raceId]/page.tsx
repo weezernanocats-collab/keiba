@@ -68,6 +68,26 @@ interface AIOnlyRanking {
   modelAccuracy: number;
 }
 
+interface AIRankingBetHorse {
+  horseNumber: number;
+  horseName: string;
+  aiRank: number;
+  aiProb: number;
+}
+
+interface AIRankingBetItem {
+  type: string;
+  horses: AIRankingBetHorse[];
+  reasoning: string;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+interface AIRankingBetsData {
+  bets: AIRankingBetItem[];
+  pattern: string;
+  summary: string;
+}
+
 interface PredictionData {
   raceId: string;
   generatedAt: string;
@@ -78,6 +98,7 @@ interface PredictionData {
   recommendedBets: Bet[];
   aiIndependentBets?: AIIndependentBetData[];
   aiOnlyRanking?: AIOnlyRanking;
+  aiRankingBets?: AIRankingBetsData;
 }
 
 interface RaceData {
@@ -171,6 +192,8 @@ export default function PredictionDetailPage() {
   const params = useParams();
   const raceId = params.raceId as string;
   const { isRaceFavoriteInProfile, toggleRaceForProfile } = useFavorites();
+
+  const [biasUpdating, setBiasUpdating] = useState(false);
 
   // メイン予想データ: SWRで即表示 + バックグラウンド再検証
   const { data: predData, error: predError, isValidating, lastFetched, mutate } = useApi<{
@@ -294,16 +317,10 @@ export default function PredictionDetailPage() {
 
   const sections = [
     ...(verification ? [{ id: 'verification', label: '答え合わせ' }] : []),
+    ...(prediction?.aiRankingBets && prediction.aiRankingBets.bets.length > 0 ? [{ id: 'ai-ranking-bets', label: 'AI買い目' }] : []),
     { id: 'summary', label: 'サマリー' },
-    { id: 'analysis', label: 'レース分析' },
-    ...(prediction?.analysis.bettingStrategy ? [{ id: 'strategy', label: '馬券戦略' }] : []),
     { id: 'picks', label: 'ブレンド予想' },
-    ...(prediction?.analysis.marketAnalysis ? [{ id: 'market', label: '市場比較' }] : []),
-    ...(prediction?.aiIndependentBets && prediction.aiIndependentBets.length > 0 ? [{ id: 'ai-independent', label: 'AI独自' }] : []),
-    ...(prediction?.aiOnlyRanking ? [{ id: 'ai-only-ranking', label: 'AI単独' }] : []),
-    ...(prediction && prediction.recommendedBets.length > 0 ? [{ id: 'bets', label: '推奨馬券' }] : []),
-    ...(valueBets.length > 0 ? [{ id: 'value-pickup', label: '期待値+' }] : []),
-    ...(prediction && prediction.recommendedBets.length > 0 && prediction.analysis.bettingStrategy ? [{ id: 'simulator', label: 'シミュレーション' }] : []),
+    { id: 'details', label: '詳細分析' },
   ];
 
   const rankLabels = ['\u25CE 本命', '\u25CB 対抗', '\u25B2 単穴', '\u25B3 連下', '\u00D7 注意', '\u2606 穴'];
@@ -388,11 +405,19 @@ export default function PredictionDetailPage() {
             </span>
           </div>
           <button
-            onClick={() => mutate()}
-            disabled={isValidating}
+            onClick={async () => {
+              setBiasUpdating(true);
+              try {
+                const res = await fetch(`/api/predictions/${raceId}?biasUpdate=1`);
+                const data = await res.json();
+                mutate(data, false);
+              } catch { /* ignore */ }
+              setBiasUpdating(false);
+            }}
+            disabled={biasUpdating || isValidating}
             className="px-3 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-500 disabled:opacity-50 transition-colors whitespace-nowrap ml-3"
           >
-            {isValidating ? '更新中...' : '更新する'}
+            {biasUpdating ? '更新中...' : '更新する'}
           </button>
         </div>
       )}
@@ -632,117 +657,63 @@ export default function PredictionDetailPage() {
         </div>
       )}
 
+      {/* AI推奨買い目（最上部に配置） */}
+      {prediction.aiRankingBets && prediction.aiRankingBets.bets.length > 0 && (
+        <div id="ai-ranking-bets" ref={setSectionRefWrapped('ai-ranking-bets')} className="scroll-mt-32">
+          <div className="border-2 border-emerald-400 dark:border-emerald-600 rounded-xl p-6 bg-emerald-50/50 dark:bg-emerald-900/20">
+            <div className="flex items-center gap-2 mb-3">
+              <h2 className="text-lg font-bold">AI推奨買い目</h2>
+              <span className="text-xs bg-emerald-200 dark:bg-emerald-800 text-emerald-800 dark:text-emerald-200 px-2 py-0.5 rounded font-bold">
+                {prediction.aiRankingBets.pattern}
+              </span>
+            </div>
+            <p className="text-xs text-muted mb-4">
+              AI独自ランキング（オッズ不使用）の上位から自動生成。{prediction.aiRankingBets.summary}
+            </p>
+            <div className="space-y-3">
+              {prediction.aiRankingBets.bets.map((bet, idx) => {
+                const confColor = bet.confidence === 'high'
+                  ? 'bg-emerald-600'
+                  : bet.confidence === 'medium'
+                    ? 'bg-blue-600'
+                    : 'bg-gray-500';
+                const confLabel = bet.confidence === 'high' ? '本線' : bet.confidence === 'medium' ? '押さえ' : '低信頼';
+                return (
+                  <div key={idx} className="border rounded-lg p-4 bg-white dark:bg-gray-800">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`${confColor} text-white px-3 py-1 rounded text-sm font-bold`}>
+                        {bet.type}
+                      </span>
+                      <span className="text-xs bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded">
+                        {confLabel}
+                      </span>
+                    </div>
+                    {bet.horses.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {bet.horses.map(h => (
+                          <span key={h.horseNumber} className="text-lg font-bold">
+                            {h.horseNumber} {h.horseName}
+                            <span className="text-xs text-muted font-normal ml-1">
+                              (AI{h.aiRank}位 {(h.aiProb * 100).toFixed(1)}%)
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-sm text-muted">{bet.reasoning}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* サマリー */}
       <div id="summary" ref={setSectionRefWrapped('summary')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-32">
         <h2 className="text-lg font-bold mb-3">予想サマリー</h2>
         <div className="whitespace-pre-line text-sm leading-relaxed">{prediction.summary}</div>
       </div>
-
-      {/* レース分析 */}
-      <div id="analysis" ref={setSectionRefWrapped('analysis')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-32">
-        <h2 className="text-lg font-bold mb-4">レース分析</h2>
-        <div className="space-y-4">
-          <div>
-            <h3 className="text-sm font-bold text-muted mb-1">馬場バイアス</h3>
-            <p className="text-sm">{prediction.analysis.trackBias}</p>
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-muted mb-1">ペース予想</h3>
-            <p className="text-sm">{prediction.analysis.paceAnalysis}</p>
-          </div>
-          {prediction.analysis.keyFactors.length > 0 && (
-            <div>
-              <h3 className="text-sm font-bold text-muted mb-1">注目ポイント</h3>
-              <ul className="space-y-1">
-                {prediction.analysis.keyFactors.map((f, i) => (
-                  <li key={i} className="text-sm flex items-start gap-2">
-                    <span className="text-accent">&#9679;</span> {f}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {prediction.analysis.riskFactors.length > 0 && (
-            <div>
-              <h3 className="text-sm font-bold text-muted mb-1">リスク要因</h3>
-              <ul className="space-y-1">
-                {prediction.analysis.riskFactors.map((f, i) => (
-                  <li key={i} className="text-sm flex items-start gap-2">
-                    <span className="text-warning">&#9888;</span> {f}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* 馬券戦略 */}
-      {prediction.analysis.bettingStrategy && (
-        <div id="strategy" ref={setSectionRefWrapped('strategy')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-32">
-          <h2 className="text-lg font-bold mb-4">馬券戦略</h2>
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className={`px-4 py-2 rounded-lg text-sm font-bold ${
-                prediction.analysis.bettingStrategy.pattern === '一強'
-                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
-                  : prediction.analysis.bettingStrategy.pattern === '二強'
-                  ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
-                  : prediction.analysis.bettingStrategy.pattern === '三つ巴'
-                  ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
-                  : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-              }`}>
-                {prediction.analysis.bettingStrategy.pattern}
-              </span>
-              <span className={`px-3 py-1 rounded text-xs font-medium ${
-                prediction.analysis.bettingStrategy.riskLevel === 'low'
-                  ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                  : prediction.analysis.bettingStrategy.riskLevel === 'medium'
-                  ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-                  : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-              }`}>
-                リスク: {prediction.analysis.bettingStrategy.riskLevel === 'low' ? '低' : prediction.analysis.bettingStrategy.riskLevel === 'medium' ? '中' : '高'}
-              </span>
-            </div>
-
-            <p className="text-sm text-muted">{prediction.analysis.bettingStrategy.patternLabel}</p>
-
-            <div className="bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-              <p className="text-sm leading-relaxed">{prediction.analysis.bettingStrategy.recommendation}</p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <h4 className="text-xs font-bold text-muted mb-2">推奨券種</h4>
-                <div className="flex flex-wrap gap-2">
-                  {prediction.analysis.bettingStrategy.primaryBets.map((bet) => (
-                    <span key={bet} className="px-2 py-1 bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-400 text-xs rounded font-medium">
-                      {bet}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              {prediction.analysis.bettingStrategy.avoidBets.length > 0 && (
-                <div>
-                  <h4 className="text-xs font-bold text-muted mb-2">非推奨</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {prediction.analysis.bettingStrategy.avoidBets.map((bet) => (
-                      <span key={bet} className="px-2 py-1 bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-400 text-xs rounded font-medium line-through">
-                        {bet}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-gray-50 dark:bg-gray-800/30 rounded-lg p-3">
-              <h4 className="text-xs font-bold text-muted mb-1">資金配分の目安</h4>
-              <p className="text-sm">{prediction.analysis.bettingStrategy.budgetAdvice}</p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 市場オッズとAIのブレンド予想 */}
       <div id="picks" ref={setSectionRefWrapped('picks')} className="scroll-mt-32">
@@ -806,9 +777,122 @@ export default function PredictionDetailPage() {
         </div>
       </div>
 
+      {/* 詳細分析（折りたたみ） */}
+      <details id="details" ref={setSectionRefWrapped('details')} className="scroll-mt-32 group">
+        <summary className="bg-card-bg border border-card-border rounded-xl p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors list-none">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold">詳細分析</h2>
+            <span className="text-muted text-sm group-open:rotate-180 transition-transform">&#9660;</span>
+          </div>
+          <p className="text-xs text-muted mt-1">レース分析・馬券戦略・市場比較・AI独自推奨・推奨馬券・シミュレーション</p>
+        </summary>
+        <div className="space-y-6 mt-4">
+
+      {/* レース分析 */}
+      <div className="bg-card-bg border border-card-border rounded-xl p-6">
+        <h2 className="text-lg font-bold mb-4">レース分析</h2>
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-sm font-bold text-muted mb-1">馬場バイアス</h3>
+            <p className="text-sm">{prediction.analysis.trackBias}</p>
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-muted mb-1">ペース予想</h3>
+            <p className="text-sm">{prediction.analysis.paceAnalysis}</p>
+          </div>
+          {prediction.analysis.keyFactors.length > 0 && (
+            <div>
+              <h3 className="text-sm font-bold text-muted mb-1">注目ポイント</h3>
+              <ul className="space-y-1">
+                {prediction.analysis.keyFactors.map((f, i) => (
+                  <li key={i} className="text-sm flex items-start gap-2">
+                    <span className="text-accent">&#9679;</span> {f}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {prediction.analysis.riskFactors.length > 0 && (
+            <div>
+              <h3 className="text-sm font-bold text-muted mb-1">リスク要因</h3>
+              <ul className="space-y-1">
+                {prediction.analysis.riskFactors.map((f, i) => (
+                  <li key={i} className="text-sm flex items-start gap-2">
+                    <span className="text-warning">&#9888;</span> {f}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 馬券戦略 */}
+      {prediction.analysis.bettingStrategy && (
+        <div className="bg-card-bg border border-card-border rounded-xl p-6">
+          <h2 className="text-lg font-bold mb-4">馬券戦略</h2>
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className={`px-4 py-2 rounded-lg text-sm font-bold ${
+                prediction.analysis.bettingStrategy.pattern === '一強'
+                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
+                  : prediction.analysis.bettingStrategy.pattern === '二強'
+                  ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
+                  : prediction.analysis.bettingStrategy.pattern === '三つ巴'
+                  ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
+                  : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+              }`}>
+                {prediction.analysis.bettingStrategy.pattern}
+              </span>
+              <span className={`px-3 py-1 rounded text-xs font-medium ${
+                prediction.analysis.bettingStrategy.riskLevel === 'low'
+                  ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                  : prediction.analysis.bettingStrategy.riskLevel === 'medium'
+                  ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                  : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+              }`}>
+                リスク: {prediction.analysis.bettingStrategy.riskLevel === 'low' ? '低' : prediction.analysis.bettingStrategy.riskLevel === 'medium' ? '中' : '高'}
+              </span>
+            </div>
+            <p className="text-sm text-muted">{prediction.analysis.bettingStrategy.patternLabel}</p>
+            <div className="bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+              <p className="text-sm leading-relaxed">{prediction.analysis.bettingStrategy.recommendation}</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <h4 className="text-xs font-bold text-muted mb-2">推奨券種</h4>
+                <div className="flex flex-wrap gap-2">
+                  {prediction.analysis.bettingStrategy.primaryBets.map((bet) => (
+                    <span key={bet} className="px-2 py-1 bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-400 text-xs rounded font-medium">
+                      {bet}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              {prediction.analysis.bettingStrategy.avoidBets.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-bold text-muted mb-2">非推奨</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {prediction.analysis.bettingStrategy.avoidBets.map((bet) => (
+                      <span key={bet} className="px-2 py-1 bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-400 text-xs rounded font-medium line-through">
+                        {bet}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="bg-gray-50 dark:bg-gray-800/30 rounded-lg p-3">
+              <h4 className="text-xs font-bold text-muted mb-1">資金配分の目安</h4>
+              <p className="text-sm">{prediction.analysis.bettingStrategy.budgetAdvice}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* モデル vs 市場オッズ */}
       {prediction.analysis.marketAnalysis && prediction.analysis.valueHorses && prediction.analysis.overround ? (
-        <div id="market" ref={setSectionRefWrapped('market')} className="scroll-mt-32">
+        <div>
         <ModelVsMarket
           marketAnalysis={prediction.analysis.marketAnalysis}
           valueHorses={prediction.analysis.valueHorses}
@@ -819,7 +903,7 @@ export default function PredictionDetailPage() {
         />
         </div>
       ) : race.status !== '結果確定' && (
-        <div id="market" ref={setSectionRefWrapped('market')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-32">
+        <div className="bg-card-bg border border-card-border rounded-xl p-6">
           <h2 className="text-lg font-bold mb-2">モデル vs 市場オッズ</h2>
           <p className="text-sm text-muted">
             市場オッズがまだ取得されていません。オッズ取得後にモデル勝率との比較が表示されます。
@@ -832,7 +916,7 @@ export default function PredictionDetailPage() {
 
       {/* AI独自推奨 */}
       {prediction.aiIndependentBets && prediction.aiIndependentBets.length > 0 && (
-        <div id="ai-independent" ref={setSectionRefWrapped('ai-independent')} className="scroll-mt-32">
+        <div>
           <div className="border-2 border-cyan-400 dark:border-cyan-600 rounded-xl p-6 bg-cyan-50/50 dark:bg-cyan-900/20">
             <div className="flex items-center gap-2 mb-3">
               <h2 className="text-lg font-bold">AI独自推奨</h2>
@@ -1294,6 +1378,9 @@ export default function PredictionDetailPage() {
           winProbabilities={prediction.analysis.winProbabilities}
         />
       )}
+
+        </div>{/* /details inner space-y-6 */}
+      </details>
 
       {/* 出馬表リンク */}
       <div className="text-center pt-4">

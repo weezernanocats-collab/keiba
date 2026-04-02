@@ -402,22 +402,24 @@ export async function GET(request: NextRequest) {
     const aiPredictions = await dbAll<{
       race_id: string;
       analysis_json: string;
+      race_date: string;
     }>(`
-      SELECT p.race_id, p.analysis_json
+      SELECT p.race_id, p.analysis_json, r.date as race_date
       FROM predictions p
       JOIN races r ON p.race_id = r.id
       WHERE r.status = '結果確定'
         AND p.analysis_json LIKE '%aiIndependentBets%'
         ${dateFilter}
+      ORDER BY r.date ASC, r.race_number ASC
     `, []);
 
     const aiBetStats = { totalRaces: 0, totalBets: 0, place: { bets: 0, hits: 0, investment: 0, returnAmount: 0 }, win: { bets: 0, hits: 0, investment: 0, returnAmount: 0 } };
+    const aiEntryMap = new Map<string, Map<number, { position: number; odds: number }>>();
+    const aiPlaceOddsMap = new Map<string, Map<number, number>>();
 
     if (aiPredictions.length > 0) {
       // AI推奨対象レースの着順・オッズを一括取得
       const aiRaceIds = aiPredictions.map(p => p.race_id);
-      const aiEntryMap = new Map<string, Map<number, { position: number; odds: number }>>();
-      const aiPlaceOddsMap = new Map<string, Map<number, number>>();
 
       const AI_BATCH = 200;
       for (let i = 0; i < aiRaceIds.length; i += AI_BATCH) {
@@ -471,6 +473,71 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // 累積推移データ: 日付ごとの的中率・ROI・収支の推移
+    interface AiCumPoint { date: string; bets: number; hits: number; hitRate: number; investment: number; returnAmount: number; roi: number; profit: number }
+    const aiCumulativePlace: AiCumPoint[] = [];
+    const aiCumulativeWin: AiCumPoint[] = [];
+    {
+      // 日付ごとに集計
+      const dayMapPlace = new Map<string, { bets: number; hits: number; investment: number; returnAmount: number }>();
+      const dayMapWin = new Map<string, { bets: number; hits: number; investment: number; returnAmount: number }>();
+
+      for (const pred of aiPredictions) {
+        let analysis: Record<string, unknown>;
+        try { analysis = JSON.parse(pred.analysis_json); } catch { continue; }
+        const bets = (analysis.aiIndependentBets || []) as Array<{ horseNumber: number; betTypes: string[] }>;
+        const d = pred.race_date;
+
+        for (const bet of bets) {
+          const entry = aiEntryMap.get(pred.race_id)?.get(bet.horseNumber);
+          if (!entry) continue;
+
+          if (bet.betTypes.includes('複勝')) {
+            const s = dayMapPlace.get(d) || { bets: 0, hits: 0, investment: 0, returnAmount: 0 };
+            s.bets++; s.investment += 100;
+            if (entry.position <= 3) {
+              s.hits++;
+              s.returnAmount += 100 * (aiPlaceOddsMap.get(pred.race_id)?.get(bet.horseNumber) ?? 0);
+            }
+            dayMapPlace.set(d, s);
+          }
+          if (bet.betTypes.includes('単勝')) {
+            const s = dayMapWin.get(d) || { bets: 0, hits: 0, investment: 0, returnAmount: 0 };
+            s.bets++; s.investment += 100;
+            if (entry.position === 1) {
+              s.hits++;
+              s.returnAmount += 100 * entry.odds;
+            }
+            dayMapWin.set(d, s);
+          }
+        }
+      }
+
+      // 累積計算
+      let cumBets = 0, cumHits = 0, cumInv = 0, cumRet = 0;
+      for (const [date, s] of [...dayMapPlace.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+        cumBets += s.bets; cumHits += s.hits; cumInv += s.investment; cumRet += s.returnAmount;
+        aiCumulativePlace.push({
+          date, bets: cumBets, hits: cumHits,
+          hitRate: Math.round(cumHits / cumBets * 1000) / 10,
+          investment: cumInv, returnAmount: Math.round(cumRet),
+          roi: Math.round(cumRet / cumInv * 1000) / 10,
+          profit: Math.round(cumRet - cumInv),
+        });
+      }
+      cumBets = 0; cumHits = 0; cumInv = 0; cumRet = 0;
+      for (const [date, s] of [...dayMapWin.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+        cumBets += s.bets; cumHits += s.hits; cumInv += s.investment; cumRet += s.returnAmount;
+        aiCumulativeWin.push({
+          date, bets: cumBets, hits: cumHits,
+          hitRate: Math.round(cumHits / cumBets * 1000) / 10,
+          investment: cumInv, returnAmount: Math.round(cumRet),
+          roi: Math.round(cumRet / cumInv * 1000) / 10,
+          profit: Math.round(cumRet - cumInv),
+        });
+      }
+    }
+
     const formatAiBetType = (s: typeof aiBetStats.place) => ({
       ...s,
       hitRate: s.bets > 0 ? Math.round(s.hits / s.bets * 1000) / 10 : 0,
@@ -483,6 +550,151 @@ export async function GET(request: NextRequest) {
       totalBets: aiBetStats.totalBets,
       place: formatAiBetType(aiBetStats.place),
       win: formatAiBetType(aiBetStats.win),
+      cumulativePlace: aiCumulativePlace,
+      cumulativeWin: aiCumulativeWin.length > 0 ? aiCumulativeWin : undefined,
+    };
+
+    // ==================== AI推奨買い目（aiRankingBets: 馬連/ワイド）統計 ====================
+    const aiRankingPredictions = await dbAll<{
+      race_id: string;
+      analysis_json: string;
+      race_date: string;
+    }>(`
+      SELECT p.race_id, p.analysis_json, r.date as race_date
+      FROM predictions p
+      JOIN races r ON p.race_id = r.id
+      WHERE r.status = '結果確定'
+        AND p.analysis_json LIKE '%aiRankingBets%'
+        ${dateFilter}
+      ORDER BY r.date ASC, r.race_number ASC
+    `, []);
+
+    interface AiRankingBetStat { bets: number; hits: number; investment: number; returnAmount: number }
+    const aiRankingStats: Record<string, AiRankingBetStat> = {};
+    let aiRankingTotalRaces = 0;
+    let aiRankingTotalBets = 0;
+
+    // 累積推移用の日別データ
+    const aiRankingDayMap = new Map<string, { bets: number; hits: number; investment: number; returnAmount: number }>();
+
+    if (aiRankingPredictions.length > 0) {
+      // 対象レースのtop3着順を取得
+      const rkRaceIds = aiRankingPredictions.map(p => p.race_id);
+      const rkTop3Map = new Map<string, number[]>(); // race_id -> [1着馬番, 2着馬番, 3着馬番]
+
+      // 馬連/ワイドのオッズも取得
+      const rkOddsMap = new Map<string, Map<string, number>>(); // race_id -> "bet_type:h1-h2" -> odds
+
+      const RK_BATCH = 200;
+      for (let i = 0; i < rkRaceIds.length; i += RK_BATCH) {
+        const batch = rkRaceIds.slice(i, i + RK_BATCH);
+        const ph = batch.map(() => '?').join(',');
+
+        const [entries, betOdds] = await Promise.all([
+          dbAll<{ race_id: string; horse_number: number; result_position: number }>(
+            `SELECT race_id, horse_number, result_position FROM race_entries
+             WHERE race_id IN (${ph}) AND result_position IS NOT NULL AND result_position <= 3
+             ORDER BY result_position`, batch),
+          dbAll<{ race_id: string; bet_type: string; horse_number1: number; horse_number2: number; odds: number; min_odds: number | null }>(
+            `SELECT race_id, bet_type, horse_number1, horse_number2, odds, min_odds FROM odds
+             WHERE race_id IN (${ph}) AND bet_type IN ('馬連', 'ワイド')`, batch),
+        ]);
+
+        for (const e of entries) {
+          const arr = rkTop3Map.get(e.race_id) || [];
+          if (arr.length < 3) arr.push(e.horse_number);
+          rkTop3Map.set(e.race_id, arr);
+        }
+        for (const o of betOdds) {
+          if (!rkOddsMap.has(o.race_id)) rkOddsMap.set(o.race_id, new Map());
+          const h1 = Math.min(o.horse_number1, o.horse_number2 || 0);
+          const h2 = Math.max(o.horse_number1, o.horse_number2 || 0);
+          const key = `${o.bet_type}:${h1}-${h2}`;
+          // ワイドはmin_oddsを使う（確実に払い戻される額）
+          rkOddsMap.get(o.race_id)!.set(key, o.bet_type === 'ワイド' && o.min_odds ? o.min_odds : o.odds);
+        }
+      }
+
+      for (const pred of aiRankingPredictions) {
+        let analysis: Record<string, unknown>;
+        try { analysis = JSON.parse(pred.analysis_json); } catch { continue; }
+        const rkBetsData = analysis.aiRankingBets as { bets: Array<{ type: string; horses: Array<{ horseNumber: number }>; confidence: string }> } | undefined;
+        if (!rkBetsData?.bets) continue;
+
+        const top3 = rkTop3Map.get(pred.race_id);
+        if (!top3 || top3.length < 2) continue;
+
+        let raceHasBet = false;
+        for (const bet of rkBetsData.bets) {
+          if (bet.type === '見送り') continue;
+          const selections = bet.horses.map(h => h.horseNumber);
+          if (selections.length < 2) continue;
+
+          raceHasBet = true;
+          const betType = bet.type; // 馬連 or ワイド
+
+          if (!aiRankingStats[betType]) aiRankingStats[betType] = { bets: 0, hits: 0, investment: 0, returnAmount: 0 };
+          const stat = aiRankingStats[betType];
+          stat.bets++;
+          stat.investment += 100;
+          aiRankingTotalBets++;
+
+          const hit = isBetHit(betType, selections, top3);
+          if (hit) {
+            stat.hits++;
+            // オッズ取得
+            const h1 = Math.min(...selections);
+            const h2 = Math.max(...selections);
+            const oddsKey = `${betType}:${h1}-${h2}`;
+            const odds = rkOddsMap.get(pred.race_id)?.get(oddsKey) ?? 0;
+            stat.returnAmount += 100 * odds;
+          }
+
+          // 日別集計
+          const dayS = aiRankingDayMap.get(pred.race_date) || { bets: 0, hits: 0, investment: 0, returnAmount: 0 };
+          dayS.bets++; dayS.investment += 100;
+          if (hit) {
+            dayS.hits++;
+            const h1 = Math.min(...selections);
+            const h2 = Math.max(...selections);
+            const oddsKey = `${betType}:${h1}-${h2}`;
+            const odds = rkOddsMap.get(pred.race_id)?.get(oddsKey) ?? 0;
+            dayS.returnAmount += 100 * odds;
+          }
+          aiRankingDayMap.set(pred.race_date, dayS);
+        }
+        if (raceHasBet) aiRankingTotalRaces++;
+      }
+    }
+
+    // 累積推移
+    const aiRankingCumulative: AiCumPoint[] = [];
+    {
+      let cumBetsR = 0, cumHitsR = 0, cumInvR = 0, cumRetR = 0;
+      for (const [date, s] of [...aiRankingDayMap.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+        cumBetsR += s.bets; cumHitsR += s.hits; cumInvR += s.investment; cumRetR += s.returnAmount;
+        aiRankingCumulative.push({
+          date, bets: cumBetsR, hits: cumHitsR,
+          hitRate: Math.round(cumHitsR / cumBetsR * 1000) / 10,
+          investment: cumInvR, returnAmount: Math.round(cumRetR),
+          roi: cumInvR > 0 ? Math.round(cumRetR / cumInvR * 1000) / 10 : 0,
+          profit: Math.round(cumRetR - cumInvR),
+        });
+      }
+    }
+
+    const aiRankingBetStats = {
+      totalRaces: aiRankingTotalRaces,
+      totalBets: aiRankingTotalBets,
+      byType: Object.fromEntries(
+        Object.entries(aiRankingStats).map(([type, s]) => [type, {
+          ...s,
+          hitRate: s.bets > 0 ? Math.round(s.hits / s.bets * 1000) / 10 : 0,
+          roi: s.investment > 0 ? Math.round(s.returnAmount / s.investment * 1000) / 10 : 0,
+          returnAmount: Math.round(s.returnAmount),
+        }])
+      ),
+      cumulative: aiRankingCumulative.length > 0 ? aiRankingCumulative : undefined,
     };
 
     // 全体サマリ
@@ -506,6 +718,7 @@ export async function GET(request: NextRequest) {
       betTypeStats,
       highConfEvStats,
       aiIndependentBetStats,
+      aiRankingBetStats,
       period: days > 0 ? `${days}日` : '全期間',
     };
 
