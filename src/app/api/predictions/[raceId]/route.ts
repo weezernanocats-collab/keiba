@@ -120,6 +120,38 @@ export async function GET(
       }
     }
 
+    // オッズ未反映チェック: オッズなしで生成された予想を、オッズ取得後に再生成
+    let regeneratedWithOdds = false;
+    if (prediction && race.status === '出走確定' && race.entries.length >= 2 && hasTimeForRegen()) {
+      const hasOddsInPrediction = prediction.analysis?.overround != null && prediction.analysis.overround > 0;
+      if (!hasOddsInPrediction) {
+        // DBにオッズが存在するか確認
+        const oddsCount = await dbGet<{ cnt: number }>(
+          `SELECT COUNT(*) as cnt FROM race_entries WHERE race_id = ? AND odds > 0`,
+          [raceId],
+        );
+        if (oddsCount && oddsCount.cnt >= 3) {
+          // オッズがDBにあるのに予想に反映されていない → 再生成
+          try {
+            await dbRun('DELETE FROM predictions WHERE race_id = ?', [raceId]);
+            const newPrediction = await buildWithTimeout(
+              raceId, race.name, race.date,
+              race.trackType as '芝' | 'ダート' | '障害', race.distance,
+              race.trackCondition as '良' | '稍重' | '重' | '不良' | undefined,
+              race.racecourseName, race.grade, race.entries,
+              race.weather as string | undefined,
+              { includeTrainerStats: true },
+            );
+            await savePrediction(newPrediction);
+            prediction = newPrediction;
+            regeneratedWithOdds = true;
+          } catch (oddsRegenError) {
+            console.error('オッズ反映再生成失敗:', oddsRegenError);
+          }
+        }
+      }
+    }
+
     // 馬場バイアス鮮度チェック: 当日レースで新しいバイアスデータがあれば通知
     // 初回表示はブロックせず、biasUpdateAvailableフラグで通知→ユーザーが「更新する」を押したら再リクエスト
     let regeneratedWithBias = false;
@@ -355,6 +387,7 @@ export async function GET(
       race,
       verification,
       ...(regeneratedWithBias ? { regeneratedWithBias: true } : {}),
+      ...(regeneratedWithOdds ? { regeneratedWithOdds: true } : {}),
       ...(biasUpdateAvailable ? { biasUpdateAvailable: true } : {}),
     }, { headers: getCacheHeaders(cachePreset) });
   } catch (error) {

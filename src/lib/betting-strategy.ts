@@ -57,8 +57,13 @@ export function classifyRacePattern(scoredHorses: ScoredHorse[]): {
   gap23: number;
   gap34: number;
 } {
+  if (scoredHorses.length < 2) {
+    return { pattern: '混戦', gap12: 0, gap23: 0, gap34: 0 };
+  }
   const gap12 = scoredHorses[0].totalScore - scoredHorses[1].totalScore;
-  const gap23 = scoredHorses[1].totalScore - scoredHorses[2].totalScore;
+  const gap23 = scoredHorses.length > 2
+    ? scoredHorses[1].totalScore - scoredHorses[2].totalScore
+    : 999;
   const gap34 = scoredHorses.length > 3
     ? scoredHorses[2].totalScore - scoredHorses[3].totalScore
     : 999;

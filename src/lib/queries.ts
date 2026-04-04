@@ -134,7 +134,8 @@ export async function getUpcomingRaces(limit: number = 50) {
   const rows = await dbAll<Record<string, unknown>>(`
     SELECT r.*, COUNT(e.id) as entry_count, p.confidence as prediction_confidence,
       p.generated_at as prediction_generated_at,
-      (SELECT MIN(re2.odds) FROM race_entries re2 WHERE re2.race_id = r.id AND re2.odds > 0) as top_odds
+      (SELECT MIN(re2.odds) FROM race_entries re2 WHERE re2.race_id = r.id AND re2.odds > 0) as top_odds,
+      json_extract(p.analysis_json, '$.aiRankingBets.pattern') as ai_pattern
     FROM races r
     LEFT JOIN race_entries e ON r.id = e.race_id
     LEFT JOIN predictions p ON r.id = p.race_id
@@ -150,6 +151,7 @@ export async function getUpcomingRaces(limit: number = 50) {
     confidence: r.prediction_confidence != null ? Number(r.prediction_confidence) : null,
     predictionGeneratedAt: r.prediction_generated_at ? ensureUtcSuffix(r.prediction_generated_at as string) : null,
     topOdds: r.top_odds != null ? Number(r.top_odds) : null,
+    aiPattern: (r.ai_pattern as string) || null,
   }));
 }
 

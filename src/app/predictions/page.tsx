@@ -26,6 +26,7 @@ interface RaceRow {
   entryCount: number;
   confidence: number | null;
   predictionGeneratedAt: string | null;
+  aiPattern: string | null;
 }
 
 interface PredBet {
@@ -145,6 +146,30 @@ function PredictionsPageInner() {
 
 const rankLabels = ['\u25CE', '\u25CB', '\u25B2', '\u25B3', '\u00D7', '\u2606'];
 
+function BetVerdictBadge({ pattern, confidence }: { pattern: string | null; confidence: number | null }) {
+  if (!pattern || confidence == null) return null;
+  let label: string;
+  let className: string;
+  if ((pattern === '一強' || pattern === '二強') && confidence >= 60) {
+    label = '買い';
+    className = 'bg-green-500 text-white';
+  } else if ((pattern === '一強' || pattern === '二強' || pattern === '三つ巴') && confidence >= 45) {
+    label = '検討';
+    className = 'bg-blue-500 text-white';
+  } else if (pattern === '混戦' || confidence < 30) {
+    label = '見送り';
+    className = 'bg-gray-400 text-white';
+  } else {
+    label = '様子見';
+    className = 'bg-amber-500 text-white';
+  }
+  return (
+    <span className={`${className} px-2 py-0.5 rounded text-xs font-bold shrink-0`}>
+      {label}
+    </span>
+  );
+}
+
 function UpcomingRaces() {
   const { data: racesData, isValidating, lastFetched } = useApi<{ races: RaceRow[] }>('/api/races?type=upcoming');
   const races = racesData?.races || [];
@@ -190,6 +215,10 @@ function UpcomingRaces() {
   const filteredRaces = useMemo(() => {
     if (confidenceFilter === 'all') return races;
     return races.filter(r => {
+      if (confidenceFilter === 'buy') {
+        const p = r.aiPattern;
+        return (p === '一強' || p === '二強') && r.confidence != null && r.confidence >= 60;
+      }
       if (confidenceFilter === 'high') return r.confidence != null && r.confidence >= 70;
       if (confidenceFilter === 'mid') return r.confidence != null && r.confidence >= 50 && r.confidence < 70;
       if (confidenceFilter === 'low') return r.confidence != null && r.confidence < 50;
@@ -236,10 +265,11 @@ function UpcomingRaces() {
             value={confidenceFilter}
             onChange={e => setConfidenceFilter(e.target.value)}
           >
-            <option value="all">全信頼度</option>
-            <option value="high">高 (70%+)</option>
-            <option value="mid">中 (50-69%)</option>
-            <option value="low">低 (&lt;50%)</option>
+            <option value="all">全レース</option>
+            <option value="buy">買い推奨のみ</option>
+            <option value="high">信頼度 高 (70%+)</option>
+            <option value="mid">信頼度 中 (50-69%)</option>
+            <option value="low">信頼度 低 (&lt;50%)</option>
             <option value="none">未算出</option>
           </select>
           <span className="text-sm text-muted">{filteredRaces.length}件</span>
@@ -282,6 +312,7 @@ function UpcomingRaces() {
                             生成: {new Date(race.predictionGeneratedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                           </span>
                         )}
+                        <BetVerdictBadge pattern={race.aiPattern} confidence={race.confidence} />
                         <ConfidenceBadge value={race.confidence} />
                         <FavoriteProfilePopover
                           checkFavorite={(p) => isRaceFavoriteInProfile(race.id, p)}

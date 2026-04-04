@@ -682,14 +682,15 @@ async function main() {
     // Filter to races that need card data
     const racesToScrape = raceList.filter(r => {
       const existing = existingRaceMap.get(r.id);
-      // Skip if already has entries and is fully scraped
-      if (existing && existing.entries > 0) return false;
+      // Skip if already has enough entries (>= 5 means properly scraped)
+      // Re-scrape if only 1-4 entries (likely incomplete/placeholder data)
+      if (existing && existing.entries >= 5) return false;
       return true;
     });
 
     const racesToSkip = raceList.filter(r => {
       const existing = existingRaceMap.get(r.id);
-      return existing && existing.entries > 0;
+      return existing && existing.entries >= 5;
     });
 
     if (racesToSkip.length > 0) {

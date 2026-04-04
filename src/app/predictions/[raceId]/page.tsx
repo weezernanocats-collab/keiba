@@ -201,6 +201,7 @@ export default function PredictionDetailPage() {
     race: RaceData | null;
     verification: Verification | null;
     regeneratedWithBias?: boolean;
+    regeneratedWithOdds?: boolean;
     biasUpdateAvailable?: boolean;
     error?: string;
   }>(`/api/predictions/${raceId}`);
@@ -315,6 +316,57 @@ export default function PredictionDetailPage() {
     })
     .filter(v => v.evScore > 100);
 
+  // 買い判定ロジック
+  const pattern = prediction.aiRankingBets?.pattern || '';
+  const hasRealBets = prediction.aiRankingBets?.bets.some(b => b.type !== '見送り') ?? false;
+  const hasValueBets = valueBets.length > 0;
+  const bestValueBet = valueBets.length > 0
+    ? valueBets.reduce((best, v) => v.evScore > best.evScore ? v : best)
+    : null;
+  const confidence = prediction.confidence;
+
+  type BetVerdict = { level: 'strong' | 'buy' | 'watch' | 'skip'; label: string; color: string; bgColor: string; borderColor: string; description: string };
+  const betVerdict: BetVerdict = (() => {
+    if ((pattern === '一強' || pattern === '二強') && hasRealBets && confidence >= 60) {
+      return {
+        level: 'strong', label: '強く推奨',
+        color: 'text-green-800 dark:text-green-200',
+        bgColor: 'bg-green-50 dark:bg-green-900/30',
+        borderColor: 'border-green-400 dark:border-green-600',
+        description: hasValueBets
+          ? `${pattern}パターン・信頼度${confidence}%。期待値プラスの馬券あり。`
+          : `${pattern}パターン・信頼度${confidence}%。AI上位が明確。`,
+      };
+    }
+    if (hasRealBets && confidence >= 45 && (pattern === '一強' || pattern === '二強' || pattern === '三つ巴')) {
+      return {
+        level: 'buy', label: '推奨',
+        color: 'text-blue-800 dark:text-blue-200',
+        bgColor: 'bg-blue-50 dark:bg-blue-900/30',
+        borderColor: 'border-blue-400 dark:border-blue-600',
+        description: `${pattern || '—'}パターン・信頼度${confidence}%。検討の価値あり。`,
+      };
+    }
+    if (pattern === '混戦' || !hasRealBets || confidence < 30) {
+      return {
+        level: 'skip', label: '見送り',
+        color: 'text-gray-600 dark:text-gray-400',
+        bgColor: 'bg-gray-50 dark:bg-gray-800/50',
+        borderColor: 'border-gray-300 dark:border-gray-600',
+        description: pattern === '混戦'
+          ? '混戦レース。差が小さく的中困難。資金温存推奨。'
+          : `信頼度${confidence}%。無理に買わず次のレースを待つ。`,
+      };
+    }
+    return {
+      level: 'watch', label: '様子見',
+      color: 'text-amber-800 dark:text-amber-200',
+      bgColor: 'bg-amber-50 dark:bg-amber-900/30',
+      borderColor: 'border-amber-300 dark:border-amber-600',
+      description: `${pattern || '—'}パターン・信頼度${confidence}%。オッズ次第で検討。`,
+    };
+  })();
+
   const sections = [
     ...(verification ? [{ id: 'verification', label: '答え合わせ' }] : []),
     ...(prediction?.aiRankingBets && prediction.aiRankingBets.bets.length > 0 ? [{ id: 'ai-ranking-bets', label: 'AI買い目' }] : []),
@@ -384,6 +436,45 @@ export default function PredictionDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* 買い判定バナー */}
+      <div className={`${betVerdict.bgColor} border-2 ${betVerdict.borderColor} rounded-xl p-4`}>
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <span className={`text-2xl font-black px-3 py-1 rounded-lg ${
+              betVerdict.level === 'strong' ? 'bg-green-500 text-white' :
+              betVerdict.level === 'buy' ? 'bg-blue-500 text-white' :
+              betVerdict.level === 'watch' ? 'bg-amber-500 text-white' :
+              'bg-gray-400 text-white'
+            }`}>
+              {betVerdict.label}
+            </span>
+            <div>
+              <p className={`text-sm font-medium ${betVerdict.color}`}>{betVerdict.description}</p>
+            </div>
+          </div>
+          {bestValueBet && (betVerdict.level === 'strong' || betVerdict.level === 'buy') && (
+            <div className="bg-white/80 dark:bg-black/30 rounded-lg px-4 py-2 text-sm">
+              <span className="text-xs text-muted block">ベストベット</span>
+              <span className="font-bold">{bestValueBet.bet.type} {bestValueBet.bet.selections.join('-')}</span>
+              <span className="ml-2 text-xs">
+                {bestValueBet.odds > 0 && <span className="text-muted">{bestValueBet.odds.toFixed(1)}倍</span>}
+                <span className="ml-1 font-bold text-green-600 dark:text-green-400">EV {bestValueBet.evScore}</span>
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* オッズ反映再生成通知 */}
+      {predData?.regeneratedWithOdds && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-700 rounded-lg px-4 py-3 text-sm text-blue-800 dark:text-blue-200">
+          <span className="font-medium">オッズ反映済み</span>
+          <span className="text-blue-600 dark:text-blue-400 ml-2">
+            最新オッズを反映して予想を再生成しました
+          </span>
+        </div>
+      )}
 
       {/* 馬場バイアス再生成通知 */}
       {predData?.regeneratedWithBias && (
