@@ -43,6 +43,9 @@ interface HistoryItem {
   betSummary: BetSummary;
   actualTop3: number[];
   actualTop3Detailed?: ActualTop3Entry[];
+  aiPattern: string | null;
+  aiConfidence: number | null;
+  aiRankingBetResults: { type: string; selections: number[]; hit: boolean }[];
 }
 
 interface Pagination {
@@ -212,24 +215,33 @@ function PredictionHistoryContent({ embedded = false }: { embedded?: boolean }) 
                       </span>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
-                      {item.betSummary.totalInvestment > 0 && (() => {
-                        const roi = Math.round(item.betSummary.totalPayout / item.betSummary.totalInvestment * 100);
-                        return (
-                          <span className={`px-2 py-0.5 text-xs rounded font-bold ${
-                            roi >= 100
-                              ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'
-                              : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300'
-                          }`}>
-                            ROI {roi}%
-                          </span>
-                        );
+                      {/* 買い判定バッジ */}
+                      {(() => {
+                        const p = item.aiPattern;
+                        const c = item.aiConfidence ?? 0;
+                        const hasBets = item.aiRankingBetResults.length > 0;
+                        let label: string; let cls: string;
+                        if ((p === '一強' || p === '二強') && hasBets && c >= 60) {
+                          label = '強く推奨'; cls = 'bg-green-500 text-white';
+                        } else if (hasBets && c >= 45 && (p === '一強' || p === '二強' || p === '三つ巴')) {
+                          label = '推奨'; cls = 'bg-blue-500 text-white';
+                        } else if (p === '混戦' || !hasBets || c < 30) {
+                          label = '見送り'; cls = 'bg-gray-400 text-white';
+                        } else {
+                          label = '様子見'; cls = 'bg-yellow-500 text-white';
+                        }
+                        return <span className={`${cls} px-2 py-0.5 rounded text-xs font-bold`}>{label}</span>;
                       })()}
-                      {item.winHit && (
-                        <span className="text-xs text-green-600 dark:text-green-400 font-medium">単勝</span>
-                      )}
-                      {!item.winHit && item.placeHit && (
-                        <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">複勝</span>
-                      )}
+                      {/* AI推奨買い目 的中サマリ */}
+                      {item.aiRankingBetResults.length > 0 && (() => {
+                        const hits = item.aiRankingBetResults.filter(b => b.hit);
+                        if (hits.length > 0) {
+                          return hits.map((b, i) => (
+                            <span key={i} className="text-xs text-green-600 dark:text-green-400 font-bold">{b.type}的中</span>
+                          ));
+                        }
+                        return <span className="text-xs text-gray-400">不的中</span>;
+                      })()}
                       <span className="text-muted text-sm">{expandedId === item.raceId ? '\u25B2' : '\u25BC'}</span>
                     </div>
                   </div>
@@ -240,6 +252,39 @@ function PredictionHistoryContent({ embedded = false }: { embedded?: boolean }) 
                   <div className="border-t border-card-border p-4 space-y-4">
                     {/* 予想 vs 結果: 左右対比レイアウト */}
                     <ComparisonLayout pickResults={item.pickResults} actualTop3Detailed={item.actualTop3Detailed} />
+
+                    {/* AI推奨買い目（馬連/ワイド）の結果 */}
+                    {item.aiRankingBetResults.length > 0 && (
+                      <div>
+                        <h3 className="text-sm font-bold text-muted mb-2">AI推奨買い目</h3>
+                        <div className="flex flex-wrap gap-2">
+                          {item.aiRankingBetResults.map((bet, idx) => (
+                            <div
+                              key={idx}
+                              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${
+                                bet.hit
+                                  ? 'bg-green-50 dark:bg-green-900/20 border-green-300 dark:border-green-700'
+                                  : 'bg-red-50 dark:bg-red-900/20 border-red-300 dark:border-red-700'
+                              }`}
+                            >
+                              <span className={`text-xs font-bold ${
+                                bet.hit ? 'text-green-700 dark:text-green-300' : 'text-red-600 dark:text-red-400'
+                              }`}>
+                                {bet.type}
+                              </span>
+                              <span className="font-mono text-sm">{bet.selections.join('-')}</span>
+                              <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+                                bet.hit
+                                  ? 'bg-green-500 text-white'
+                                  : 'bg-red-400 text-white'
+                              }`}>
+                                {bet.hit ? '的中' : '不的中'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* 推奨馬券の収支 */}
                     {item.betResults.length > 0 && (
