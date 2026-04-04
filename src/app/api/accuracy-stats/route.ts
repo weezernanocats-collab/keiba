@@ -558,9 +558,10 @@ export async function GET(request: NextRequest) {
     const aiRankingPredictions = await dbAll<{
       race_id: string;
       analysis_json: string;
+      bets_json: string | null;
       race_date: string;
     }>(`
-      SELECT p.race_id, p.analysis_json, r.date as race_date
+      SELECT p.race_id, p.analysis_json, p.bets_json, r.date as race_date
       FROM predictions p
       JOIN races r ON p.race_id = r.id
       WHERE r.status = '結果確定'
@@ -582,8 +583,9 @@ export async function GET(request: NextRequest) {
       const rkRaceIds = aiRankingPredictions.map(p => p.race_id);
       const rkTop3Map = new Map<string, number[]>(); // race_id -> [1着馬番, 2着馬番, 3着馬番]
 
-      // 馬連/ワイドのオッズも取得
+      // 馬連/ワイドのオッズ + 単勝オッズ（推定用）を取得
       const rkOddsMap = new Map<string, Map<string, number>>(); // race_id -> "bet_type:h1-h2" -> odds
+      const rkWinOddsMap = new Map<string, Map<number, number>>(); // race_id -> horse_number -> win_odds
 
       const RK_BATCH = 200;
       for (let i = 0; i < rkRaceIds.length; i += RK_BATCH) {
@@ -591,8 +593,8 @@ export async function GET(request: NextRequest) {
         const ph = batch.map(() => '?').join(',');
 
         const [entries, betOdds] = await Promise.all([
-          dbAll<{ race_id: string; horse_number: number; result_position: number }>(
-            `SELECT race_id, horse_number, result_position FROM race_entries
+          dbAll<{ race_id: string; horse_number: number; result_position: number; odds: number | null }>(
+            `SELECT race_id, horse_number, result_position, odds FROM race_entries
              WHERE race_id IN (${ph}) AND result_position IS NOT NULL AND result_position <= 3
              ORDER BY result_position`, batch),
           dbAll<{ race_id: string; bet_type: string; horse_number1: number; horse_number2: number; odds: number; min_odds: number | null }>(
@@ -604,6 +606,11 @@ export async function GET(request: NextRequest) {
           const arr = rkTop3Map.get(e.race_id) || [];
           if (arr.length < 3) arr.push(e.horse_number);
           rkTop3Map.set(e.race_id, arr);
+          // 単勝オッズも保存（馬連/ワイドの推定用）
+          if (e.odds && e.odds > 0) {
+            if (!rkWinOddsMap.has(e.race_id)) rkWinOddsMap.set(e.race_id, new Map());
+            rkWinOddsMap.get(e.race_id)!.set(e.horse_number, e.odds);
+          }
         }
         for (const o of betOdds) {
           if (!rkOddsMap.has(o.race_id)) rkOddsMap.set(o.race_id, new Map());
@@ -615,6 +622,18 @@ export async function GET(request: NextRequest) {
         }
       }
 
+      // 全レースの単勝オッズも補完取得（top3以外のエントリも必要）
+      for (let i = 0; i < rkRaceIds.length; i += RK_BATCH) {
+        const batch = rkRaceIds.slice(i, i + RK_BATCH);
+        const ph = batch.map(() => '?').join(',');
+        const allEntries = await dbAll<{ race_id: string; horse_number: number; odds: number | null }>(
+          `SELECT race_id, horse_number, odds FROM race_entries WHERE race_id IN (${ph}) AND odds IS NOT NULL AND odds > 0`, batch);
+        for (const e of allEntries) {
+          if (!rkWinOddsMap.has(e.race_id)) rkWinOddsMap.set(e.race_id, new Map());
+          rkWinOddsMap.get(e.race_id)!.set(e.horse_number, e.odds!);
+        }
+      }
+
       for (const pred of aiRankingPredictions) {
         let analysis: Record<string, unknown>;
         try { analysis = JSON.parse(pred.analysis_json); } catch { continue; }
@@ -623,6 +642,23 @@ export async function GET(request: NextRequest) {
 
         const top3 = rkTop3Map.get(pred.race_id);
         if (!top3 || top3.length < 2) continue;
+
+        // bets_jsonから推定オッズのフォールバックマップを構築
+        const betsOddsFallback = new Map<string, number>();
+        if (pred.bets_json) {
+          try {
+            const bets = JSON.parse(pred.bets_json) as { type: string; selections: number[]; odds?: number }[];
+            if (Array.isArray(bets)) {
+              for (const b of bets) {
+                if ((b.type === '馬連' || b.type === 'ワイド') && b.selections?.length >= 2 && b.odds && b.odds > 0) {
+                  const h1 = Math.min(...b.selections);
+                  const h2 = Math.max(...b.selections);
+                  betsOddsFallback.set(`${b.type}:${h1}-${h2}`, b.odds);
+                }
+              }
+            }
+          } catch { /* skip */ }
+        }
 
         let raceHasBet = false;
         for (const bet of rkBetsData.bets) {
@@ -642,11 +678,25 @@ export async function GET(request: NextRequest) {
           const hit = isBetHit(betType, selections, top3);
           if (hit) {
             stat.hits++;
-            // オッズ取得
             const h1 = Math.min(...selections);
             const h2 = Math.max(...selections);
             const oddsKey = `${betType}:${h1}-${h2}`;
-            const odds = rkOddsMap.get(pred.race_id)?.get(oddsKey) ?? 0;
+            // 1. DBオッズ → 2. bets_json推定 → 3. 単勝オッズから合成推定
+            let odds = rkOddsMap.get(pred.race_id)?.get(oddsKey)
+              ?? betsOddsFallback.get(oddsKey)
+              ?? 0;
+            if (odds === 0) {
+              // 単勝オッズから馬連/ワイドを推定: 馬連≈単勝1×単勝2×0.8/頭数補正, ワイド≈馬連×0.4
+              const winOdds = rkWinOddsMap.get(pred.race_id);
+              if (winOdds) {
+                const o1 = winOdds.get(h1) ?? 0;
+                const o2 = winOdds.get(h2) ?? 0;
+                if (o1 > 0 && o2 > 0) {
+                  const estimatedUmaren = Math.max(1.5, o1 * o2 * 0.08);
+                  odds = betType === '馬連' ? estimatedUmaren : Math.max(1.1, estimatedUmaren * 0.4);
+                }
+              }
+            }
             stat.returnAmount += 100 * odds;
           }
 
@@ -658,7 +708,20 @@ export async function GET(request: NextRequest) {
             const h1 = Math.min(...selections);
             const h2 = Math.max(...selections);
             const oddsKey = `${betType}:${h1}-${h2}`;
-            const odds = rkOddsMap.get(pred.race_id)?.get(oddsKey) ?? 0;
+            let odds = rkOddsMap.get(pred.race_id)?.get(oddsKey)
+              ?? betsOddsFallback.get(oddsKey)
+              ?? 0;
+            if (odds === 0) {
+              const winOdds = rkWinOddsMap.get(pred.race_id);
+              if (winOdds) {
+                const o1 = winOdds.get(h1) ?? 0;
+                const o2 = winOdds.get(h2) ?? 0;
+                if (o1 > 0 && o2 > 0) {
+                  const estimatedUmaren = Math.max(1.5, o1 * o2 * 0.08);
+                  odds = betType === '馬連' ? estimatedUmaren : Math.max(1.1, estimatedUmaren * 0.4);
+                }
+              }
+            }
             dayS.returnAmount += 100 * odds;
           }
           aiRankingDayMap.set(pred.race_date, dayS);
