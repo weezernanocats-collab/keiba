@@ -440,11 +440,12 @@ export default function PredictionDetailPage() {
               onClick={async () => {
                 setRegenerating(true);
                 try {
-                  const res = await fetch(`/api/predictions/${raceId}?regen=1`);
-                  const data = await res.json();
-                  mutate(data, false);
-                } catch { /* ignore */ }
-                setRegenerating(false);
+                  await fetch(`/api/predictions/${raceId}?regen=1`);
+                  // キャッシュを完全にクリアしてページをリロード
+                  window.location.reload();
+                } catch {
+                  setRegenerating(false);
+                }
               }}
               disabled={regenerating || isValidating}
               className="ml-auto px-3 py-1.5 text-xs bg-white/20 hover:bg-white/30 text-white rounded-lg disabled:opacity-50 transition-colors"
