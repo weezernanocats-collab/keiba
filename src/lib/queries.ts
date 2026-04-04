@@ -700,6 +700,8 @@ export async function getPredictionByRaceId(raceId: string) {
 
 export async function savePrediction(prediction: Prediction) {
   // 同一race_idの古い予測を削除してから新規挿入
+  // prediction_resultsがFK参照しているため先に削除（結果確定済みレースの再生成時）
+  await dbRun(`DELETE FROM prediction_results WHERE race_id = ?`, [prediction.raceId]);
   await dbRun(`DELETE FROM predictions WHERE race_id = ?`, [prediction.raceId]);
   await dbRun(`
     INSERT INTO predictions (race_id, generated_at, confidence, summary, analysis_json, picks_json, bets_json)
