@@ -35,6 +35,9 @@ interface HitRecord {
     totalPayout: number;
     totalProfit: number;
   };
+  aiPattern: string | null;
+  aiConfidence: number | null;
+  aiRankingBetResults: { type: string; selections: number[]; hit: boolean }[];
 }
 
 interface Stats {
@@ -68,7 +71,7 @@ function SkeletonCard() {
 export default function HomePage() {
   const { data: racesData, isValidating: racesValidating, lastFetched } = useApi<{ races: RaceRow[] }>('/api/races?type=upcoming');
   const { data: resultsData } = useApi<{ races: RaceRow[] }>('/api/races?type=results');
-  const { data: hitsData } = useApi<{ history: HitRecord[] }>('/api/predictions/history?result=win&limit=10');
+  const { data: hitsData } = useApi<{ history: HitRecord[] }>('/api/predictions/history?limit=10');
   const { data: stats } = useApi<Stats>('/api/stats');
 
   const upcomingRaces = racesData?.races || [];
@@ -205,83 +208,71 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* 直近の的中 / 最近の結果 */}
+      {/* AI推奨買い目の直近結果 */}
       {recentHits.length > 0 ? (
         <section>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold">🎯 直近の的中</h2>
-            <Link href="/predictions/history?result=win" className="text-sm text-accent hover:underline">すべて見る →</Link>
+            <h2 className="text-xl font-bold">AI推奨買い目 直近の結果</h2>
+            <Link href="/predictions/history" className="text-sm text-accent hover:underline">すべて見る →</Link>
           </div>
-          <div className="bg-card-bg border border-card-border rounded-xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 dark:bg-gray-800/50">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium">日付</th>
-                    <th className="px-4 py-3 text-left font-medium">競馬場</th>
-                    <th className="px-4 py-3 text-left font-medium">レース名</th>
-                    <th className="px-4 py-3 text-left font-medium">的中</th>
-                    <th className="px-4 py-3 text-right font-medium">ROI</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-card-border">
-                  {recentHits.slice(0, 5).map((hit) => {
-                    const hitBets = hit.betResults.filter(b => b.hit);
-                    const roi = hit.betSummary.totalInvestment > 0
-                      ? Math.round((hit.betSummary.totalPayout / hit.betSummary.totalInvestment) * 100)
-                      : 0;
+          <div className="space-y-3">
+            {recentHits.slice(0, 8).map((hit) => {
+              // 買い判定バッジ
+              const pattern = hit.aiPattern;
+              const confidence = hit.aiConfidence ?? 0;
+              const hasAiBets = hit.aiRankingBetResults.length > 0;
+              let verdictLabel: string;
+              let verdictClass: string;
+              if ((pattern === '一強' || pattern === '二強') && hasAiBets && confidence >= 60) {
+                verdictLabel = '強く推奨'; verdictClass = 'bg-green-500 text-white';
+              } else if (hasAiBets && confidence >= 45 && (pattern === '一強' || pattern === '二強' || pattern === '三つ巴')) {
+                verdictLabel = '推奨'; verdictClass = 'bg-blue-500 text-white';
+              } else if (pattern === '混戦' || !hasAiBets || confidence < 30) {
+                verdictLabel = '見送り'; verdictClass = 'bg-gray-400 text-white';
+              } else {
+                verdictLabel = '様子見'; verdictClass = 'bg-yellow-500 text-white';
+              }
 
-                    return (
-                      <tr key={hit.raceId} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
-                        <td className="px-4 py-3 whitespace-nowrap">{hit.raceDate}</td>
-                        <td className="px-4 py-3 font-medium">{hit.racecourseName}</td>
-                        <td className="px-4 py-3">
-                          <Link href={`/predictions/${hit.raceId}`} className="text-accent hover:underline font-medium">
-                            {hit.raceNumber}R {hit.raceName}
-                          </Link>
-                          {' '}
-                          <GradeBadge grade={hit.grade} size="sm" />
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-1">
-                            {hit.winHit && (
-                              <span className="inline-block bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                                単勝的中!
-                              </span>
-                            )}
-                            {hit.placeHit && !hit.winHit && (
-                              <span className="inline-block bg-emerald-400 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                                複勝的中!
-                              </span>
-                            )}
-                            {hitBets
-                              .filter(b => b.type !== '単勝' && b.type !== '複勝')
-                              .map((b) => (
-                                <span
-                                  key={b.type}
-                                  className="inline-block bg-teal-500 text-white text-xs font-bold px-2 py-0.5 rounded-full"
-                                >
-                                  {b.type}的中!
-                                </span>
-                              ))}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <span className={`font-bold ${roi >= 100 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
-                            {roi}%
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+              const aiHits = hit.aiRankingBetResults.filter(b => b.hit);
+              const aiMisses = hit.aiRankingBetResults.filter(b => !b.hit);
+
+              return (
+                <Link
+                  key={hit.raceId}
+                  href={`/predictions/${hit.raceId}`}
+                  className="block bg-card-bg border border-card-border rounded-xl p-4 hover:border-accent/50 transition-colors"
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className={`${verdictClass} px-2 py-0.5 rounded text-xs font-bold shrink-0`}>{verdictLabel}</span>
+                    <span className="text-sm text-muted">{hit.raceDate}</span>
+                    <span className="text-sm font-medium">{hit.racecourseName} {hit.raceNumber}R</span>
+                    <span className="text-sm font-medium truncate">{hit.raceName}</span>
+                    <GradeBadge grade={hit.grade} size="sm" />
+                  </div>
+                  {hit.aiRankingBetResults.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {aiHits.map((b, i) => (
+                        <span key={`hit-${i}`} className="inline-flex items-center gap-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs font-bold px-2 py-0.5 rounded-full">
+                          {b.type} {b.selections.join('-')} 的中!
+                        </span>
+                      ))}
+                      {aiMisses.map((b, i) => (
+                        <span key={`miss-${i}`} className="inline-flex items-center gap-1 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs px-2 py-0.5 rounded-full">
+                          {b.type} {b.selections.join('-')} 不的中
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted">AI推奨買い目なし</span>
+                  )}
+                </Link>
+              );
+            })}
           </div>
         </section>
       ) : recentResults.length > 0 ? (
         <section>
-          <h2 className="text-xl font-bold mb-4">🏁 最近の結果</h2>
+          <h2 className="text-xl font-bold mb-4">最近の結果</h2>
           <div className="bg-card-bg border border-card-border rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

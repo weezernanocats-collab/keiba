@@ -72,6 +72,7 @@ export async function GET(request: NextRequest) {
       confidence: number;
       picks_json: string;
       bets_json: string;
+      analysis_json: string | null;
       summary: string;
       win_hit: number;
       place_hit: number;
@@ -82,7 +83,7 @@ export async function GET(request: NextRequest) {
       `SELECT r.id as race_id, r.name as race_name, r.date as race_date,
               r.racecourse_name, r.race_number, r.grade, r.track_type,
               r.distance, r.track_condition,
-              p.confidence, p.picks_json, p.bets_json, p.summary,
+              p.confidence, p.picks_json, p.bets_json, p.analysis_json, p.summary,
               pr.win_hit, pr.place_hit, pr.top3_picks_hit,
               pr.bet_roi, pr.bet_return
        FROM prediction_results pr
@@ -212,6 +213,30 @@ export async function GET(request: NextRequest) {
         };
       });
 
+      // aiRankingBets (馬連/ワイド) の的中判定
+      let aiRankingBetResults: { type: string; selections: number[]; hit: boolean }[] = [];
+      let aiPattern: string | null = null;
+      let aiConfidence: number | null = null;
+
+      if (row.analysis_json) {
+        try {
+          const analysis = JSON.parse(row.analysis_json);
+          if (analysis.aiRankingBets) {
+            aiPattern = analysis.aiRankingBets.pattern || null;
+            aiConfidence = analysis.aiRankingBets.confidence ?? null;
+            if (analysis.aiRankingBets.bets) {
+              for (const bet of analysis.aiRankingBets.bets as { type: string; horses: { horseNumber: number }[] }[]) {
+                if (bet.type === '見送り') continue;
+                const sels = bet.horses.map((h: { horseNumber: number }) => h.horseNumber);
+                if (sels.length < 2) continue;
+                const hit = isBetHit(bet.type, sels, top3);
+                aiRankingBetResults.push({ type: bet.type, selections: sels, hit });
+              }
+            }
+          }
+        } catch { /* skip */ }
+      }
+
       // レースごとの収支サマリ
       const totalInvestment = betResults.reduce((s, b) => s + b.investment, 0);
       const totalPayout = betResults.reduce((s, b) => s + b.payout, 0);
@@ -239,6 +264,9 @@ export async function GET(request: NextRequest) {
         betSummary: { totalInvestment, totalPayout, totalProfit },
         actualTop3: top3,
         actualTop3Detailed,
+        aiPattern,
+        aiConfidence,
+        aiRankingBetResults,
       };
     });
 
