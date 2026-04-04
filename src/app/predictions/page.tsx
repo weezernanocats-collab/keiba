@@ -171,7 +171,7 @@ function BetVerdictBadge({ pattern, confidence }: { pattern: string | null; conf
 }
 
 function UpcomingRaces() {
-  const { data: racesData, isValidating, lastFetched } = useApi<{ races: RaceRow[] }>('/api/races?type=upcoming');
+  const { data: racesData, isValidating, lastFetched, mutate } = useApi<{ races: RaceRow[] }>('/api/races?type=upcoming');
   const races = racesData?.races || [];
   const loading = !racesData;
 
@@ -255,11 +255,16 @@ function UpcomingRaces() {
           過去の成績データを多角的に分析し、各レースの予想を提供します。タップで推奨馬券を表示します。
         </p>
         <div className="flex items-center gap-2 ml-auto">
-          {isValidating ? (
-            <span className="text-xs text-muted animate-pulse">更新中...</span>
-          ) : lastFetched ? (
-            <span className="text-xs text-muted">最終取得: {formatLastFetched(lastFetched)}</span>
-          ) : null}
+          <button
+            onClick={() => { setPredCache(new Map()); mutate(); }}
+            disabled={isValidating}
+            className="px-3 py-1.5 text-xs border border-card-border rounded-lg bg-card-bg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 transition-colors"
+          >
+            {isValidating ? '更新中...' : '最新に更新'}
+          </button>
+          {!isValidating && lastFetched && (
+            <span className="text-xs text-muted hidden sm:inline">{formatLastFetched(lastFetched)}</span>
+          )}
           <select
             className="px-3 py-2 text-sm border border-card-border rounded-lg bg-card-bg"
             value={confidenceFilter}
