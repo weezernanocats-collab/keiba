@@ -6,7 +6,7 @@
 type CachePreset = 'races' | 'prediction' | 'stats' | 'master' | 'no-cache';
 
 const CACHE_PRESETS: Record<CachePreset, string> = {
-  races: 'public, s-maxage=120, stale-while-revalidate=600',
+  races: 'public, s-maxage=30, stale-while-revalidate=120',
   prediction: 'public, s-maxage=300, stale-while-revalidate=600',
   stats: 'public, s-maxage=1800, stale-while-revalidate=3600',
   master: 'public, s-maxage=600, stale-while-revalidate=1800',
