@@ -440,9 +440,11 @@ export default function PredictionDetailPage() {
               onClick={async () => {
                 setRegenerating(true);
                 try {
-                  await fetch(`/api/predictions/${raceId}?regen=1`);
-                  // キャッシュを完全にクリアしてページをリロード
-                  window.location.reload();
+                  // regen=1で再生成実行（CDNキャッシュバスター付き）
+                  await fetch(`/api/predictions/${raceId}?regen=1&_t=${Date.now()}`);
+                  // SWRキャッシュをクリアしてからリロード
+                  mutate(undefined, { revalidate: false });
+                  window.location.href = window.location.pathname + '?_t=' + Date.now();
                 } catch {
                   setRegenerating(false);
                 }

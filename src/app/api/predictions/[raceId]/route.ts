@@ -407,8 +407,10 @@ export async function GET(
       }
     }
 
-    // 結果確定済みレースはデータ不変 → 長めにキャッシュ
-    const cachePreset = race.status === '結果確定' ? 'stats' : 'prediction';
+    // 再生成直後はキャッシュなし、結果確定済みは長め、それ以外は通常
+    const cachePreset = (manuallyRegenerated || regeneratedWithOdds || regeneratedWithBias)
+      ? 'no-cache'
+      : race.status === '結果確定' ? 'stats' : 'prediction';
     return NextResponse.json({
       prediction: augmentedPrediction,
       race,
