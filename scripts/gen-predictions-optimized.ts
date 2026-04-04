@@ -630,14 +630,15 @@ async function main() {
 
   // 3. 対象レース一覧
   const statusFilter = DATE_FILTER
-    ? `r.status IN ('結果確定', '出走確定') AND r.date = ?`
-    : `r.status = '結果確定'`;
+    ? `r.status IN ('出走確定', '予定') AND r.date = ?`
+    : `r.status = '出走確定'`;
   const statusArgs = DATE_FILTER ? [DATE_FILTER] : [];
 
   // --regen: 既存予想があるレースも対象に含める（savePrediction()がレース単位で安全に上書き）
   // 通常: 予想未生成レースのみ
+  // 結果確定済み（prediction_resultsあり）はどちらの場合もスキップ
   const predFilter = REGEN_MODE
-    ? ''
+    ? `AND r.id NOT IN (SELECT race_id FROM prediction_results)`
     : `AND r.id NOT IN (SELECT race_id FROM predictions)`;
 
   const targetRaces = await dbAll<{ id: string }>(
