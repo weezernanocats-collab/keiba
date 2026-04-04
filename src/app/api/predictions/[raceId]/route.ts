@@ -59,6 +59,9 @@ export async function GET(
 
     let prediction = await getPredictionByRaceId(raceId);
 
+    // 手動再生成リクエスト: ?regen=1 で強制再生成（馬場バイアス反映）
+    const forceRegen = _request.nextUrl.searchParams.get('regen') === '1';
+
     // タイムガード: 残り時間が少なければ重い処理をスキップ（maxDuration=60s）
     const hasTimeForRegen = () => (Date.now() - apiStart) < 40_000; // 40秒以内
 
@@ -93,6 +96,30 @@ export async function GET(
         prediction = newPrediction;
       } catch (regenError) {
         console.error('予想再生成失敗:', regenError);
+        if (regenError instanceof Error && regenError.message.includes('タイムアウト')) {
+          generationTimedOut = true;
+        }
+      }
+    }
+
+    // 手動再生成: ボタンから強制的に再生成（馬場バイアス最新反映）
+    let manuallyRegenerated = false;
+    if (forceRegen && race.entries.length >= 2 && hasTimeForRegen()) {
+      try {
+        await dbRun('DELETE FROM predictions WHERE race_id = ?', [raceId]);
+        const newPrediction = await buildWithTimeout(
+          raceId, race.name, race.date,
+          race.trackType as '芝' | 'ダート' | '障害', race.distance,
+          race.trackCondition as '良' | '稍重' | '重' | '不良' | undefined,
+          race.racecourseName, race.grade, race.entries,
+          race.weather as string | undefined,
+          { includeTrainerStats: true },
+        );
+        await savePrediction(newPrediction);
+        prediction = newPrediction;
+        manuallyRegenerated = true;
+      } catch (regenError) {
+        console.error('手動再生成失敗:', regenError);
         if (regenError instanceof Error && regenError.message.includes('タイムアウト')) {
           generationTimedOut = true;
         }
@@ -388,6 +415,7 @@ export async function GET(
       verification,
       ...(regeneratedWithBias ? { regeneratedWithBias: true } : {}),
       ...(regeneratedWithOdds ? { regeneratedWithOdds: true } : {}),
+      ...(manuallyRegenerated ? { manuallyRegenerated: true } : {}),
       ...(biasUpdateAvailable ? { biasUpdateAvailable: true } : {}),
     }, { headers: getCacheHeaders(cachePreset) });
   } catch (error) {

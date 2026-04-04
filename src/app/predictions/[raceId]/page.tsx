@@ -194,6 +194,7 @@ export default function PredictionDetailPage() {
   const { isRaceFavoriteInProfile, toggleRaceForProfile } = useFavorites();
 
   const [biasUpdating, setBiasUpdating] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
 
   // メイン予想データ: SWRで即表示 + バックグラウンド再検証
   const { data: predData, error: predError, isValidating, lastFetched, mutate } = useApi<{
@@ -434,6 +435,23 @@ export default function PredictionDetailPage() {
               <span className="font-bold">{prediction.confidence}%</span>
             </div>
           </div>
+          {race.status !== '結果確定' && (
+            <button
+              onClick={async () => {
+                setRegenerating(true);
+                try {
+                  const res = await fetch(`/api/predictions/${raceId}?regen=1`);
+                  const data = await res.json();
+                  mutate(data, false);
+                } catch { /* ignore */ }
+                setRegenerating(false);
+              }}
+              disabled={regenerating || isValidating}
+              className="ml-auto px-3 py-1.5 text-xs bg-white/20 hover:bg-white/30 text-white rounded-lg disabled:opacity-50 transition-colors"
+            >
+              {regenerating ? '再生成中...' : '予想を再生成'}
+            </button>
+          )}
         </div>
       </div>
 
