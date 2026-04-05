@@ -658,6 +658,13 @@ function parsePaddockCommentary(raw: string): string[] {
     /逃げた|寝ばって|外1気に|インコースから/,
     /ケーバとなりました|レースは.*?等の/,
     /職業をつかんで/, /先行して勝利/,
+    /コーナー|カーブ|直線|バックストレッチ|ゴール/,
+    /スタート.*?しました|発走|ゲートが開/,
+    /リード.*?馬身|先頭|2番手|3番手|後方/,
+    /上がって[いき]|差し[てき]|追い込[みん]/,
+    /着差|決着|写真判定/, /競走中止|落馬/,
+    /メートル.*?通過|ペース/, /レース中継/,
+    /出走.*?頭の争い/, /市場.*?メートル/,
   ];
 
   // パドック関連キーワード（これらを含むセンテンスを採用）
@@ -683,10 +690,11 @@ function parsePaddockCommentary(raw: string): string[] {
     .map(s => s.trim())
     .filter(s => s.length > 5);
 
-  // フィルタ: 除外パターンを含むものを除去し、パドックキーワードを含むものを採用
+  // フィルタ: 除外パターンを含むものを除去し、パドックキーワードを2つ以上含むものを採用（厳格モード）
   const paddockSentences = sentences.filter(s => {
     if (excludePatterns.some(p => p.test(s))) return false;
-    return paddockKeywords.some(p => p.test(s));
+    const matchCount = paddockKeywords.filter(p => p.test(s)).length;
+    return matchCount >= 2; // 2つ以上のパドックキーワードが必要
   });
 
   if (paddockSentences.length === 0) return [];
@@ -734,6 +742,60 @@ function parsePaddockCommentary(raw: string): string[] {
   }
 
   return result;
+}
+
+/**
+ * ローカルLLM（Ollama）でパドック解説を要約
+ */
+async function summarizePaddockWithLLM(rawText: string): Promise<string | null> {
+  const OLLAMA_URL = 'http://localhost:11434/api/chat';
+  const MODEL = 'gemma3:4b';
+
+  const prompt = `あなたは競馬パドック解説のまとめ役です。
+以下は音声認識で文字起こしされたパドック解説です（誤字が多い）。
+
+【重要ルール】
+- パドックでの「馬体評価」のみを抽出してください
+- レース実況（○番手、コーナー、ゴール等）は完全に無視してください
+- 払い戻し、オッズ、タイム、着順は完全に無視してください
+- 馬体評価とは: 体つき、歩き、気配、仕上がり、テンション、馬体重増減のコメント
+- 馬番ごとに1行で要約（馬体評価がない馬番は省略）
+- 形式: ○（好評価）/ ×（不安あり）/ △（普通）＋ 要約コメント
+- 解説者の推奨馬があれば最後に「★推奨: ○番、○番」
+- 5行以上は書かないでください。簡潔に。
+
+${rawText}`;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+
+    const res = await fetch(OLLAMA_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [{ role: 'user', content: prompt }],
+        stream: false,
+        options: { temperature: 0.1, num_predict: 500 },
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) return null;
+    const data = await res.json() as { message?: { content?: string } };
+    const content = data.message?.content?.trim();
+    if (content && content.length > 10) {
+      console.log(`  [パドック要約] ${content.split('\n').length}行 (LLM: ${MODEL})`);
+      return content;
+    }
+    return null;
+  } catch (e) {
+    // Ollamaが起動していない場合はフォールバック
+    console.log('  [パドック要約] LLM接続失敗、生テキストを使用');
+    return null;
+  }
 }
 
 async function main() {
@@ -914,7 +976,9 @@ async function main() {
       if (REGEN_MODE) {
         const paddockChunks = loadPaddockChunks(race.date, race.time);
         if (paddockChunks.length > 0) {
-          (prediction.analysis as Record<string, unknown>).paddockCommentary = paddockChunks.join(' ');
+          const filtered = paddockChunks.join('\n');
+          const summary = await summarizePaddockWithLLM(filtered);
+          (prediction.analysis as Record<string, unknown>).paddockCommentary = summary || filtered;
         }
       }
 
