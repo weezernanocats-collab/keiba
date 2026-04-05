@@ -610,7 +610,7 @@ const RACE_FILTER = process.argv.includes('--race')
 /**
  * パドック文字起こしを読み込み、パドック解説部分のみ抽出・馬番ごとに整理
  */
-function loadPaddockChunks(raceDate: string, raceTime: string | null, racecourse?: string): string[] {
+function loadPaddockChunks(raceDate: string, raceTime: string | null, racecourse?: string, raceId?: string): string[] {
   if (!raceTime) return [];
   const jsonlPath = `/tmp/paddock_watcher/chunks_${raceDate.replace(/-/g, '')}.jsonl`;
   if (!existsSync(jsonlPath)) return [];
@@ -651,7 +651,16 @@ function loadPaddockChunks(raceDate: string, raceTime: string | null, racecourse
       } catch { /* skip */ }
     }
 
-    // 各チャンクに競馬場ラベルを付与（直近の競馬場名を引き継ぐ）
+    // 出馬表の馬名リスト（馬名マッチング用）
+    const raceHorseNames: string[] = [];
+    if (raceId && entriesByRace.has(raceId)) {
+      for (const e of entriesByRace.get(raceId)!) {
+        const horse = horsesById.get(e.horse_id);
+        if (horse) raceHorseNames.push(horse.name);
+      }
+    }
+
+    // 各チャンクをフィルタ: 競馬場名追跡 + 馬名マッチング
     let currentVenue = '';
     const rawTexts: string[] = [];
     for (const chunk of timeFilteredChunks) {
@@ -662,8 +671,14 @@ function loadPaddockChunks(raceDate: string, raceTime: string | null, racecourse
           break;
         }
       }
-      // 対象競馬場に一致するチャンクのみ採用
-      if (!racecourse || currentVenue === racecourse) {
+
+      // 馬名マッチング: 出馬表の馬名が3文字以上部分一致するか
+      const hasHorseName = raceHorseNames.some(name =>
+        name.length >= 3 && Array.from({ length: name.length - 2 }, (_, i) => name.slice(i, i + 3)).some(sub => chunk.text.includes(sub))
+      );
+
+      // 採用条件: 競馬場一致 OR 馬名一致
+      if (!racecourse || currentVenue === racecourse || hasHorseName) {
         rawTexts.push(chunk.text.trim());
       }
     }
@@ -1009,7 +1024,7 @@ async function main() {
 
       // パドック文字起こしをanalysisに埋め込み（ファイルがあれば）
       if (REGEN_MODE) {
-        const paddockChunks = loadPaddockChunks(race.date, race.time, race.racecourse_name);
+        const paddockChunks = loadPaddockChunks(race.date, race.time, race.racecourse_name, raceId);
         if (paddockChunks.length > 0) {
           const filtered = paddockChunks.join('\n');
           const summary = await summarizePaddockWithLLM(filtered);
