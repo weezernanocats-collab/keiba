@@ -1,16 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
-# パドック解説リアルタイム監視 + 予想再生成パイプライン
+# パドック解説リアルタイ��文字起こし + 発走7分前に予想一括再生成
 #
 # 使い方:
 #   bash scripts/paddock-watcher.sh <YouTube_URL>
 #
 # 動作:
-#   1. ライブ配信音声を60秒チャンクで継続取得
-#   2. Whisper(tiny)で即時文字起こし
-#   3. パドック推奨馬の発表を検知
-#   4. 該当レースの予想を再生成
-#   5. 全テキストをログに保存
+#   1. ライブ配信音声を60秒チャンクで継続取得・文字起こし
+#   2. 発走7分���になったレースを検知
+#   3. 当日の未発走レースをまとめて予想再生成
+#   4. 全テキストをログに保存
 #
 
 set -euo pipefail
@@ -28,12 +27,17 @@ LOG_FILE="${WORK_DIR}/transcript_$(date +%Y%m%d).log"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 REGEN_SCRIPT="npx tsx ${SCRIPT_DIR}/gen-predictions-optimized.ts"
+TODAY=$(date +%Y-%m-%d)
+
+# 再生成タイミング: 発走の何分前か
+REGEN_MINUTES_BEFORE=7
 
 mkdir -p "$WORK_DIR"
 
 echo "=== パドック解説監視開始 $(date '+%H:%M:%S') ==="
 echo "YouTube: $YOUTUBE_URL"
 echo "チャンク: ${CHUNK_SECONDS}秒, モデル: $WHISPER_MODEL"
+echo "再生成: 発走${REGEN_MINUTES_BEFORE}分前に自動実行"
 echo "ログ: $LOG_FILE"
 echo ""
 
@@ -50,8 +54,54 @@ if [ -z "$STREAM_URL" ]; then
   exit 1
 fi
 
-# 直近で再生成済みのレースを記録（重複防止）
-declare -A REGEN_DONE
+# 再生成済みタイムスタンプ管理（ファイルベース）
+REGEN_DONE_FILE="${WORK_DIR}/regen_done_${TODAY}.txt"
+touch "$REGEN_DONE_FILE"
+
+is_regen_done() { grep -qF "$1" "$REGEN_DONE_FILE" 2>/dev/null; }
+mark_regen_done() { echo "$1" >> "$REGEN_DONE_FILE"; }
+
+# レース発走時刻リスト取得（HH:MM形式）
+RACE_TIMES_FILE="${WORK_DIR}/race_times.txt"
+cd "$PROJECT_DIR"
+node --env-file=.env.local -e "
+const { createClient } = require('@libsql/client');
+const db = createClient({ url: process.env.TURSO_DATABASE_URL.replace('libsql://', 'https://'), authToken: process.env.TURSO_AUTH_TOKEN });
+(async () => {
+  const r = await db.execute(\"SELECT DISTINCT time FROM races WHERE date = '${TODAY}' AND time IS NOT NULL ORDER BY time\");
+  r.rows.forEach(row => console.log(row.time));
+})();
+" 2>/dev/null | grep -E '^[0-9]{2}:[0-9]{2}' > "$RACE_TIMES_FILE"
+
+RACE_COUNT=$(wc -l < "$RACE_TIMES_FILE" | tr -d ' ')
+echo "本日のレース発走時刻: ${RACE_COUNT}件"
+cat "$RACE_TIMES_FILE" | tr '\n' ' '
+echo ""
+echo ""
+
+# 発走7分前チェック: 現在時刻から7分後の発走レースがあれば再生成
+check_and_regen() {
+  local now_epoch=$(date +%s)
+  local trigger_time=$((now_epoch + REGEN_MINUTES_BEFORE * 60))
+  local trigger_hhmm=$(date -r "$trigger_time" '+%H:%M' 2>/dev/null || date -d "@$trigger_time" '+%H:%M' 2>/dev/null)
+
+  # trigger_hhmmと一致する発走時刻があるか
+  if grep -qF "$trigger_hhmm" "$RACE_TIMES_FILE" && ! is_regen_done "$trigger_hhmm"; then
+    echo ""
+    echo "  *** 発走${REGEN_MINUTES_BEFORE}分前: ${trigger_hhmm}発走のレースを検知 ***"
+    echo "  *** 当日未発走レースをまとめて予想再生成 ($(date '+%H:%M:%S')) ***"
+    echo "  [$(date '+%H:%M:%S')] 再生成トリガー: ${trigger_hhmm}発走" >> "$LOG_FILE"
+
+    mark_regen_done "$trigger_hhmm"
+
+    # バックグラウンドで再生成（全未発走レース）
+    (
+      cd "$PROJECT_DIR"
+      $REGEN_SCRIPT --date "$TODAY" --regen 2>&1 | tail -5
+      echo "  *** 予想再生成完了 ($(date '+%H:%M:%S')) ***"
+    ) &
+  fi
+}
 
 # メインループ
 CHUNK_NUM=0
@@ -70,6 +120,9 @@ while true; do
     fi
   fi
 
+  # 発走7分前チェック
+  check_and_regen
+
   # 音声取得
   ffmpeg -i "$STREAM_URL" -t "$CHUNK_SECONDS" -vn -acodec pcm_s16le -ar 16000 -ac 1 "$AUDIO_FILE" 2>/dev/null
 
@@ -82,11 +135,8 @@ while true; do
   fi
 
   # Whisper文字起こし
-  TRANSCRIPT=$(whisper "$AUDIO_FILE" --model "$WHISPER_MODEL" --language ja --output_format txt --output_dir "$WORK_DIR" 2>/dev/null)
-  TEXT_FILE="${AUDIO_FILE%.wav}.txt"
-  if [ -f "${WORK_DIR}/chunk_${CHUNK_NUM}.txt" ]; then
-    TEXT_FILE="${WORK_DIR}/chunk_${CHUNK_NUM}.txt"
-  fi
+  whisper "$AUDIO_FILE" --model "$WHISPER_MODEL" --language ja --output_format txt --output_dir "$WORK_DIR" 2>/dev/null
+  TEXT_FILE="${WORK_DIR}/chunk_${CHUNK_NUM}.txt"
 
   TRANSCRIPT_TEXT=""
   if [ -f "$TEXT_FILE" ]; then
@@ -101,43 +151,6 @@ while true; do
   # 画面表示（コンパクト）
   PREVIEW=$(echo "$TRANSCRIPT_TEXT" | head -3 | tr '\n' ' ' | cut -c1-120)
   echo "[$TIMESTAMP] #${CHUNK_NUM}: ${PREVIEW}..."
-
-  # パドック推奨馬の検知
-  # キーワード: "推奨馬" "推奨場" "以上で" "パドックでの評価"
-  if echo "$TRANSCRIPT_TEXT" | grep -qiE "推奨|以上で.*お願い|パドックでの"; then
-    echo "  >>> パドック推奨馬を検知!"
-
-    # レース番号を特定（"○R" or "○レース"）
-    # 直近のテキストからレース番号を抽出
-    RACE_NUM=$(echo "$TRANSCRIPT_TEXT" | grep -oE '[0-9]+レース|[0-9]+R' | tail -1 | grep -oE '[0-9]+')
-
-    # 競馬場を特定
-    VENUE=""
-    if echo "$TRANSCRIPT_TEXT" | grep -qi "中山\|なかやま\|仲間"; then
-      VENUE="中山"
-    elif echo "$TRANSCRIPT_TEXT" | grep -qi "阪神\|半信\|はんしん"; then
-      VENUE="阪神"
-    fi
-
-    # 推奨馬番号を抽出
-    PICKS=$(echo "$TRANSCRIPT_TEXT" | grep -oE '[0-9]+番' | sort -u | tr '\n' ',' | sed 's/,$//')
-
-    echo "  >>> 競馬場: ${VENUE:-不明}, レース: ${RACE_NUM:-不明}R, 推奨馬番: ${PICKS:-不明}"
-    echo "  [$(date '+%H:%M:%S')] 推奨検知: ${VENUE:-?} ${RACE_NUM:-?}R 推奨=${PICKS}" >> "$LOG_FILE"
-
-    # 予想再生成（重複防止）
-    REGEN_KEY="${VENUE}_${RACE_NUM}"
-    if [ -n "$VENUE" ] && [ -n "$RACE_NUM" ] && [ -z "${REGEN_DONE[$REGEN_KEY]:-}" ]; then
-      echo "  >>> 予想再生成開始: ${VENUE} ${RACE_NUM}R ($(date '+%H:%M:%S'))"
-      # バックグラウンドで再生成（メインループをブロックしない）
-      (
-        cd "$PROJECT_DIR"
-        $REGEN_SCRIPT --date "$(date +%Y-%m-%d)" --race "${VENUE}${RACE_NUM}" --regen 2>&1 | tail -3
-        echo "  >>> 予想再生成完了: ${VENUE} ${RACE_NUM}R ($(date '+%H:%M:%S'))"
-      ) &
-      REGEN_DONE[$REGEN_KEY]=1
-    fi
-  fi
 
   # 一時ファイル削除
   rm -f "$AUDIO_FILE" "$TEXT_FILE"
