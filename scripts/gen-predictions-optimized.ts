@@ -610,27 +610,62 @@ const RACE_FILTER = process.argv.includes('--race')
 /**
  * パドック文字起こしを読み込み、パドック解説部分のみ抽出・馬番ごとに整理
  */
-function loadPaddockChunks(raceDate: string, raceTime: string | null): string[] {
+function loadPaddockChunks(raceDate: string, raceTime: string | null, racecourse?: string): string[] {
   if (!raceTime) return [];
   const jsonlPath = `/tmp/paddock_watcher/chunks_${raceDate.replace(/-/g, '')}.jsonl`;
   if (!existsSync(jsonlPath)) return [];
+
+  // 競馬場名の表記揺れ対応（Whisperの誤変換含む）
+  const venueAliases: Record<string, string[]> = {
+    '中山': ['中山', '仲間', '仲山', '中やま', 'なかやま'],
+    '阪神': ['阪神', '半信', '半身', 'はんしん', 'ハンシン'],
+    '東京': ['東京', '府中'],
+    '京都': ['京都'],
+  };
+  const aliases = racecourse ? (venueAliases[racecourse] || [racecourse]) : [];
 
   try {
     const lines = readFileSync(jsonlPath, 'utf-8').trim().split('\n').filter(l => l);
     const [raceH, raceM] = raceTime.split(':').map(Number);
     const raceMinutes = raceH * 60 + raceM;
 
+    // 全競馬場のエイリアス
+    const allVenues: Record<string, string[]> = {
+      '中山': ['中山', '仲間', '仲山', '中やま', 'なかやま'],
+      '阪神': ['阪神', '半信', '半身', 'はんしん', 'ハンシン'],
+      '東京': ['東京', '府中'],
+      '京都': ['京都'],
+    };
+
     // 発走30分前〜発走時刻のチャンクを取得
-    const rawTexts: string[] = [];
+    // 競馬場名が登場したら、次に別の競馬場名が出るまで同一競馬場と見なす
+    const timeFilteredChunks: { text: string }[] = [];
     for (const line of lines) {
       try {
         const chunk = JSON.parse(line) as { time: string; text: string };
         const [h, m] = chunk.time.split(':').map(Number);
         const chunkMinutes = h * 60 + m;
         if (chunkMinutes >= raceMinutes - 30 && chunkMinutes < raceMinutes) {
-          rawTexts.push(chunk.text.trim());
+          timeFilteredChunks.push(chunk);
         }
       } catch { /* skip */ }
+    }
+
+    // 各チャンクに競馬場ラベルを付与（直近の競馬場名を引き継ぐ）
+    let currentVenue = '';
+    const rawTexts: string[] = [];
+    for (const chunk of timeFilteredChunks) {
+      // このチャンクに競馬場名が含まれているか
+      for (const [venue, vAliases] of Object.entries(allVenues)) {
+        if (vAliases.some(a => chunk.text.includes(a))) {
+          currentVenue = venue;
+          break;
+        }
+      }
+      // 対象競馬場に一致するチャンクのみ採用
+      if (!racecourse || currentVenue === racecourse) {
+        rawTexts.push(chunk.text.trim());
+      }
     }
     if (rawTexts.length === 0) return [];
 
@@ -974,7 +1009,7 @@ async function main() {
 
       // パドック文字起こしをanalysisに埋め込み（ファイルがあれば）
       if (REGEN_MODE) {
-        const paddockChunks = loadPaddockChunks(race.date, race.time);
+        const paddockChunks = loadPaddockChunks(race.date, race.time, race.racecourse_name);
         if (paddockChunks.length > 0) {
           const filtered = paddockChunks.join('\n');
           const summary = await summarizePaddockWithLLM(filtered);
