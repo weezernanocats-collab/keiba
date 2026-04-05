@@ -306,6 +306,7 @@ export async function GET(
     const aiIndependentBets = analysisAny?.aiIndependentBets || undefined;
     const aiOnlyRanking = analysisAny?.aiOnlyRanking || undefined;
     const aiRankingBets = analysisAny?.aiRankingBets || undefined;
+    const paddockCommentary = analysisAny?.paddockCommentary || undefined;
 
     const augmentedPrediction = {
       ...prediction,
@@ -314,6 +315,7 @@ export async function GET(
       ...(aiIndependentBets ? { aiIndependentBets } : {}),
       ...(aiOnlyRanking ? { aiOnlyRanking } : {}),
       ...(aiRankingBets ? { aiRankingBets } : {}),
+      ...(paddockCommentary ? { paddockCommentary } : {}),
     };
 
     // 結果確定済みの場合は答え合わせデータを追加

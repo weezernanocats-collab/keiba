@@ -99,6 +99,7 @@ interface PredictionData {
   aiIndependentBets?: AIIndependentBetData[];
   aiOnlyRanking?: AIOnlyRanking;
   aiRankingBets?: AIRankingBetsData;
+  paddockCommentary?: string;
 }
 
 interface RaceData {
@@ -370,6 +371,7 @@ export default function PredictionDetailPage() {
 
   const sections = [
     ...(verification ? [{ id: 'verification', label: '答え合わせ' }] : []),
+    ...(prediction?.paddockCommentary ? [{ id: 'paddock', label: 'パドック' }] : []),
     ...(prediction?.aiRankingBets && prediction.aiRankingBets.bets.length > 0 ? [{ id: 'ai-ranking-bets', label: 'AI買い目' }] : []),
     { id: 'summary', label: 'サマリー' },
     { id: 'picks', label: 'ブレンド予想' },
@@ -766,6 +768,22 @@ export default function PredictionDetailPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* パドック解説 */}
+      {prediction.paddockCommentary && (
+        <div id="paddock" ref={setSectionRefWrapped('paddock')} className="scroll-mt-32">
+          <div className="border border-amber-400 dark:border-amber-600 rounded-xl p-5 bg-amber-50/50 dark:bg-amber-900/20">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="px-2 py-0.5 rounded text-xs font-bold bg-amber-500 text-white">LIVE</span>
+              <h2 className="text-lg font-bold">パドック解説</h2>
+            </div>
+            <p className="text-xs text-muted mb-3">グリーンチャンネル解説の自動文字起こし（発走30分前〜直前）</p>
+            <div className="text-sm leading-relaxed whitespace-pre-wrap bg-white/50 dark:bg-black/20 rounded-lg p-4 max-h-60 overflow-y-auto">
+              {prediction.paddockCommentary}
+            </div>
+          </div>
         </div>
       )}
 

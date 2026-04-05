@@ -24,6 +24,7 @@ CHUNK_SECONDS=60
 WHISPER_MODEL=tiny
 WORK_DIR="/tmp/paddock_watcher"
 LOG_FILE="${WORK_DIR}/transcript_$(date +%Y%m%d).log"
+JSONL_FILE="${WORK_DIR}/chunks_$(date +%Y%m%d).jsonl"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 REGEN_SCRIPT="npx tsx ${SCRIPT_DIR}/gen-predictions-optimized.ts"
@@ -147,6 +148,12 @@ while true; do
   echo "[$TIMESTAMP] --- chunk $CHUNK_NUM ---" >> "$LOG_FILE"
   echo "$TRANSCRIPT_TEXT" >> "$LOG_FILE"
   echo "" >> "$LOG_FILE"
+
+  # JSON Lines形式でも保存（再生成スクリプトから参照）
+  if [ -n "$TRANSCRIPT_TEXT" ]; then
+    ESCAPED_TEXT=$(echo "$TRANSCRIPT_TEXT" | tr '\n' ' ' | sed 's/"/\\"/g')
+    echo "{\"time\":\"$TIMESTAMP\",\"text\":\"$ESCAPED_TEXT\"}" >> "$JSONL_FILE"
+  fi
 
   # 画面表示（コンパクト）
   PREVIEW=$(echo "$TRANSCRIPT_TEXT" | head -3 | tr '\n' ' ' | cut -c1-120)

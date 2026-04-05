@@ -21,6 +21,7 @@ for (const line of envContent.split('\n')) {
 import { ensureInitialized, dbAll } from '../src/lib/database';
 import { generatePrediction, type HorseAnalysisInput } from '../src/lib/prediction-engine';
 import { savePrediction } from '../src/lib/queries';
+import { readFileSync, existsSync } from 'fs';
 import type { TrackType, TrackCondition } from '../src/types';
 
 // ==================== 型定義 ====================
@@ -606,6 +607,36 @@ const RACE_FILTER = process.argv.includes('--race')
   ? process.argv[process.argv.indexOf('--race') + 1]
   : '';
 
+/**
+ * パドック文字起こしを読み込む
+ * 発走時刻の30分前〜直前のチャンクを抽出
+ */
+function loadPaddockChunks(raceDate: string, raceTime: string | null): string[] {
+  if (!raceTime) return [];
+  const jsonlPath = `/tmp/paddock_watcher/chunks_${raceDate.replace(/-/g, '')}.jsonl`;
+  if (!existsSync(jsonlPath)) return [];
+
+  try {
+    const lines = readFileSync(jsonlPath, 'utf-8').trim().split('\n').filter(l => l);
+    const [raceH, raceM] = raceTime.split(':').map(Number);
+    const raceMinutes = raceH * 60 + raceM;
+
+    const relevant: string[] = [];
+    for (const line of lines) {
+      try {
+        const chunk = JSON.parse(line) as { time: string; text: string };
+        const [h, m] = chunk.time.split(':').map(Number);
+        const chunkMinutes = h * 60 + m;
+        // 発走30分前〜発走時刻のチャンクを取得
+        if (chunkMinutes >= raceMinutes - 30 && chunkMinutes < raceMinutes) {
+          relevant.push(chunk.text.trim());
+        }
+      } catch { /* skip malformed line */ }
+    }
+    return relevant;
+  } catch { return []; }
+}
+
 async function main() {
   const startTime = Date.now();
 
@@ -779,6 +810,14 @@ async function main() {
         race.grade || undefined,
         horseInputs as HorseAnalysisInput[],
       );
+
+      // パドック文字起こしをanalysisに埋め込み（ファイルがあれば）
+      if (REGEN_MODE) {
+        const paddockChunks = loadPaddockChunks(race.date, race.time);
+        if (paddockChunks.length > 0) {
+          (prediction.analysis as Record<string, unknown>).paddockCommentary = paddockChunks.join(' ');
+        }
+      }
 
       // 保存（これだけTursoに書き込み）
       await savePrediction(prediction);
