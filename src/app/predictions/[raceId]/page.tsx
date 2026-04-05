@@ -412,7 +412,7 @@ export default function PredictionDetailPage() {
           {race.time && ` | 発走 ${race.time}`}
         </p>
         <p className="text-white/50 text-xs mt-1">
-          予想生成: {new Date(prediction.generatedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+          予想生成: {new Date(prediction.generatedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
           {isValidating ? (
             <span className="ml-3 animate-pulse">更新中...</span>
           ) : lastFetched ? (
