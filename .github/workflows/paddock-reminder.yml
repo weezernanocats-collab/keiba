@@ -1,0 +1,24 @@
+name: Paddock Reminder
+
+on:
+  schedule:
+    # 毎日 JST 8:30 (UTC 23:30前日) に実行、スクリプト内で曜日判定
+    - cron: '30 23 * * 5,6'  # 金曜・土曜 23:30 UTC = 土曜・日曜 8:30 JST
+  workflow_dispatch:
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack reminder
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+        run: |
+          curl -s -X POST 'https://slack.com/api/chat.postMessage' \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H 'Content-Type: application/json; charset=utf-8' \
+            -d '{
+              "channel": "'"$SLACK_CHANNEL_ID"'",
+              "text": "🐴 本日は中央競馬開催日です\n\nグリーンチャンネルのYouTube LiveのURLを送ってください。\nパドック解説の自動文字起こし＋予想再生成が起動します。\n\n▼ JRA公式チャンネル\nhttps://www.youtube.com/@jaborajra/streams"
+            }'
