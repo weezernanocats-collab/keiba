@@ -601,6 +601,10 @@ const DATE_FILTER = process.argv.includes('--date')
 const LIMIT = process.argv.includes('--limit')
   ? parseInt(process.argv[process.argv.indexOf('--limit') + 1], 10)
   : 0;
+// --race "中山5" で特定レースのみ再生成（競馬場名+レース番号）
+const RACE_FILTER = process.argv.includes('--race')
+  ? process.argv[process.argv.indexOf('--race') + 1]
+  : '';
 
 async function main() {
   const startTime = Date.now();
@@ -608,6 +612,7 @@ async function main() {
   if (TEST_MODE) console.log('*** テストモード: 1件のみ ***\n');
   if (REGEN_MODE) console.log('*** 再生成モード: 全予想を削除して再生成 ***\n');
   if (DATE_FILTER) console.log(`*** 日付フィルタ: ${DATE_FILTER} (出走確定含む) ***\n`);
+  if (RACE_FILTER) console.log(`*** レースフィルタ: ${RACE_FILTER} ***\n`);
   if (LIMIT > 0) console.log(`*** 件数制限: ${LIMIT}件 ***\n`);
 
   // 1. クライアント取得 + キャッシュインストール
@@ -641,12 +646,24 @@ async function main() {
     ? `AND r.id NOT IN (SELECT race_id FROM prediction_results)`
     : `AND r.id NOT IN (SELECT race_id FROM predictions)`;
 
+  // --race フィルタ: "中山5" → racecourse_name='中山' AND race_number=5
+  let raceFilterSql = '';
+  const raceFilterArgs: (string | number)[] = [];
+  if (RACE_FILTER) {
+    const match = RACE_FILTER.match(/^(.+?)(\d+)$/);
+    if (match) {
+      raceFilterSql = `AND r.racecourse_name = ? AND r.race_number = ?`;
+      raceFilterArgs.push(match[1], parseInt(match[2], 10));
+    }
+  }
+
   const targetRaces = await dbAll<{ id: string }>(
     `SELECT r.id FROM races r
      WHERE ${statusFilter}
        ${predFilter}
+       ${raceFilterSql}
      ORDER BY r.date, r.id`,
-    statusArgs
+    [...statusArgs, ...raceFilterArgs]
   );
 
   const targetCount = TEST_MODE ? 1 : (LIMIT > 0 ? Math.min(LIMIT, targetRaces.length) : targetRaces.length);
