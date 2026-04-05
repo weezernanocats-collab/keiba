@@ -12,7 +12,7 @@
 #   4. 全テキストをログに保存
 #
 
-set -euo pipefail
+set -eo pipefail
 
 YOUTUBE_URL="${1:-}"
 if [ -z "$YOUTUBE_URL" ]; then
@@ -59,7 +59,7 @@ fi
 REGEN_DONE_FILE="${WORK_DIR}/regen_done_${TODAY}.txt"
 touch "$REGEN_DONE_FILE"
 
-is_regen_done() { grep -qF "$1" "$REGEN_DONE_FILE" 2>/dev/null; }
+is_regen_done() { grep -qF "$1" "$REGEN_DONE_FILE" 2>/dev/null || false; }
 mark_regen_done() { echo "$1" >> "$REGEN_DONE_FILE"; }
 
 # レース発走時刻+競馬場+レース番号リスト取得
@@ -92,7 +92,7 @@ check_and_regen() {
 
   # trigger_hhmmと一致する発走レースを取得
   local races_at_time
-  races_at_time=$(grep "^${trigger_hhmm}	" "$RACE_LIST_FILE" 2>/dev/null)
+  races_at_time=$(grep "^${trigger_hhmm}	" "$RACE_LIST_FILE" 2>/dev/null || true)
 
   if [ -n "$races_at_time" ] && ! is_regen_done "$trigger_hhmm"; then
     echo ""
