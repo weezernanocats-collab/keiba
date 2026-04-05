@@ -62,22 +62,26 @@ touch "$REGEN_DONE_FILE"
 is_regen_done() { grep -qF "$1" "$REGEN_DONE_FILE" 2>/dev/null; }
 mark_regen_done() { echo "$1" >> "$REGEN_DONE_FILE"; }
 
-# レース発走時刻リスト取得（HH:MM形式）
-RACE_TIMES_FILE="${WORK_DIR}/race_times.txt"
+# レース発走時刻+競馬場+レース番号リスト取得
+RACE_LIST_FILE="${WORK_DIR}/race_list.txt"
 cd "$PROJECT_DIR"
 node --env-file=.env.local -e "
 const { createClient } = require('@libsql/client');
 const db = createClient({ url: process.env.TURSO_DATABASE_URL.replace('libsql://', 'https://'), authToken: process.env.TURSO_AUTH_TOKEN });
 (async () => {
-  const r = await db.execute(\"SELECT DISTINCT time FROM races WHERE date = '${TODAY}' AND time IS NOT NULL ORDER BY time\");
-  r.rows.forEach(row => console.log(row.time));
+  const r = await db.execute(\"SELECT time, racecourse_name, race_number, name FROM races WHERE date = '${TODAY}' AND time IS NOT NULL ORDER BY time\");
+  r.rows.forEach(row => console.log(row.time + '\t' + row.racecourse_name + '\t' + row.race_number + '\t' + row.name));
 })();
-" 2>/dev/null | grep -E '^[0-9]{2}:[0-9]{2}' > "$RACE_TIMES_FILE"
+" 2>/dev/null | grep -E '^[0-9]{2}:[0-9]{2}' > "$RACE_LIST_FILE"
 
-RACE_COUNT=$(wc -l < "$RACE_TIMES_FILE" | tr -d ' ')
-echo "本日のレース発走時刻: ${RACE_COUNT}件"
-cat "$RACE_TIMES_FILE" | tr '\n' ' '
-echo ""
+# 旧形式の時刻のみファイルも作成（互換用）
+RACE_TIMES_FILE="${WORK_DIR}/race_times.txt"
+cut -f1 "$RACE_LIST_FILE" | sort -u > "$RACE_TIMES_FILE"
+
+RACE_COUNT=$(wc -l < "$RACE_LIST_FILE" | tr -d ' ')
+echo "本日のレース: ${RACE_COUNT}件"
+head -5 "$RACE_LIST_FILE"
+echo "..."
 echo ""
 
 # 発走7分前チェック: 現在時刻から7分後の発走レースがあれば再生成
@@ -86,23 +90,32 @@ check_and_regen() {
   local trigger_time=$((now_epoch + REGEN_MINUTES_BEFORE * 60))
   local trigger_hhmm=$(date -r "$trigger_time" '+%H:%M' 2>/dev/null || date -d "@$trigger_time" '+%H:%M' 2>/dev/null)
 
-  # trigger_hhmmと一致する発走時刻があるか
-  if grep -qF "$trigger_hhmm" "$RACE_TIMES_FILE" && ! is_regen_done "$trigger_hhmm"; then
+  # trigger_hhmmと一致する発走レースを取得
+  local races_at_time
+  races_at_time=$(grep "^${trigger_hhmm}	" "$RACE_LIST_FILE" 2>/dev/null)
+
+  if [ -n "$races_at_time" ] && ! is_regen_done "$trigger_hhmm"; then
     echo ""
     echo "  *** 発走${REGEN_MINUTES_BEFORE}分前: ${trigger_hhmm}発走のレースを検知 ***"
-    echo "  *** 当日未発走レースをまとめて予想再生成 ($(date '+%H:%M:%S')) ***"
     echo "  [$(date '+%H:%M:%S')] 再生成トリガー: ${trigger_hhmm}発走" >> "$LOG_FILE"
 
     mark_regen_done "$trigger_hhmm"
 
-    # バックグラウンドで再生成（全未発走レース）+ Slack通知
+    # 該当レースのみ再生成 + Slack通知
     (
       cd "$PROJECT_DIR"
-      RESULT=$($REGEN_SCRIPT --date "$TODAY" --regen 2>&1)
-      GENERATED=$(echo "$RESULT" | grep '生成:' | head -1)
-      echo "$RESULT" | tail -5
-      echo "  *** 予想再生成完了 ($(date '+%H:%M:%S')) ***"
-      bash "${SCRIPT_DIR}/slack-notify.sh" "🐴 予想再生成完了 (${trigger_hhmm}発走前)\n${GENERATED:-生成完了}\nパドック解説反映済み"
+      RACE_NAMES=""
+      echo "$races_at_time" | while IFS=$'\t' read -r _time venue rnum rname; do
+        RACE_KEY="${venue}${rnum}"
+        echo "  *** 再生成: ${venue} ${rnum}R ${rname} ($(date '+%H:%M:%S')) ***"
+        $REGEN_SCRIPT --date "$TODAY" --race "$RACE_KEY" --regen 2>&1 | tail -2
+        RACE_NAMES="${RACE_NAMES}${venue}${rnum}R ${rname}\n"
+      done
+
+      # Slack通知
+      RACE_INFO=$(echo "$races_at_time" | while IFS=$'\t' read -r _t v r n; do echo "${v}${r}R ${n}"; done | tr '\n' '、' | sed 's/、$//')
+      bash "${SCRIPT_DIR}/slack-notify.sh" "🐴 予想再生成完了 (${trigger_hhmm}発走前)\n${RACE_INFO}\nパドック解説反映済み"
+      echo "  *** 再生成完了 ($(date '+%H:%M:%S')) ***"
     ) &
   fi
 }
