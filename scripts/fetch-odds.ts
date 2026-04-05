@@ -119,7 +119,8 @@ async function scrapeOddsFromApi(raceId: string): Promise<ApiOdds> {
   const win: ApiOdds['win'] = [];
   const place: ApiOdds['place'] = [];
 
-  const apiUrl = `${RACE_BASE_URL}/api/api_get_jra_odds.html?race_id=${raceId}&type=1`;
+  // action=init&compress=0: 未発走レースの前売りオッズも取得可能にする
+  const apiUrl = `${RACE_BASE_URL}/api/api_get_jra_odds.html?race_id=${raceId}&type=1&action=init&compress=0`;
   const response = await fetch(apiUrl, {
     headers: { 'User-Agent': USER_AGENT },
     signal: AbortSignal.timeout(10000),
@@ -134,12 +135,15 @@ async function scrapeOddsFromApi(raceId: string): Promise<ApiOdds> {
         '1'?: Record<string, [string, string, string]>;
         '2'?: Record<string, [string, string, string]>;
       };
-    };
+    } | string;
   };
 
-  if (data.status !== 'result' || !data.data?.odds) return { win, place };
+  // status=result (確定) or status=middle (前売り) どちらもオッズを取得
+  if (!data.data || typeof data.data !== 'object') return { win, place };
+  const oddsData = data.data as { odds?: { '1'?: Record<string, [string, string, string]>; '2'?: Record<string, [string, string, string]> } };
+  if (!oddsData.odds) return { win, place };
 
-  const winOdds = data.data.odds['1'];
+  const winOdds = oddsData.odds['1'];
   if (winOdds) {
     for (const [numStr, values] of Object.entries(winOdds)) {
       const horseNumber = parseInt(numStr);
@@ -148,7 +152,7 @@ async function scrapeOddsFromApi(raceId: string): Promise<ApiOdds> {
     }
   }
 
-  const placeOdds = data.data.odds['2'];
+  const placeOdds = oddsData.odds['2'];
   if (placeOdds) {
     for (const [numStr, values] of Object.entries(placeOdds)) {
       const horseNumber = parseInt(numStr);
@@ -231,13 +235,14 @@ async function main() {
 
     if (races.rows.length === 0) continue;
 
-    // Check if already have odds for this date
+    // Check if already have odds for this date (skip unless --force)
+    const forceFlag = process.argv.includes('--force');
     const existingOdds = await db.execute({
       sql: "SELECT COUNT(*) as c FROM odds WHERE race_id IN (SELECT id FROM races WHERE date = ?)",
       args: [targetDate],
     });
-    if ((existingOdds.rows[0].c as number) > 0) {
-      console.log(`  ${targetDate}: ${races.rows.length} races (already have odds, skip)`);
+    if ((existingOdds.rows[0].c as number) > 0 && !forceFlag) {
+      console.log(`  ${targetDate}: ${races.rows.length} races (already have odds, skip. Use --force to refresh)`);
       continue;
     }
 
