@@ -608,8 +608,7 @@ const RACE_FILTER = process.argv.includes('--race')
   : '';
 
 /**
- * パドック文字起こしを読み込む
- * 発走時刻の30分前〜直前のチャンクを抽出
+ * パドック文字起こしを読み込み、パドック解説部分のみ抽出・馬番ごとに整理
  */
 function loadPaddockChunks(raceDate: string, raceTime: string | null): string[] {
   if (!raceTime) return [];
@@ -621,20 +620,120 @@ function loadPaddockChunks(raceDate: string, raceTime: string | null): string[] 
     const [raceH, raceM] = raceTime.split(':').map(Number);
     const raceMinutes = raceH * 60 + raceM;
 
-    const relevant: string[] = [];
+    // 発走30分前〜発走時刻のチャンクを取得
+    const rawTexts: string[] = [];
     for (const line of lines) {
       try {
         const chunk = JSON.parse(line) as { time: string; text: string };
         const [h, m] = chunk.time.split(':').map(Number);
         const chunkMinutes = h * 60 + m;
-        // 発走30分前〜発走時刻のチャンクを取得
         if (chunkMinutes >= raceMinutes - 30 && chunkMinutes < raceMinutes) {
-          relevant.push(chunk.text.trim());
+          rawTexts.push(chunk.text.trim());
         }
-      } catch { /* skip malformed line */ }
+      } catch { /* skip */ }
     }
-    return relevant;
+    if (rawTexts.length === 0) return [];
+
+    return parsePaddockCommentary(rawTexts.join(' '));
   } catch { return []; }
+}
+
+/**
+ * 生テキストからパドック解説をフィルタし、馬番ごとに整理
+ */
+function parsePaddockCommentary(raw: string): string[] {
+  // 除外パターン（レース結果、払い戻し、CM等）
+  const excludePatterns = [
+    /単勝\d+番.*?円/, /探証\d+番/, /探索式/,
+    /[枠馬ワク]連.*?[円倍]/, /生まれん|生また|生まな/,
+    /三連|3連|三年|3年/, /復勝.*?円/,
+    /ワイド.*?円/, /はらい戻し|払い戻し/,
+    /価値タイム|勝ちタイム/, /上がり\d+メートル/,
+    /グリーンチャンネル/, /視聴.*?方法/,
+    /qrコー[トド]/i, /ご案内でした/,
+    /確定までお待ち/, /[0-9]+\.[0-9]+倍/,
+    /人気.*?です$/, /番人気\d+番人気/,
+    /キロ.*?キロ.*?キロ/, // 馬体重の羅列行
+    /勝利を|勝ちました|買ったのは|1着2着|2着3着/,
+    /逃げた|寝ばって|外1気に|インコースから/,
+    /ケーバとなりました|レースは.*?等の/,
+    /職業をつかんで/, /先行して勝利/,
+  ];
+
+  // パドック関連キーワード（これらを含むセンテンスを採用）
+  const paddockKeywords = [
+    /\d+番/, /プラス\d|マイナス\d|増減なし/,
+    /パドック|パドク/, /体[がはも]|馬体/, /歩[きけい]|アルキ/,
+    /気配|仕上|前向き|集中|落ち着|テンション|硬[くい]|柔ら/,
+    /削[りれ]|絞[りれっ]|太め|重め|シャープ|キッチリ|しっかり/,
+    /筋肉|毛艶|毛ヅヤ|発汗|汗/, /成長|未完成|良く見え|目立つ/,
+    /推奨[馬場]|注目/, /リズム|踏み込み|バネ/,
+  ];
+
+  // 文をセンテンスに分割
+  const sentences = raw
+    .replace(/。/g, '。\n')
+    .replace(/です\s/g, 'です\n')
+    .replace(/ます\s/g, 'ます\n')
+    .replace(/ですね\s/g, 'ですね\n')
+    .replace(/ですし\s/g, 'ですし\n')
+    .replace(/ですかね\s/g, 'ですかね\n')
+    .replace(/思います\s/g, '思います\n')
+    .split('\n')
+    .map(s => s.trim())
+    .filter(s => s.length > 5);
+
+  // フィルタ: 除外パターンを含むものを除去し、パドックキーワードを含むものを採用
+  const paddockSentences = sentences.filter(s => {
+    if (excludePatterns.some(p => p.test(s))) return false;
+    return paddockKeywords.some(p => p.test(s));
+  });
+
+  if (paddockSentences.length === 0) return [];
+
+  // 馬番ごとにグループ化（文の先頭の馬番で分類）
+  const horseComments = new Map<number, string[]>();
+  let currentHorse = 0;
+
+  for (const s of paddockSentences) {
+    // 推奨行はスキップ（後で別処理）
+    if (/推奨/.test(s)) continue;
+
+    // 文の先頭付近に馬番がある場合は切り替え
+    const headMatch = s.match(/^.{0,10}?(\d{1,2})番/);
+    if (headMatch) {
+      const num = parseInt(headMatch[1]);
+      if (num >= 1 && num <= 18) currentHorse = num;
+    }
+    if (currentHorse > 0) {
+      if (!horseComments.has(currentHorse)) horseComments.set(currentHorse, []);
+      horseComments.get(currentHorse)!.push(s);
+    }
+  }
+
+  // 推奨馬番号の抽出（"推奨" を含む行と、周辺の馬番を拾う）
+  const recommendLines = paddockSentences.filter(s => /推奨/.test(s));
+  const recommendNums = new Set<number>();
+  for (const line of recommendLines) {
+    const matches = line.matchAll(/(\d{1,2})番/g);
+    for (const m of matches) {
+      const n = parseInt(m[1]);
+      if (n >= 1 && n <= 18) recommendNums.add(n);
+    }
+  }
+
+  // 整形出力
+  const result: string[] = [];
+  const sorted = [...horseComments.entries()].sort((a, b) => a[0] - b[0]);
+  for (const [num, comments] of sorted) {
+    const text = comments.join(' ');
+    result.push(`【${num}番】${text}`);
+  }
+  if (recommendNums.size > 0) {
+    result.push(`\n★解説者推奨: ${[...recommendNums].sort((a, b) => a - b).map(n => `${n}番`).join('、')}`);
+  }
+
+  return result;
 }
 
 async function main() {
