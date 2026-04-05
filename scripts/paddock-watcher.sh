@@ -95,11 +95,14 @@ check_and_regen() {
 
     mark_regen_done "$trigger_hhmm"
 
-    # バックグラウンドで再生成（全未発走レース）
+    # バックグラウンドで再生成（全未発走レース）+ Slack通知
     (
       cd "$PROJECT_DIR"
-      $REGEN_SCRIPT --date "$TODAY" --regen 2>&1 | tail -5
+      RESULT=$($REGEN_SCRIPT --date "$TODAY" --regen 2>&1)
+      GENERATED=$(echo "$RESULT" | grep '生成:' | head -1)
+      echo "$RESULT" | tail -5
       echo "  *** 予想再生成完了 ($(date '+%H:%M:%S')) ***"
+      bash "${SCRIPT_DIR}/slack-notify.sh" "🐴 予想再生成完了 (${trigger_hhmm}発走前)\n${GENERATED:-生成完了}\nパドック解説反映済み"
     ) &
   fi
 }
