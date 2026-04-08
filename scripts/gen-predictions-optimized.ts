@@ -799,7 +799,7 @@ function parsePaddockCommentary(raw: string): string[] {
  */
 async function summarizePaddockWithLLM(rawText: string): Promise<string | null> {
   const OLLAMA_URL = 'http://localhost:11434/api/chat';
-  const MODEL = 'gemma3:4b';
+  const MODEL = 'qwen3.5:35b';
 
   const prompt = `あなたは競馬パドック解説のまとめ役です。
 以下は音声認識で文字起こしされたパドック解説です（誤字が多い）。
@@ -818,7 +818,7 @@ ${rawText}`;
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
+    const timeout = setTimeout(() => controller.abort(), 60000);
 
     const res = await fetch(OLLAMA_URL, {
       method: 'POST',
