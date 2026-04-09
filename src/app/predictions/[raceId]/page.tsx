@@ -100,6 +100,18 @@ interface PredictionData {
   aiOnlyRanking?: AIOnlyRanking;
   aiRankingBets?: AIRankingBetsData;
   paddockCommentary?: string;
+  shosanPrediction?: {
+    candidates: {
+      horseNumber: number;
+      horseName: string;
+      theory: 1 | 2;
+      matchScore: number;
+      jockeyZone: number;
+      jockeyName: string;
+      reasons: string[];
+    }[];
+    umarenRecommendations: { horses: number[]; confidence: string }[];
+  };
 }
 
 interface RaceData {
@@ -373,6 +385,7 @@ export default function PredictionDetailPage() {
     ...(verification ? [{ id: 'verification', label: '答え合わせ' }] : []),
     ...(prediction?.paddockCommentary ? [{ id: 'paddock', label: 'パドック' }] : []),
     ...(prediction?.aiRankingBets && prediction.aiRankingBets.bets.length > 0 ? [{ id: 'ai-ranking-bets', label: 'AI買い目' }] : []),
+    ...(prediction?.shosanPrediction && prediction.shosanPrediction.candidates.length > 0 ? [{ id: 'shoshan', label: 'しょーさん' }] : []),
     { id: 'summary', label: 'サマリー' },
     { id: 'picks', label: 'ブレンド予想' },
     { id: 'details', label: '詳細分析' },
@@ -835,6 +848,68 @@ export default function PredictionDetailPage() {
                 );
               })}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* しょーさん予想 */}
+      {prediction.shosanPrediction && prediction.shosanPrediction.candidates.length > 0 && (
+        <div id="shoshan" ref={setSectionRefWrapped('shoshan')} className="scroll-mt-32">
+          <div className="border-2 border-orange-400 dark:border-orange-600 rounded-xl p-6 bg-orange-50/50 dark:bg-orange-900/20">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="px-2 py-0.5 rounded text-xs font-bold bg-orange-500 text-white">SHO</span>
+              <h2 className="text-lg font-bold">しょーさん予想</h2>
+            </div>
+            <p className="text-xs text-muted mb-4">先行力 x 休養明け x アゲ騎手の乗り替わり理論</p>
+
+            {/* 候補馬 */}
+            <div className="space-y-3 mb-4">
+              {prediction.shosanPrediction.candidates.map((c, idx) => (
+                <div key={c.horseNumber} className="flex items-center gap-3 p-3 rounded-lg bg-white/60 dark:bg-black/20 border border-orange-200 dark:border-orange-800">
+                  <span className="text-2xl font-black text-orange-500 w-8 text-center">{idx + 1}</span>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold">{c.horseNumber}番 {c.horseName}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${
+                        c.theory === 1 ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                          : 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+                      }`}>
+                        理論{c.theory}
+                      </span>
+                      <span className="text-xs text-muted">Z{c.jockeyZone} {c.jockeyName}</span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1">
+                      <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                        <div
+                          className={`h-2 rounded-full ${c.matchScore >= 70 ? 'bg-orange-500' : c.matchScore >= 55 ? 'bg-yellow-500' : 'bg-gray-400'}`}
+                          style={{ width: `${c.matchScore}%` }}
+                        />
+                      </div>
+                      <span className="text-sm font-bold text-orange-600 dark:text-orange-400">{c.matchScore}%</span>
+                    </div>
+                    <p className="text-xs text-muted mt-1">{c.reasons.join(' / ')}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* 馬連推奨 */}
+            {prediction.shosanPrediction.umarenRecommendations.length > 0 && (
+              <div className="border-t border-orange-200 dark:border-orange-800 pt-3">
+                <h3 className="text-sm font-bold mb-2">馬連推奨</h3>
+                <div className="flex flex-wrap gap-2">
+                  {prediction.shosanPrediction.umarenRecommendations.map((rec, i) => (
+                    <span key={i} className={`px-3 py-1.5 rounded-lg text-sm font-bold border ${
+                      rec.confidence === '高' ? 'bg-orange-100 dark:bg-orange-900/30 border-orange-400 text-orange-700 dark:text-orange-300'
+                        : rec.confidence === '中' ? 'bg-yellow-100 dark:bg-yellow-900/30 border-yellow-400 text-yellow-700 dark:text-yellow-300'
+                        : 'bg-gray-100 dark:bg-gray-800 border-gray-300 text-gray-600 dark:text-gray-400'
+                    }`}>
+                      {rec.horses.join(' - ')} <span className="text-xs">({rec.confidence})</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

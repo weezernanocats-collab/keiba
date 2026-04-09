@@ -1,0 +1,363 @@
+/**
+ * しょーさん予想: 先行力 × 乗り替わり × アゲ騎手 の理論
+ *
+ * 理論1: 近走先行できなかった馬 + アゲ騎手への乗り替わり（復調期待）
+ * 理論2: 前走好走(好騎手騎乗) + アゲ騎手が継続/乗り替わり（好調継続）
+ */
+
+// ==================== アゲ騎手定義 ====================
+
+export interface JockeyZone {
+  id: string;
+  name: string;
+  zone: 1 | 2 | 3 | 4 | 5;
+}
+
+// Zone 5は地方競馬場のみ有効
+const LOCAL_VENUES = ['札幌', '函館', '福島', '新潟', '中京', '小倉'];
+
+const AGE_JOCKEYS: JockeyZone[] = [
+  // Zone 1: 先行意識が高く、長年好成績、良い馬が回ってくる
+  { id: '00666', name: '武豊', zone: 1 },
+  { id: '01126', name: '松山', zone: 1 },
+  { id: '01170', name: '横山武', zone: 1 },
+  { id: '01163', name: '坂井', zone: 1 },
+  // Zone 2: 先行意識が高く、直近で非常に調子が良い、期待値最高
+  { id: '01174', name: '岩田望', zone: 2 },
+  { id: '01157', name: '鮫島駿', zone: 2 },
+  { id: '01160', name: '荻野極', zone: 2 },
+  // Zone 3: 先行意識が高いが、Zone 2より信頼度低い
+  { id: '01075', name: '田辺', zone: 3 },
+  { id: '01144', name: '菱田', zone: 3 },
+  { id: '01200', name: '西塚', zone: 3 },
+  { id: '01150', name: '石川', zone: 3 },
+  { id: '01115', name: '浜中', zone: 3 },
+  { id: '01122', name: '三浦', zone: 3 },
+  { id: '01178', name: '斎藤', zone: 3 },
+  { id: '01220', name: '田山', zone: 3 },
+  // Zone 4: 一時期Zone 2だったが移行できなかった
+  { id: '01091', name: '丹内', zone: 4 },
+  { id: '01197', name: '佐々木', zone: 4 },
+  // Zone 5: 地方のみZone 3
+  { id: '01127', name: '丸山', zone: 5 },
+  // 杉山はDBにないためスキップ
+];
+
+export function getJockeyZone(jockeyId: string, venue?: string): JockeyZone | null {
+  const j = AGE_JOCKEYS.find(a => a.id === jockeyId);
+  if (!j) return null;
+  if (j.zone === 5) {
+    // Zone 5は地方開催のみ有効
+    if (venue && LOCAL_VENUES.includes(venue)) {
+      return { ...j, zone: 3 }; // 地方ではZone 3扱い
+    }
+    return null; // 中央主場では対象外
+  }
+  return j;
+}
+
+// ==================== 入力データ型 ====================
+
+export interface HorseEntry {
+  horseNumber: number;
+  horseName: string;
+  horseId: string;
+  jockeyId: string;
+  jockeyName: string;
+}
+
+export interface PastPerf {
+  date: string;
+  position: number;       // 着順
+  cornerPositions: string; // "2-2-3-4" or "1-1" 等
+  jockeyId?: string;       // 前走の騎手ID（race_entriesから）
+  jockeyName?: string;
+  entries: number;          // 出走頭数
+}
+
+// ==================== 評価結果 ====================
+
+export interface ShosanCandidate {
+  horseNumber: number;
+  horseName: string;
+  theory: 1 | 2;
+  matchScore: number;    // 0-100%
+  jockeyZone: number;
+  jockeyName: string;
+  prevJockeyName?: string;
+  reasons: string[];     // 選出理由
+}
+
+export interface ShosanResult {
+  candidates: ShosanCandidate[];
+  umarenRecommendations: { horses: number[]; confidence: string }[];
+}
+
+// ==================== 先行力判定 ====================
+
+function getFirstCornerPosition(cornerPositions: string): number | null {
+  if (!cornerPositions || cornerPositions === '**' || cornerPositions === '') return null;
+  const parts = cornerPositions.split('-').map(s => parseInt(s.trim()));
+  return parts[0] > 0 ? parts[0] : null;
+}
+
+/**
+ * 先行力があるか: 過去に1角1-2番手を取った経験があるか
+ */
+function hasFrontRunningAbility(pastPerfs: PastPerf[]): { has: boolean; frontCount: number; totalRaces: number } {
+  let frontCount = 0;
+  let totalRaces = 0;
+  for (const pp of pastPerfs) {
+    const pos = getFirstCornerPosition(pp.cornerPositions);
+    if (pos === null) continue;
+    totalRaces++;
+    if (pos <= 2) frontCount++;
+  }
+  return { has: frontCount >= 1, frontCount, totalRaces };
+}
+
+/**
+ * 近走で先行できていないか（直近N走で1角3番手以降）
+ */
+function recentlyNotFrontRunning(recentPerfs: PastPerf[], n: number = 3): boolean {
+  const recent = recentPerfs.slice(0, n);
+  if (recent.length === 0) return false;
+  return recent.every(pp => {
+    const pos = getFirstCornerPosition(pp.cornerPositions);
+    return pos === null || pos >= 3;
+  });
+}
+
+/**
+ * 休養期間の計算（日数）
+ */
+function restDays(raceDate: string, lastPerfDate: string): number {
+  const d1 = new Date(raceDate);
+  const d2 = new Date(lastPerfDate);
+  return Math.floor((d1.getTime() - d2.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * 近走で好走しているか
+ */
+function recentGoodResult(recentPerfs: PastPerf[], n: number = 1): boolean {
+  const recent = recentPerfs.slice(0, n);
+  return recent.some(pp => pp.position <= 3);
+}
+
+// ==================== 理論評価 ====================
+
+export function evaluateShosanTheory(
+  raceDate: string,
+  venue: string,
+  entries: HorseEntry[],
+  pastPerfsMap: Map<string, PastPerf[]>,   // horseId -> past performances (desc by date)
+  prevJockeyMap: Map<string, string>,       // horseId -> 前走のjockey_id
+): ShosanResult {
+  const candidates: ShosanCandidate[] = [];
+
+  for (const entry of entries) {
+    const pastPerfs = pastPerfsMap.get(entry.horseId) || [];
+    if (pastPerfs.length < 2) continue;
+
+    // 前提: 先行力があること
+    const frontAbility = hasFrontRunningAbility(pastPerfs);
+    if (!frontAbility.has) continue;
+
+    // アゲ騎手チェック
+    const currentJockeyZone = getJockeyZone(entry.jockeyId, venue);
+    if (!currentJockeyZone) continue;
+
+    // 前走の騎手
+    const prevJockeyId = prevJockeyMap.get(entry.horseId) || '';
+    const isJockeyChange = prevJockeyId !== '' && prevJockeyId !== entry.jockeyId;
+
+    // 最終レースからの休養日数
+    const rest = restDays(raceDate, pastPerfs[0].date);
+
+    // ==================== 理論1: 復調 + アゲ騎手乗り替わり ====================
+    const theory1 = evaluateTheory1(
+      entry, pastPerfs, currentJockeyZone, isJockeyChange, prevJockeyId, rest
+    );
+    if (theory1) candidates.push(theory1);
+
+    // ==================== 理論2: 好調継続 + アゲ騎手 ====================
+    const theory2 = evaluateTheory2(
+      entry, pastPerfs, currentJockeyZone, isJockeyChange, prevJockeyId, rest, venue
+    );
+    if (theory2) candidates.push(theory2);
+  }
+
+  // スコア順にソート、上位3頭
+  candidates.sort((a, b) => b.matchScore - a.matchScore);
+  const top = candidates.slice(0, 3);
+
+  // 馬連推奨
+  const umarenRecommendations = generateUmarenRecommendations(top);
+
+  return { candidates: top, umarenRecommendations };
+}
+
+function evaluateTheory1(
+  entry: HorseEntry,
+  pastPerfs: PastPerf[],
+  jockeyZone: JockeyZone,
+  isJockeyChange: boolean,
+  prevJockeyId: string,
+  restFromLastRace: number,
+): ShosanCandidate | null {
+  const reasons: string[] = [];
+  let score = 0;
+
+  // 必須: 乗り替わり（アゲ騎手への交代）
+  if (!isJockeyChange) return null;
+  reasons.push(`乗り替わり→${jockeyZone.name}(Z${jockeyZone.zone})`);
+
+  // 必須: 近走好走していない（好走馬は買わない）
+  if (recentGoodResult(pastPerfs, 2)) return null;
+  reasons.push('近走凡走');
+
+  // 核心: 休養明けパターンを検出
+  // パターンA: 今走が休養明け（6週+）
+  // パターンB: 直近に休養があり、叩き2-3戦目
+  let restPattern = '';
+  let restWeeks = 0;
+
+  if (restFromLastRace >= 42) {
+    // パターンA: 今走が休養明け
+    restPattern = 'direct';
+    restWeeks = Math.floor(restFromLastRace / 7);
+    score += 25;
+    reasons.push(`休養明け${restWeeks}週`);
+  } else if (pastPerfs.length >= 2) {
+    // パターンB: 直近の走間に6週+の休養があったか
+    for (let k = 0; k < Math.min(3, pastPerfs.length - 1); k++) {
+      const gap = restDays(pastPerfs[k].date, pastPerfs[k + 1].date);
+      if (gap >= 42) {
+        restPattern = 'post-rest';
+        restWeeks = Math.floor(gap / 7);
+        const racesBack = k + 1; // 休養後何戦目か（今走含めず）
+        score += 30; // 叩き後はスコア高め
+        reasons.push(`休養${restWeeks}週後の叩き${racesBack + 1}戦目`);
+        break;
+      }
+    }
+  }
+
+  // 休養パターンなし → 対象外
+  if (!restPattern) return null;
+
+  // スコア加算: 基本
+  score += 20;
+
+  // ゾーンボーナス
+  if (jockeyZone.zone === 1) score += 15;
+  else if (jockeyZone.zone === 2) score += 20; // Zone 2が最も期待値高い
+  else if (jockeyZone.zone === 3) score += 10;
+  else if (jockeyZone.zone === 4) score += 5;
+
+  // 先行実績ボーナス（過去に先行できた実績が多いほど）
+  const frontAbility = hasFrontRunningAbility(pastPerfs);
+  if (frontAbility.frontCount >= 3) score += 10;
+  else if (frontAbility.frontCount >= 2) score += 5;
+
+  if (score < 45) return null;
+
+  return {
+    horseNumber: entry.horseNumber,
+    horseName: entry.horseName,
+    theory: 1,
+    matchScore: Math.min(100, score),
+    jockeyZone: jockeyZone.zone,
+    jockeyName: jockeyZone.name,
+    prevJockeyName: undefined,
+    reasons,
+  };
+}
+
+function evaluateTheory2(
+  entry: HorseEntry,
+  pastPerfs: PastPerf[],
+  jockeyZone: JockeyZone,
+  isJockeyChange: boolean,
+  prevJockeyId: string,
+  rest: number,
+  venue: string,
+): ShosanCandidate | null {
+  const reasons: string[] = [];
+  let score = 0;
+
+  // 必須: 前走が好走（3着以内）
+  if (!recentGoodResult(pastPerfs, 1)) return null;
+  reasons.push(`前走${pastPerfs[0].position}着`);
+
+  // 必須: 前走の騎手がZone 1-2 or アゲ騎手
+  const prevZone = prevJockeyId ? getJockeyZone(prevJockeyId, venue) : null;
+  // 一流騎手（ルメール、川田等）も前走好走の条件に含める
+  const topJockeyIds = ['00660', '00733', '00666', '01126', '01170', '01163']; // ルメール、川田、武豊、松山、横山武、坂井
+  const prevIsGoodJockey = prevZone && prevZone.zone <= 2 || topJockeyIds.includes(prevJockeyId);
+  if (!prevIsGoodJockey) return null;
+  reasons.push(`前走騎手:${prevZone?.name || '一流'}`);
+
+  // 現在もアゲ騎手
+  reasons.push(`今走:${jockeyZone.name}(Z${jockeyZone.zone})`);
+
+  // 好調継続（3戦以内）
+  if (rest > 90) return null; // 長期休養は除外
+  if (pastPerfs.length >= 3 && pastPerfs.slice(0, 3).every(p => p.position > 5)) return null;
+
+  // スコア計算
+  score += 30;
+
+  // 前走着順ボーナス
+  if (pastPerfs[0].position === 1) score += 15;
+  else if (pastPerfs[0].position === 2) score += 10;
+  else if (pastPerfs[0].position === 3) score += 5;
+
+  // 継続騎乗 vs 乗り替わり
+  if (!isJockeyChange) {
+    score += 10; // 継続騎乗は安定
+    reasons.push('継続騎乗');
+  } else {
+    score += 5;
+    reasons.push('乗り替わり');
+  }
+
+  // ゾーンボーナス
+  if (jockeyZone.zone === 1) score += 15;
+  else if (jockeyZone.zone === 2) score += 20;
+  else if (jockeyZone.zone === 3) score += 10;
+
+  if (score < 45) return null;
+
+  return {
+    horseNumber: entry.horseNumber,
+    horseName: entry.horseName,
+    theory: 2,
+    matchScore: Math.min(100, score),
+    jockeyZone: jockeyZone.zone,
+    jockeyName: jockeyZone.name,
+    reasons,
+  };
+}
+
+// ==================== 馬連推奨 ====================
+
+function generateUmarenRecommendations(
+  candidates: ShosanCandidate[]
+): { horses: number[]; confidence: string }[] {
+  if (candidates.length < 2) return [];
+
+  const recs: { horses: number[]; confidence: string }[] = [];
+  for (let i = 0; i < candidates.length; i++) {
+    for (let j = i + 1; j < candidates.length; j++) {
+      const avgScore = (candidates[i].matchScore + candidates[j].matchScore) / 2;
+      const confidence = avgScore >= 70 ? '高' : avgScore >= 50 ? '中' : '低';
+      recs.push({
+        horses: [candidates[i].horseNumber, candidates[j].horseNumber].sort((a, b) => a - b),
+        confidence,
+      });
+    }
+  }
+  return recs;
+}

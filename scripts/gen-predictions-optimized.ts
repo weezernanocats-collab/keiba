@@ -22,6 +22,7 @@ import { ensureInitialized, dbAll } from '../src/lib/database';
 import { generatePrediction, type HorseAnalysisInput } from '../src/lib/prediction-engine';
 import { savePrediction } from '../src/lib/queries';
 import { readFileSync, existsSync } from 'fs';
+import { evaluateShosanTheory, type HorseEntry, type PastPerf } from '../src/lib/shoshan-theory';
 import type { TrackType, TrackCondition } from '../src/types';
 
 // ==================== 型定義 ====================
@@ -1021,6 +1022,67 @@ async function main() {
         race.grade || undefined,
         horseInputs as HorseAnalysisInput[],
       );
+
+      // しょーさん予想を評価してanalysisに埋め込み
+      {
+        const horseEntries: HorseEntry[] = entries.map(re => ({
+          horseNumber: re.horse_number,
+          horseName: re.horse_name,
+          horseId: re.horse_id,
+          jockeyId: re.jockey_id || '',
+          jockeyName: jockeyNameById.get(re.jockey_id) || '',
+        }));
+        const pastPerfsForShoshan = new Map<string, PastPerf[]>();
+        for (const re of entries) {
+          const allPerfs = perfsByHorse.get(re.horse_id) || [];
+          pastPerfsForShoshan.set(re.horse_id, allPerfs
+            .filter(p => p.date < race.date)
+            .map(p => ({
+              date: p.date,
+              position: p.position,
+              cornerPositions: p.corner_positions || '',
+              entries: p.entries,
+            })));
+        }
+        // 前走騎手マップ
+        const prevJockeyMap = new Map<string, string>();
+        for (const re of entries) {
+          // キャッシュ内で前走騎手を探す
+          const perfs = perfsByHorse.get(re.horse_id) || [];
+          const prevPerf = perfs.filter(p => p.date < race.date)[0];
+          if (prevPerf) {
+            let found = false;
+            for (const [rid, rEntries] of entriesByRace) {
+              const r = racesById.get(rid);
+              if (r && r.date === prevPerf.date) {
+                const prevEntry = rEntries.find(e => e.horse_id === re.horse_id);
+                if (prevEntry) {
+                  prevJockeyMap.set(re.horse_id, prevEntry.jockey_id);
+                  found = true;
+                  break;
+                }
+              }
+            }
+            // キャッシュになければDBから直接取得
+            if (!found) {
+              const dbResult = await dbAll<{ jockey_id: string }>(
+                `SELECT re.jockey_id FROM race_entries re JOIN races r ON re.race_id = r.id
+                 WHERE re.horse_id = ? AND r.date < ? ORDER BY r.date DESC LIMIT 1`,
+                [re.horse_id, race.date]
+              );
+              if (dbResult.length > 0) {
+                prevJockeyMap.set(re.horse_id, dbResult[0].jockey_id);
+              }
+            }
+          }
+        }
+        const shosanResult = evaluateShosanTheory(
+          race.date, race.racecourse_name, horseEntries, pastPerfsForShoshan, prevJockeyMap
+        );
+        if (shosanResult.candidates.length > 0) {
+          (prediction.analysis as Record<string, unknown>).shosanPrediction = shosanResult;
+        }
+      }
 
       // パドック文字起こしをanalysisに埋め込み（ファイルがあれば）
       if (REGEN_MODE) {
