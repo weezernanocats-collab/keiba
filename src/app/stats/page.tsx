@@ -169,6 +169,14 @@ export default function StatsPage() {
     cumulative?: AiCumPoint[];
   }
   const [aiRankingBetStats, setAiRankingBetStats] = useState<AiRankingBetStatsType | null>(null);
+  interface ShosanTheoryStats { candidates: number; wins: number; top3: number; winRate: number; top3Rate: number; roi: number; investment: number; returnAmount: number }
+  interface ShosanStatsType {
+    totalRaces: number;
+    theory1: ShosanTheoryStats;
+    theory2: ShosanTheoryStats;
+    umaren: { bets: number; hits: number; hitRate: number; roi: number; investment: number; returnAmount: number };
+  }
+  const [shosanStats, setShosanStats] = useState<ShosanStatsType | null>(null);
 
   useEffect(() => {
     async function fetchData() {
@@ -195,6 +203,7 @@ export default function StatsPage() {
         setHighConfEvStats(data.highConfEvStats || null);
         setAiBetStats(data.aiIndependentBetStats || null);
         setAiRankingBetStats(data.aiRankingBetStats || null);
+        setShosanStats(data.shosanStats || null);
 
         const trendJson = await trendRes.json();
         setTrendData(trendJson.trend || []);
@@ -706,6 +715,85 @@ export default function StatsPage() {
         </div>
       )}
 
+
+      {/* しょーさん予想の成績 */}
+      {shosanStats && shosanStats.totalRaces > 0 && (
+        <div className="bg-card-bg border border-orange-700/40 rounded-xl p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="px-2 py-0.5 rounded text-xs font-bold bg-orange-500 text-white">SHO</span>
+            <h2 className="text-lg font-bold">しょーさん予想の成績</h2>
+          </div>
+          <p className="text-xs text-muted mb-4">
+            先行力×休養×アゲ騎手理論による候補馬の実績（{shosanStats.totalRaces}レース）
+          </p>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b dark:border-gray-700 text-left">
+                  <th className="py-2 pr-3 font-medium">理論</th>
+                  <th className="py-2 px-3 font-medium text-center">候補数</th>
+                  <th className="py-2 px-3 font-medium text-center">1着</th>
+                  <th className="py-2 px-3 font-medium text-center">勝率</th>
+                  <th className="py-2 px-3 font-medium text-center">3着内率</th>
+                  <th className="py-2 px-3 font-medium text-center">単勝ROI</th>
+                  <th className="py-2 px-3 font-medium text-right">収支</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { label: '理論1 (休養+乗替)', stats: shosanStats.theory1, color: 'bg-blue-600' },
+                  { label: '理論2 (好調継続)', stats: shosanStats.theory2, color: 'bg-purple-600' },
+                ].map(row => {
+                  const profit = row.stats.returnAmount - row.stats.investment;
+                  return (
+                    <tr key={row.label} className="border-b dark:border-gray-800">
+                      <td className="py-2 pr-3">
+                        <span className={`inline-block ${row.color} text-white px-2 py-0.5 rounded text-xs font-bold`}>
+                          {row.label}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-center">{row.stats.candidates}</td>
+                      <td className="py-2 px-3 text-center">{row.stats.wins}</td>
+                      <td className="py-2 px-3 text-center">
+                        <span className={row.stats.winRate >= 15 ? 'text-green-600 font-bold' : ''}>{row.stats.winRate}%</span>
+                      </td>
+                      <td className="py-2 px-3 text-center">{row.stats.top3Rate}%</td>
+                      <td className="py-2 px-3 text-center">
+                        <span className={`font-bold ${row.stats.roi >= 100 ? 'text-green-600' : 'text-red-500'}`}>{row.stats.roi}%</span>
+                      </td>
+                      <td className={`py-2 px-3 text-right font-bold font-mono ${profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                        {profit >= 0 ? '+' : ''}{profit.toLocaleString()}円
+                      </td>
+                    </tr>
+                  );
+                })}
+                {/* 馬連 */}
+                <tr className="border-b dark:border-gray-800">
+                  <td className="py-2 pr-3">
+                    <span className="inline-block bg-orange-600 text-white px-2 py-0.5 rounded text-xs font-bold">馬連推奨</span>
+                  </td>
+                  <td className="py-2 px-3 text-center">{shosanStats.umaren.bets}</td>
+                  <td className="py-2 px-3 text-center">{shosanStats.umaren.hits}</td>
+                  <td className="py-2 px-3 text-center">
+                    <span className={shosanStats.umaren.hitRate >= 5 ? 'text-green-600 font-bold' : ''}>{shosanStats.umaren.hitRate}%</span>
+                  </td>
+                  <td className="py-2 px-3 text-center">-</td>
+                  <td className="py-2 px-3 text-center">
+                    <span className={`font-bold ${shosanStats.umaren.roi >= 100 ? 'text-green-600' : 'text-red-500'}`}>{shosanStats.umaren.roi}%</span>
+                  </td>
+                  <td className={`py-2 px-3 text-right font-bold font-mono ${shosanStats.umaren.returnAmount - shosanStats.umaren.investment >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                    {shosanStats.umaren.returnAmount - shosanStats.umaren.investment >= 0 ? '+' : ''}{(shosanStats.umaren.returnAmount - shosanStats.umaren.investment).toLocaleString()}円
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-muted mt-3">
+            100円均一ベット基準。理論1=休養明け+アゲ騎手乗り替わり、理論2=前走好走+アゲ騎手継続。
+          </p>
+        </div>
+      )}
 
       {/* 競馬場別的中率 */}
       {venueStats.length > 0 && (

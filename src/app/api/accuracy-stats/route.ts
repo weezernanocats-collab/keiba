@@ -760,6 +760,109 @@ export async function GET(request: NextRequest) {
       cumulative: aiRankingCumulative.length > 0 ? aiRankingCumulative : undefined,
     };
 
+    // ==================== しょーさん予想統計 ====================
+    const shosanPredictions = await dbAll<{
+      race_id: string; analysis_json: string; race_date: string;
+    }>(`
+      SELECT p.race_id, p.analysis_json, r.date as race_date
+      FROM predictions p JOIN races r ON p.race_id = r.id
+      WHERE r.status = '結果確定' AND p.analysis_json LIKE '%shosanPrediction%'
+        ${dateFilter}
+      ORDER BY r.date ASC
+    `, []);
+
+    const shosanStats = {
+      totalRaces: 0,
+      theory1: { candidates: 0, wins: 0, top3: 0, investment: 0, returnAmount: 0 },
+      theory2: { candidates: 0, wins: 0, top3: 0, investment: 0, returnAmount: 0 },
+      umaren: { bets: 0, hits: 0, investment: 0, returnAmount: 0 },
+    };
+
+    if (shosanPredictions.length > 0) {
+      const shRaceIds = shosanPredictions.map(p => p.race_id);
+      const shEntryMap = new Map<string, Map<number, { position: number; odds: number }>>();
+
+      const SH_BATCH = 200;
+      for (let i = 0; i < shRaceIds.length; i += SH_BATCH) {
+        const batch = shRaceIds.slice(i, i + SH_BATCH);
+        const ph = batch.map(() => '?').join(',');
+        const entries = await dbAll<{ race_id: string; horse_number: number; result_position: number; odds: number | null }>(
+          `SELECT race_id, horse_number, result_position, odds FROM race_entries
+           WHERE race_id IN (${ph}) AND result_position IS NOT NULL`, batch);
+        for (const e of entries) {
+          if (!shEntryMap.has(e.race_id)) shEntryMap.set(e.race_id, new Map());
+          shEntryMap.get(e.race_id)!.set(e.horse_number, { position: e.result_position, odds: e.odds ?? 0 });
+        }
+      }
+
+      for (const pred of shosanPredictions) {
+        let analysis: Record<string, unknown>;
+        try { analysis = JSON.parse(pred.analysis_json); } catch { continue; }
+        const shosan = analysis.shosanPrediction as {
+          candidates: { horseNumber: number; theory: number; matchScore: number }[];
+          umarenRecommendations: { horses: number[] }[];
+        } | undefined;
+        if (!shosan?.candidates?.length) continue;
+
+        const posMap = shEntryMap.get(pred.race_id);
+        if (!posMap) continue;
+        shosanStats.totalRaces++;
+
+        for (const c of shosan.candidates) {
+          const entry = posMap.get(c.horseNumber);
+          if (!entry) continue;
+          const stat = c.theory === 1 ? shosanStats.theory1 : shosanStats.theory2;
+          stat.candidates++;
+          stat.investment += 100;
+          if (entry.position === 1) {
+            stat.wins++;
+            stat.returnAmount += 100 * entry.odds;
+          }
+          if (entry.position <= 3) stat.top3++;
+        }
+
+        // 馬連チェック
+        const top2 = [...posMap.entries()].sort((a, b) => a[1].position - b[1].position).slice(0, 2).map(([n]) => n);
+        for (const rec of shosan.umarenRecommendations || []) {
+          if (rec.horses.length !== 2) continue;
+          shosanStats.umaren.bets++;
+          shosanStats.umaren.investment += 100;
+          const isHit = top2.length === 2 && rec.horses.includes(top2[0]) && rec.horses.includes(top2[1]);
+          if (isHit) {
+            shosanStats.umaren.hits++;
+            // 馬連オッズ推定
+            const o1 = posMap.get(rec.horses[0])?.odds ?? 0;
+            const o2 = posMap.get(rec.horses[1])?.odds ?? 0;
+            const estimatedOdds = o1 > 0 && o2 > 0 ? Math.max(1.5, o1 * o2 * 0.08) : 10;
+            shosanStats.umaren.returnAmount += 100 * estimatedOdds;
+          }
+        }
+      }
+    }
+
+    const formatShosanTheory = (s: typeof shosanStats.theory1) => ({
+      candidates: s.candidates,
+      wins: s.wins,
+      top3: s.top3,
+      winRate: s.candidates > 0 ? Math.round(s.wins / s.candidates * 1000) / 10 : 0,
+      top3Rate: s.candidates > 0 ? Math.round(s.top3 / s.candidates * 1000) / 10 : 0,
+      roi: s.investment > 0 ? Math.round(s.returnAmount / s.investment * 1000) / 10 : 0,
+      investment: s.investment,
+      returnAmount: Math.round(s.returnAmount),
+    });
+
+    const shosanStatsFormatted = {
+      totalRaces: shosanStats.totalRaces,
+      theory1: formatShosanTheory(shosanStats.theory1),
+      theory2: formatShosanTheory(shosanStats.theory2),
+      umaren: {
+        ...shosanStats.umaren,
+        hitRate: shosanStats.umaren.bets > 0 ? Math.round(shosanStats.umaren.hits / shosanStats.umaren.bets * 1000) / 10 : 0,
+        roi: shosanStats.umaren.investment > 0 ? Math.round(shosanStats.umaren.returnAmount / shosanStats.umaren.investment * 1000) / 10 : 0,
+        returnAmount: Math.round(shosanStats.umaren.returnAmount),
+      },
+    };
+
     // 全体サマリ
     const totalWin = results.reduce((s, r) => s + r.win_hit, 0);
     const totalPlace = results.reduce((s, r) => s + r.place_hit, 0);
@@ -782,6 +885,7 @@ export async function GET(request: NextRequest) {
       highConfEvStats,
       aiIndependentBetStats,
       aiRankingBetStats,
+      shosanStats: shosanStatsFormatted,
       period: days > 0 ? `${days}日` : '全期間',
     };
 
