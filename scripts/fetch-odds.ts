@@ -271,9 +271,17 @@ async function main() {
           } else {
             // Get odds from API for upcoming races
             const apiOdds = await scrapeOddsFromApi(raceId);
+            // 人気順位を計算（単勝オッズ昇順）
+            const sortedWin = [...apiOdds.win].sort((a, b) => a.odds - b.odds);
+            const popularityMap = new Map<number, number>();
+            sortedWin.forEach((w, i) => popularityMap.set(w.horseNumber, i + 1));
+
             for (const w of apiOdds.win) {
               await upsertOdds(raceId, '単勝', w.horseNumber, w.odds);
               totalWin++;
+              // race_entries.odds/popularity も更新
+              await updateEntryOdds(raceId, w.horseNumber, w.odds, popularityMap.get(w.horseNumber) || 0);
+              totalEntryUpdates++;
             }
             for (const p of apiOdds.place) {
               await upsertOdds(raceId, '複勝', p.horseNumber, p.minOdds, p.minOdds, p.maxOdds);
