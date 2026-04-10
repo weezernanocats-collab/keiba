@@ -1,0 +1,43 @@
+name: Daily Night Pipeline
+
+on:
+  schedule:
+    # 翌日のレース取得（出馬表+予想生成）
+    # 22:30 JST = 13:30 UTC （Vercel Cron 22:00 JSTのバックアップ、重複回避）
+    - cron: '30 13 * * *'
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: '対象日 (YYYY-MM-DD, 空欄で翌日)'
+        required: false
+        type: string
+
+jobs:
+  night:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create .env.local
+        run: |
+          echo "TURSO_DATABASE_URL=\"${{ secrets.TURSO_DATABASE_URL }}\"" > .env.local
+          echo "TURSO_AUTH_TOKEN=\"${{ secrets.TURSO_AUTH_TOKEN }}\"" >> .env.local
+
+      - name: Run night pipeline (next-day races + predictions)
+        run: npx tsx -r tsconfig-paths/register scripts/daily-pipeline.ts --job night
+
+      - name: Cleanup
+        if: always()
+        run: rm -f .env.local
