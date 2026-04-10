@@ -305,19 +305,23 @@ function evaluateTheory2(
   const reasons: string[] = [];
   let score = 0;
 
+  // 必須: 乗り替わり（継続騎乗はROI低いため除外）
+  // バックテスト: 乗替ROI 127% vs 継続騎乗ROI 67%
+  if (!isJockeyChange) return null;
+
   // 必須: 前走が好走（3着以内）
   if (!recentGoodResult(pastPerfs, 1)) return null;
   reasons.push(`前走${pastPerfs[0].position}着`);
 
-  // 必須: 前走の騎手がZone 1-2 or アゲ騎手
+  // 必須: 前走の騎手がZone 1-2 or ルメール・川田等の一流
   const prevZone = prevJockeyId ? getJockeyZone(prevJockeyId, venue) : null;
-  // 一流騎手（ルメール、川田等）も前走好走の条件に含める
-  const topJockeyIds = ['00660', '00733', '00666', '01126', '01170', '01163']; // ルメール、川田、武豊、松山、横山武、坂井
-  const prevIsGoodJockey = prevZone && prevZone.zone <= 2 || topJockeyIds.includes(prevJockeyId);
+  const topOverpopularIds = ['00660', '00733']; // ルメール、川田（過剰人気）
+  const isPrevTopOverpopular = topOverpopularIds.includes(prevJockeyId);
+  const prevIsGoodJockey = (prevZone && prevZone.zone <= 2) || isPrevTopOverpopular;
   if (!prevIsGoodJockey) return null;
-  reasons.push(`前走騎手:${prevZone?.name || '一流'}`);
+  reasons.push(`前走:${isPrevTopOverpopular ? 'ルメ川田' : prevZone?.name}→乗替`);
 
-  // 現在もアゲ騎手
+  // 現在の騎手はAGE騎手（ルメール・川田は既にgetJockeyZoneで除外済み）
   reasons.push(`今走:${jockeyZone.name}(Z${jockeyZone.zone})`);
 
   // 好調継続（3戦以内）
@@ -332,19 +336,20 @@ function evaluateTheory2(
   else if (pastPerfs[0].position === 2) score += 10;
   else if (pastPerfs[0].position === 3) score += 5;
 
-  // 継続騎乗 vs 乗り替わり
-  if (!isJockeyChange) {
-    score += 10; // 継続騎乗は安定
-    reasons.push('継続騎乗');
-  } else {
-    score += 5;
-    reasons.push('乗り替わり');
+  // 乗り替わりボーナス（必須化したので常に加算）
+  score += 10;
+
+  // 前走がルメール・川田だった場合は大ボーナス（バックテストROI 649%）
+  if (isPrevTopOverpopular) {
+    score += 15;
+    reasons.push('★一流→AGE');
   }
 
-  // ゾーンボーナス
-  if (jockeyZone.zone === 1) score += 15;
-  else if (jockeyZone.zone === 2) score += 20;
-  else if (jockeyZone.zone === 3) score += 10;
+  // ゾーンボーナス（Zone1はROI 65%で赤字のため減点、Zone2-3が有力）
+  if (jockeyZone.zone === 1) score += 5;   // 過剰人気になりがち
+  else if (jockeyZone.zone === 2) score += 15;
+  else if (jockeyZone.zone === 3) score += 20; // バックテストROI 270%
+  else if (jockeyZone.zone === 4) score += 5;
 
   if (score < 45) return null;
 
