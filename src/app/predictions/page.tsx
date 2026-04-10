@@ -27,6 +27,7 @@ interface RaceRow {
   confidence: number | null;
   predictionGeneratedAt: string | null;
   aiPattern: string | null;
+  shosanCount: number;
 }
 
 interface PredBet {
@@ -219,6 +220,7 @@ function UpcomingRaces() {
         const p = r.aiPattern;
         return (p === '一強' || p === '二強') && r.confidence != null && r.confidence >= 60;
       }
+      if (confidenceFilter === 'shosan') return r.shosanCount > 0;
       if (confidenceFilter === 'high') return r.confidence != null && r.confidence >= 70;
       if (confidenceFilter === 'mid') return r.confidence != null && r.confidence >= 50 && r.confidence < 70;
       if (confidenceFilter === 'low') return r.confidence != null && r.confidence < 50;
@@ -272,6 +274,7 @@ function UpcomingRaces() {
           >
             <option value="all">全レース</option>
             <option value="buy">買い推奨のみ</option>
+            <option value="shosan">しょーさん予想あり</option>
             <option value="high">信頼度 高 (70%+)</option>
             <option value="mid">信頼度 中 (50-69%)</option>
             <option value="low">信頼度 低 (&lt;50%)</option>
@@ -318,6 +321,11 @@ function UpcomingRaces() {
                           </span>
                         )}
                         <BetVerdictBadge pattern={race.aiPattern} confidence={race.confidence} />
+                        {race.shosanCount > 0 && (
+                          <span className="bg-orange-500 text-white px-2 py-0.5 rounded text-xs font-bold shrink-0" title="しょーさん予想あり">
+                            SHO {race.shosanCount}
+                          </span>
+                        )}
                         <ConfidenceBadge value={race.confidence} />
                         <FavoriteProfilePopover
                           checkFavorite={(p) => isRaceFavoriteInProfile(race.id, p)}
