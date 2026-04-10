@@ -21,6 +21,7 @@ interface RaceRow {
   entryCount: number;
   confidence: number | null;
   topOdds: number | null;
+  shosanCount?: number;
 }
 
 export default function RacesPage() {
@@ -145,6 +146,7 @@ export default function RacesPage() {
       if (confidenceFilter === 'mid' && (r.confidence == null || r.confidence < 50 || r.confidence >= 70)) return false;
       if (confidenceFilter === 'low' && (r.confidence == null || r.confidence >= 50)) return false;
       if (confidenceFilter === 'none' && r.confidence != null) return false;
+      if (confidenceFilter === 'shosan' && (!r.shosanCount || r.shosanCount === 0)) return false;
       return true;
     });
   }, [races, courseFilter, trackFilter, gradeFilter, confidenceFilter]);
@@ -224,6 +226,7 @@ export default function RacesPage() {
           onChange={e => setConfidenceFilter(e.target.value)}
         >
           <option value="all">全信頼度</option>
+          <option value="shosan">しょーさん予想あり</option>
           <option value="high">高 (70%+)</option>
           <option value="mid">中 (50-69%)</option>
           <option value="low">低 (&lt;50%)</option>
@@ -325,9 +328,16 @@ export default function RacesPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {race.confidence != null ? (
-                            <ConfidenceBadge value={race.confidence} />
-                          ) : null}
+                          <div className="flex items-center justify-center gap-1">
+                            {race.confidence != null ? (
+                              <ConfidenceBadge value={race.confidence} />
+                            ) : null}
+                            {race.shosanCount && race.shosanCount > 0 ? (
+                              <span className="bg-orange-500 text-white px-1.5 py-0.5 rounded text-xs font-bold" title="しょーさん予想あり">
+                                SHO {race.shosanCount}
+                              </span>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-center">
                           <Link
