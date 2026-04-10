@@ -914,6 +914,133 @@ export default function PredictionDetailPage() {
         </div>
       )}
 
+      {/* しょーさん × AI 掛け合わせ */}
+      {prediction.shosanPrediction && prediction.shosanPrediction.candidates.length > 0 && (() => {
+        // AI Top3の馬番セット
+        const aiTop3Set = new Set(prediction.topPicks.slice(0, 3).map(p => p.horseNumber));
+        // 各候補馬を分類
+        const sweetSpot: typeof prediction.shosanPrediction.candidates = [];
+        const aiAgreed: typeof prediction.shosanPrediction.candidates = [];
+        const aiMissed: typeof prediction.shosanPrediction.candidates = [];
+
+        for (const c of prediction.shosanPrediction.candidates) {
+          const horseInTop3 = aiTop3Set.has(c.horseNumber);
+          const horsePick = prediction.topPicks.find(p => p.horseNumber === c.horseNumber);
+          const odds = horsePick && 'odds' in horsePick ? (horsePick as { odds?: number }).odds : undefined;
+
+          if (horseInTop3 && c.matchScore >= 65 && odds && odds >= 5) {
+            sweetSpot.push(c);
+          } else if (horseInTop3) {
+            aiAgreed.push(c);
+          } else {
+            aiMissed.push(c);
+          }
+        }
+
+        if (sweetSpot.length === 0 && aiAgreed.length === 0 && aiMissed.length === 0) return null;
+
+        return (
+          <div className="scroll-mt-32">
+            <div className="border-2 border-pink-400 dark:border-pink-600 rounded-xl p-6 bg-pink-50/50 dark:bg-pink-900/20">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="px-2 py-0.5 rounded text-xs font-bold bg-pink-500 text-white">SHO×AI</span>
+                <h2 className="text-lg font-bold">しょーさん × AI</h2>
+              </div>
+              <p className="text-xs text-muted mb-4">しょーさん理論とAI予想の掛け合わせ分類（バックテストROI 106-116%）</p>
+
+              {/* スイートスポット: しょーさん65%+ × AI Top3 × オッズ5倍+ */}
+              {sweetSpot.length > 0 && (
+                <div className="mb-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">🔥</span>
+                    <h3 className="text-sm font-bold text-pink-700 dark:text-pink-300">スイートスポット（バックテストROI 116%）</h3>
+                  </div>
+                  <p className="text-xs text-muted mb-2">しょーさん65%以上 × AI Top3入り × オッズ5倍以上の最高条件</p>
+                  <div className="space-y-2">
+                    {sweetSpot.map(c => {
+                      const horsePick = prediction.topPicks.find(p => p.horseNumber === c.horseNumber);
+                      const odds = horsePick && 'odds' in horsePick ? (horsePick as { odds?: number }).odds : undefined;
+                      return (
+                        <div key={c.horseNumber} className="flex items-center gap-3 p-3 rounded-lg bg-pink-100 dark:bg-pink-900/30 border-2 border-pink-300 dark:border-pink-700">
+                          <span className="text-xl">🔥</span>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-pink-900 dark:text-pink-100">{c.horseNumber}番 {c.horseName}</span>
+                              <span className="text-xs text-pink-700 dark:text-pink-300">SHO {c.matchScore}% / AI Top3</span>
+                              {odds && <span className="text-xs font-bold text-pink-700 dark:text-pink-300">{odds.toFixed(1)}倍</span>}
+                            </div>
+                            <p className="text-xs text-muted mt-0.5">理論{c.theory} / Z{c.jockeyZone} {c.jockeyName}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* AI見落とし: しょーさんあり × AI Top3外（穴狙い） */}
+              {aiMissed.length > 0 && (
+                <div className="mb-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">💎</span>
+                    <h3 className="text-sm font-bold text-purple-700 dark:text-purple-300">AI見落とし穴馬（バックテストROI 107%）</h3>
+                  </div>
+                  <p className="text-xs text-muted mb-2">AIは推さないが、しょーさん理論には合致する穴馬</p>
+                  <div className="space-y-2">
+                    {aiMissed.map(c => {
+                      const horsePick = prediction.topPicks.find(p => p.horseNumber === c.horseNumber);
+                      const odds = horsePick && 'odds' in horsePick ? (horsePick as { odds?: number }).odds : undefined;
+                      return (
+                        <div key={c.horseNumber} className="flex items-center gap-3 p-3 rounded-lg bg-purple-50 dark:bg-purple-900/20 border border-purple-300 dark:border-purple-700">
+                          <span className="text-xl">💎</span>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold">{c.horseNumber}番 {c.horseName}</span>
+                              <span className="text-xs text-purple-700 dark:text-purple-300">SHO {c.matchScore}%</span>
+                              {odds && <span className="text-xs font-bold text-purple-700 dark:text-purple-300">{odds.toFixed(1)}倍</span>}
+                            </div>
+                            <p className="text-xs text-muted mt-0.5">理論{c.theory} / Z{c.jockeyZone} {c.jockeyName}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* AI同意（人気側）: バックテストではROI低めなので参考扱い */}
+              {aiAgreed.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">⚠️</span>
+                    <h3 className="text-sm font-bold text-gray-600 dark:text-gray-400">AI同意（人気想定 / 参考）</h3>
+                  </div>
+                  <p className="text-xs text-muted mb-2">AI Top3に入っているが、人気で期待値低（バックテストROI 86%）</p>
+                  <div className="space-y-2">
+                    {aiAgreed.map(c => {
+                      const horsePick = prediction.topPicks.find(p => p.horseNumber === c.horseNumber);
+                      const odds = horsePick && 'odds' in horsePick ? (horsePick as { odds?: number }).odds : undefined;
+                      return (
+                        <div key={c.horseNumber} className="flex items-center gap-3 p-2 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
+                          <span className="text-base opacity-50">⚠️</span>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-sm">{c.horseNumber}番 {c.horseName}</span>
+                              <span className="text-xs text-gray-500">SHO {c.matchScore}% / AI Top3</span>
+                              {odds && <span className="text-xs">{odds.toFixed(1)}倍</span>}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* サマリー */}
       <div id="summary" ref={setSectionRefWrapped('summary')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-32">
         <h2 className="text-lg font-bold mb-3">予想サマリー</h2>
