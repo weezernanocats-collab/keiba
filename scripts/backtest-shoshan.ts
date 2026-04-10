@@ -70,8 +70,8 @@ async function main() {
       const hph = hBatch.map(() => '?').join(',');
       const perfs = await dbAll<{
         horse_id: string; date: string; position: number;
-        corner_positions: string; jockey_name: string; entries: number;
-      }>(`SELECT horse_id, date, position, corner_positions, jockey_name, entries
+        corner_positions: string; jockey_name: string; entries: number; racecourse_name: string;
+      }>(`SELECT horse_id, date, position, corner_positions, jockey_name, entries, racecourse_name
           FROM past_performances WHERE horse_id IN (${hph})
           ORDER BY date DESC`, hBatch);
       for (const p of perfs) {
@@ -82,6 +82,7 @@ async function main() {
           cornerPositions: p.corner_positions || '',
           jockeyName: p.jockey_name || '',
           entries: p.entries,
+          racecourseName: p.racecourse_name || '',
         });
       }
     }

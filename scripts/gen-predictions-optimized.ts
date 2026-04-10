@@ -1042,6 +1042,7 @@ async function main() {
               position: p.position,
               cornerPositions: p.corner_positions || '',
               entries: p.entries,
+              racecourseName: (p as { racecourse_name?: string }).racecourse_name || '',
             })));
         }
         // 前走騎手マップ

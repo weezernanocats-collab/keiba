@@ -177,13 +177,14 @@ async function evaluateShosanForRace(
   const ppForShosan = new Map<string, ShosanPastPerf[]>();
   for (const re of entries) {
     const perfs = (pastPerfsMap.get(re.horseId) || []) as Array<{
-      date: string; position: number; cornerPositions?: string; entries?: number;
+      date: string; position: number; cornerPositions?: string; entries?: number; racecourseName?: string;
     }>;
     ppForShosan.set(re.horseId, perfs.map(p => ({
       date: p.date,
       position: p.position,
       cornerPositions: p.cornerPositions || '',
       entries: p.entries || 0,
+      racecourseName: p.racecourseName || '',
     })));
   }
 

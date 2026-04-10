@@ -73,6 +73,19 @@ export interface PastPerf {
   jockeyId?: string;       // 前走の騎手ID（race_entriesから）
   jockeyName?: string;
   entries: number;          // 出走頭数
+  racecourseName?: string;  // 競馬場名（JRA/地方判定用）
+}
+
+// JRA 10場
+const JRA_VENUES = ['中京', '中山', '京都', '函館', '小倉', '新潟', '札幌', '東京', '福島', '阪神'];
+
+/**
+ * 競馬場名がJRA（中央競馬）かどうか
+ * racecourse_nameは "1中京1" のような形式なので部分一致で判定
+ */
+function isJraVenue(racecourseName?: string): boolean {
+  if (!racecourseName) return false;
+  return JRA_VENUES.some(v => racecourseName.includes(v));
 }
 
 // ==================== 評価結果 ====================
@@ -102,12 +115,17 @@ function getFirstCornerPosition(cornerPositions: string): number | null {
 }
 
 /**
- * 先行力があるか: 過去に1角1-2番手を取った経験があるか
+ * 先行力があるか: 直近10走以内のJRA（中央）レースで1角1-2番手を取った経験があるか
+ * 地方競馬の先行実績はカウントしない
  */
 function hasFrontRunningAbility(pastPerfs: PastPerf[]): { has: boolean; frontCount: number; totalRaces: number } {
   let frontCount = 0;
   let totalRaces = 0;
-  for (const pp of pastPerfs) {
+  // 直近10走のみ
+  const recent = pastPerfs.slice(0, 10);
+  for (const pp of recent) {
+    // JRA（中央競馬）のレースのみカウント
+    if (!isJraVenue(pp.racecourseName)) continue;
     const pos = getFirstCornerPosition(pp.cornerPositions);
     if (pos === null) continue;
     totalRaces++;
