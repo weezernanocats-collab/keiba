@@ -140,7 +140,7 @@ export async function buildAndPredict(
   // しょーさん予想評価（先行力 × 休養 × アゲ騎手）
   try {
     const shosanResult = await evaluateShosanForRace(
-      raceId, date, racecourseName, entries, pastPerfsMap
+      raceId, date, racecourseName, entries, pastPerfsMap, raceName
     );
     if (shosanResult && shosanResult.candidates.length > 0) {
       (prediction.analysis as unknown as Record<string, unknown>).shosanPrediction = shosanResult;
@@ -163,6 +163,7 @@ async function evaluateShosanForRace(
   racecourseName: string,
   entries: RaceEntry[],
   pastPerfsMap: Map<string, unknown[]>,
+  raceName?: string,
 ) {
   // しょーさん用のHorseEntry形式に変換
   const horseEntries: ShosanHorseEntry[] = entries.map(re => ({
@@ -212,5 +213,5 @@ async function evaluateShosanForRace(
     }
   }
 
-  return evaluateShosanTheory(date, racecourseName, horseEntries, ppForShosan, prevJockeyMap);
+  return evaluateShosanTheory(date, racecourseName, horseEntries, ppForShosan, prevJockeyMap, raceName);
 }

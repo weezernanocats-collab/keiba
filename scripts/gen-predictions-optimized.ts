@@ -1078,7 +1078,7 @@ async function main() {
           }
         }
         const shosanResult = evaluateShosanTheory(
-          race.date, race.racecourse_name, horseEntries, pastPerfsForShoshan, prevJockeyMap
+          race.date, race.racecourse_name, horseEntries, pastPerfsForShoshan, prevJockeyMap, race.name
         );
         if (shosanResult.candidates.length > 0) {
           (prediction.analysis as Record<string, unknown>).shosanPrediction = shosanResult;

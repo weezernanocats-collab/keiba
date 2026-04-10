@@ -162,7 +162,7 @@ async function main() {
       }
 
       const pj = prevJockeyMap.get(race.id) || new Map();
-      const result = evaluateShosanTheory(race.date, race.racecourse_name, horseEntries, filteredPP, pj);
+      const result = evaluateShosanTheory(race.date, race.racecourse_name, horseEntries, filteredPP, pj, (race as { name?: string }).name);
 
       // 理論2のみ抽出
       const t2 = result.candidates.filter(c => c.theory === 2);

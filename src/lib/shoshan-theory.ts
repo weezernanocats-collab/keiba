@@ -104,6 +104,7 @@ export interface ShosanCandidate {
 export interface ShosanResult {
   candidates: ShosanCandidate[];
   umarenRecommendations: { horses: number[]; confidence: string }[];
+  warning?: string;  // 適用注意（未勝利戦・3歳限定戦等）
 }
 
 // ==================== 先行力判定 ====================
@@ -165,13 +166,34 @@ function recentGoodResult(recentPerfs: PastPerf[], n: number = 1): boolean {
 
 // ==================== 理論評価 ====================
 
+/**
+ * しょーさん理論が通用しにくいレース条件を判定
+ * - 未勝利戦/新馬戦: 経験不足の馬が多く理論が機能しにくい
+ * - 3歳/2歳限定戦: 若駒同士の比較で休養明け効果が見えにくい（3歳以上戦は対象）
+ *
+ * 該当する場合は注意書きを返す（候補は通常通り評価）
+ */
+function getRaceWarning(raceName: string): string | undefined {
+  if (!raceName) return undefined;
+  if (raceName.includes('新馬')) return '新馬戦は経験データなしのため理論精度低（参考扱い）';
+  if (raceName.includes('未勝利')) return '未勝利戦は理論精度低（休養明け効果が出にくい）';
+  if (raceName.includes('2歳')) return '2歳限定戦は理論精度低（経験不足）';
+  if (raceName.includes('3歳') && !raceName.includes('3歳以上')) {
+    return '3歳限定戦は理論精度低（休養明け効果が出にくい）';
+  }
+  return undefined;
+}
+
 export function evaluateShosanTheory(
   raceDate: string,
   venue: string,
   entries: HorseEntry[],
   pastPerfsMap: Map<string, PastPerf[]>,   // horseId -> past performances (desc by date)
   prevJockeyMap: Map<string, string>,       // horseId -> 前走のjockey_id
+  raceName?: string,                         // レース名（未勝利戦・3歳戦判定用）
 ): ShosanResult {
+  const warning = raceName ? getRaceWarning(raceName) : undefined;
+
   const candidates: ShosanCandidate[] = [];
 
   for (const entry of entries) {
@@ -213,7 +235,7 @@ export function evaluateShosanTheory(
   // 馬連推奨
   const umarenRecommendations = generateUmarenRecommendations(top);
 
-  return { candidates: top, umarenRecommendations };
+  return { candidates: top, umarenRecommendations, warning };
 }
 
 function evaluateTheory1(

@@ -129,7 +129,7 @@ async function main() {
 
       // 理論評価
       const result = evaluateShosanTheory(
-        race.date, race.racecourse_name, horseEntries, filteredPastPerfs, prevJockeyMap
+        race.date, race.racecourse_name, horseEntries, filteredPastPerfs, prevJockeyMap, race.name
       );
 
       totalRaces++;

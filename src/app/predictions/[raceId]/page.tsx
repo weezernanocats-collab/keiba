@@ -111,6 +111,7 @@ interface PredictionData {
       reasons: string[];
     }[];
     umarenRecommendations: { horses: number[]; confidence: string }[];
+    warning?: string;
   };
 }
 
@@ -861,6 +862,13 @@ export default function PredictionDetailPage() {
               <h2 className="text-lg font-bold">しょーさん予想</h2>
             </div>
             <p className="text-xs text-muted mb-4">先行力 x 休養明け x アゲ騎手の乗り替わり理論</p>
+
+            {/* 警告（未勝利戦・3歳限定戦等） */}
+            {prediction.shosanPrediction.warning && (
+              <div className="mb-4 px-3 py-2 rounded-lg bg-yellow-100 dark:bg-yellow-900/30 border border-yellow-400 dark:border-yellow-600 text-yellow-900 dark:text-yellow-200 text-xs">
+                ⚠️ {prediction.shosanPrediction.warning}
+              </div>
+            )}
 
             {/* 候補馬 */}
             <div className="space-y-3 mb-4">
