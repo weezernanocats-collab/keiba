@@ -46,6 +46,20 @@ jobs:
       - name: Run morning pipeline (data fetch + predictions)
         run: npx tsx -r tsconfig-paths/register scripts/daily-pipeline.ts --job ${{ github.event.inputs.job || 'morning' }}
 
+      - name: Fetch today's odds (当日オッズ取得)
+        if: github.event.inputs.job == '' || github.event.inputs.job == 'morning'
+        run: |
+          TODAY=$(date -u -d '+9 hours' '+%Y-%m-%d')
+          echo "Fetching odds for $TODAY"
+          npx tsx scripts/fetch-odds.ts --date "$TODAY" --force
+
+      - name: Regenerate predictions with odds (当日予想をオッズ反映で再生成)
+        if: github.event.inputs.job == '' || github.event.inputs.job == 'morning'
+        run: |
+          TODAY=$(date -u -d '+9 hours' '+%Y-%m-%d')
+          echo "Regenerating predictions for $TODAY"
+          npx tsx scripts/gen-predictions-optimized.ts --date "$TODAY" --regen
+
       - name: Cleanup
         if: always()
         run: rm -f .env.local

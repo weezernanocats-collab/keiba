@@ -38,6 +38,18 @@ jobs:
       - name: Run night pipeline (next-day races + predictions)
         run: npx tsx -r tsconfig-paths/register scripts/daily-pipeline.ts --job night
 
+      - name: Fetch next-day odds (前日時点の前売りオッズ)
+        run: |
+          TOMORROW=$(date -u -d '+1 day +9 hours' '+%Y-%m-%d')
+          echo "Fetching odds for $TOMORROW"
+          npx tsx scripts/fetch-odds.ts --date "$TOMORROW" --force
+
+      - name: Regenerate predictions with odds (翌日予想をオッズ反映で再生成)
+        run: |
+          TOMORROW=$(date -u -d '+1 day +9 hours' '+%Y-%m-%d')
+          echo "Regenerating predictions for $TOMORROW"
+          npx tsx scripts/gen-predictions-optimized.ts --date "$TOMORROW" --regen
+
       - name: Cleanup
         if: always()
         run: rm -f .env.local
