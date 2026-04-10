@@ -19,6 +19,8 @@ import {
   getJockeyDistanceWinRateBatch,
   getJockeyCourseWinRateBatch,
 } from './queries';
+import { evaluateShosanTheory, type HorseEntry as ShosanHorseEntry, type PastPerf as ShosanPastPerf } from './shoshan-theory';
+import { dbAll } from './database';
 
 export interface BuildPredictionOptions {
   isAfternoon?: boolean;
@@ -134,6 +136,80 @@ export async function buildAndPredict(
     trackCondition, racecourseName, grade, horseInputs,
     weather, { isAfternoon: options?.isAfternoon },
   );
+
+  // しょーさん予想評価（先行力 × 休養 × アゲ騎手）
+  try {
+    const shosanResult = await evaluateShosanForRace(
+      raceId, date, racecourseName, entries, pastPerfsMap
+    );
+    if (shosanResult && shosanResult.candidates.length > 0) {
+      (prediction.analysis as unknown as Record<string, unknown>).shosanPrediction = shosanResult;
+    }
+  } catch (e) {
+    console.warn(`[perf] ${raceId} しょーさん予想評価失敗:`, e instanceof Error ? e.message : e);
+  }
+
   console.log(`[perf] ${raceId} 予想生成完了: ${Date.now() - t0}ms`);
   return prediction;
+}
+
+/**
+ * しょーさん予想評価のヘルパー
+ * 前走騎手をバッチで取得して評価
+ */
+async function evaluateShosanForRace(
+  raceId: string,
+  date: string,
+  racecourseName: string,
+  entries: RaceEntry[],
+  pastPerfsMap: Map<string, unknown[]>,
+) {
+  // しょーさん用のHorseEntry形式に変換
+  const horseEntries: ShosanHorseEntry[] = entries.map(re => ({
+    horseNumber: re.horseNumber,
+    horseName: re.horseName,
+    horseId: re.horseId,
+    jockeyId: re.jockeyId || '',
+    jockeyName: re.jockeyName || '',
+  }));
+
+  // 過去成績マップをしょーさん形式に変換
+  const ppForShosan = new Map<string, ShosanPastPerf[]>();
+  for (const re of entries) {
+    const perfs = (pastPerfsMap.get(re.horseId) || []) as Array<{
+      date: string; position: number; cornerPositions?: string; entries?: number;
+    }>;
+    ppForShosan.set(re.horseId, perfs.map(p => ({
+      date: p.date,
+      position: p.position,
+      cornerPositions: p.cornerPositions || '',
+      entries: p.entries || 0,
+    })));
+  }
+
+  // 前走騎手を一括取得
+  const horseIds = entries.map(re => re.horseId).filter(Boolean);
+  const prevJockeyMap = new Map<string, string>();
+  if (horseIds.length > 0) {
+    const ph = horseIds.map(() => '?').join(',');
+    // 各馬の最新の過去レースの騎手を1クエリで取得
+    const rows = await dbAll<{ horse_id: string; jockey_id: string }>(
+      `SELECT re.horse_id, re.jockey_id FROM race_entries re
+       JOIN races r ON re.race_id = r.id
+       WHERE re.horse_id IN (${ph})
+         AND r.date < ?
+         AND (re.horse_id, r.date) IN (
+           SELECT re2.horse_id, MAX(r2.date)
+           FROM race_entries re2 JOIN races r2 ON re2.race_id = r2.id
+           WHERE re2.horse_id IN (${ph}) AND r2.date < ?
+           GROUP BY re2.horse_id
+         )`,
+      [...horseIds, date, ...horseIds, date]
+    );
+    for (const row of rows) {
+      if (row.jockey_id) prevJockeyMap.set(row.horse_id, row.jockey_id);
+    }
+  }
+
+  return evaluateShosanTheory(date, racecourseName, horseEntries, ppForShosan, prevJockeyMap);
 }
