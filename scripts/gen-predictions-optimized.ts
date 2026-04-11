@@ -828,6 +828,9 @@ ${rawText}`;
         model: MODEL,
         messages: [{ role: 'user', content: prompt }],
         stream: false,
+        // qwen3.5 は reasoning モデルで、think 有効だと num_predict 分が thinking に消費され
+        // message.content が空になる。要約用途なので think は不要。
+        think: false,
         options: { temperature: 0.1, num_predict: 500 },
       }),
       signal: controller.signal,
