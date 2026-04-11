@@ -411,10 +411,15 @@ export async function GET(
       }
     }
 
-    // 再生成直後はキャッシュなし、結果確定済みは長め、それ以外は通常
+    // キャッシュ方針:
+    // - 再生成直後 / 発走前(出走確定): no-cache (パドック・オッズ・馬場バイアスが外部スクリプトで
+    //   随時更新されるため、CDN にキャッシュされると反映が遅れる)
+    // - 結果確定済み: 長め (静的データ)
     const cachePreset = (manuallyRegenerated || regeneratedWithOdds || regeneratedWithBias)
       ? 'no-cache'
-      : race.status === '結果確定' ? 'stats' : 'prediction';
+      : race.status === '結果確定' ? 'stats'
+      : race.status === '出走確定' ? 'no-cache'
+      : 'prediction';
     return NextResponse.json({
       prediction: augmentedPrediction,
       race,
