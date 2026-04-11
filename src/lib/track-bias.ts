@@ -83,7 +83,6 @@ export async function calculateTodayTrackBias(
      ) fs ON fs.race_id = re.race_id
      WHERE r.racecourse_name = ?
        AND r.date = ?
-       AND r.status = '結果確定'
        ${trackTypeFilter}
        AND re.result_position IS NOT NULL
        AND re.result_position > 0

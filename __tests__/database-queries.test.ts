@@ -29,6 +29,9 @@ import {
 beforeAll(async () => {
   // ローカルファイルDBで初期化（テストごとに新しいDB）
   await ensureInitialized();
+  // 他のDBテスト (track-bias.test.ts) と同じ file DB を共有するため、
+  // SQLITE_BUSY を避けるよう busy_timeout を設定する。
+  await dbAll('PRAGMA busy_timeout = 10000');
 });
 
 afterAll(async () => {
