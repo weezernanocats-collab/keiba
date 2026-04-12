@@ -146,8 +146,10 @@ export async function scrapeRaceCard(raceId: string): Promise<ScrapedRaceDetail>
   // Icon_GradeType の番号体系:
   //   1=G1, 2=G2, 3=G3, 5=リステッド, 10=オープン,
   //   15=3勝クラス, 16=2勝クラス, 17=1勝クラス, 18=未勝利, 19=新馬
-  const gradeText = $('span.RaceGrade, span.Icon_GradeType').text().trim();
-  const gradeClassList = $('span.Icon_GradeType').map((_, el) => $(el).attr('class') || '').get();
+  // レースヘッダー内のみからグレードを検出（サイドバーの関連レースリンクに含まれる
+  // Icon_GradeType を誤検出しないよう、RaceData01/RaceName 配下に限定する）
+  const gradeText = $('div.RaceData01 span.RaceGrade, div.RaceData01 span.Icon_GradeType, .RaceName span.RaceGrade, .RaceName span.Icon_GradeType').text().trim();
+  const gradeClassList = $('div.RaceData01 span.Icon_GradeType, .RaceName span.Icon_GradeType').map((_, el) => $(el).attr('class') || '').get();
   // 個別クラスに分割して正確にマッチ（Icon_GradeType1 が Icon_GradeType10 等にマッチしないよう）
   const allClasses = gradeClassList.flatMap(c => c.split(/\s+/));
   const hasGradeClass = (suffix: string) => allClasses.includes(`Icon_GradeType${suffix}`);
