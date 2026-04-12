@@ -41,12 +41,13 @@ async function main() {
   // --results-only 時: 発走済みレースのみ対象 (発走時刻 + 20分 < 現在JST)
   let races: { id: string; name: string }[];
   if (resultsOnly) {
-    const jstNow = new Date(now.getTime() + jstOffset);
-    const cutoffHHMM = `${String(jstNow.getHours()).padStart(2, '0')}:${String(jstNow.getMinutes()).padStart(2, '0')}`;
+    // JST 現在時刻を取得 (UTC getHours/Minutes に +9h)
+    const jstHour = (now.getUTCHours() + 9) % 24;
+    const jstMin = now.getUTCMinutes();
     // 発走時刻 + 20分 のバッファを考慮して、20分前の cutoff を使う
-    const cutoffMin = jstNow.getHours() * 60 + jstNow.getMinutes() - 20;
-    const cutoffH = String(Math.floor(cutoffMin / 60)).padStart(2, '0');
-    const cutoffM = String(cutoffMin % 60).padStart(2, '0');
+    const totalMin = jstHour * 60 + jstMin - 20;
+    const cutoffH = String(Math.floor(totalMin / 60)).padStart(2, '0');
+    const cutoffM = String(totalMin % 60).padStart(2, '0');
     const cutoff = `${cutoffH}:${cutoffM}`;
     races = await dbAll<{ id: string; name: string }>(
       "SELECT id, name FROM races WHERE date = ? AND status != '結果確定' AND time IS NOT NULL AND time <= ?",

@@ -183,7 +183,7 @@ export async function upsertRace(race: Partial<Race> & { id: string }) {
 
   await dbRunNamed(`
     INSERT INTO races (id, name, date, time, racecourse_id, racecourse_name, race_number, grade, track_type, distance, track_condition, weather, status)
-    VALUES (@id, @name, @date, @time, @racecourse_id, @racecourse_name, @race_number, @grade, @track_type, @distance, @track_condition, @weather, @status)
+    VALUES (@id, @name, @date, @time, @racecourse_id, @racecourse_name, @race_number, @grade, COALESCE(NULLIF(@track_type, ''), 'ダート'), @distance, @track_condition, @weather, @status)
     ON CONFLICT(id) DO UPDATE SET
       name = COALESCE(NULLIF(@name, ''), races.name),
       date = COALESCE(NULLIF(@date, ''), races.date),
@@ -206,7 +206,7 @@ export async function upsertRace(race: Partial<Race> & { id: string }) {
     racecourse_name: race.racecourseName || '',
     race_number: race.raceNumber || 0,
     grade: race.grade || null,
-    track_type: race.trackType || 'ダート',
+    track_type: race.trackType || '',
     distance: race.distance || 0,
     track_condition: race.trackCondition || null,
     weather: race.weather || null,
@@ -267,23 +267,23 @@ export async function upsertRaceEntry(raceId: string, entry: Partial<RaceEntry>)
       result_corner_positions, result_weight, result_weight_change
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(race_id, horse_number) DO UPDATE SET
-      post_position = COALESCE(excluded.post_position, post_position),
-      horse_id = COALESCE(NULLIF(excluded.horse_id, ''), horse_id),
-      horse_name = COALESCE(NULLIF(excluded.horse_name, ''), horse_name),
-      age = COALESCE(excluded.age, age),
-      sex = COALESCE(excluded.sex, sex),
-      weight = COALESCE(excluded.weight, weight),
-      jockey_id = COALESCE(NULLIF(excluded.jockey_id, ''), jockey_id),
-      jockey_name = COALESCE(NULLIF(excluded.jockey_name, ''), jockey_name),
-      trainer_name = COALESCE(NULLIF(excluded.trainer_name, ''), trainer_name),
-      handicap_weight = COALESCE(excluded.handicap_weight, handicap_weight),
-      result_position = COALESCE(excluded.result_position, result_position),
-      result_time = COALESCE(excluded.result_time, result_time),
-      result_margin = COALESCE(excluded.result_margin, result_margin),
-      result_last_three_furlongs = COALESCE(excluded.result_last_three_furlongs, result_last_three_furlongs),
-      result_corner_positions = COALESCE(excluded.result_corner_positions, result_corner_positions),
-      result_weight = COALESCE(excluded.result_weight, result_weight),
-      result_weight_change = COALESCE(excluded.result_weight_change, result_weight_change)
+      post_position = CASE WHEN excluded.post_position > 0 THEN excluded.post_position ELSE race_entries.post_position END,
+      horse_id = COALESCE(NULLIF(excluded.horse_id, ''), race_entries.horse_id),
+      horse_name = COALESCE(NULLIF(excluded.horse_name, ''), race_entries.horse_name),
+      age = COALESCE(excluded.age, race_entries.age),
+      sex = COALESCE(excluded.sex, race_entries.sex),
+      weight = COALESCE(excluded.weight, race_entries.weight),
+      jockey_id = COALESCE(NULLIF(excluded.jockey_id, ''), race_entries.jockey_id),
+      jockey_name = CASE WHEN excluded.jockey_name NOT IN ('不明', '') THEN excluded.jockey_name ELSE race_entries.jockey_name END,
+      trainer_name = COALESCE(NULLIF(excluded.trainer_name, ''), race_entries.trainer_name),
+      handicap_weight = CASE WHEN excluded.handicap_weight > 0 THEN excluded.handicap_weight ELSE race_entries.handicap_weight END,
+      result_position = COALESCE(excluded.result_position, race_entries.result_position),
+      result_time = COALESCE(excluded.result_time, race_entries.result_time),
+      result_margin = COALESCE(excluded.result_margin, race_entries.result_margin),
+      result_last_three_furlongs = COALESCE(excluded.result_last_three_furlongs, race_entries.result_last_three_furlongs),
+      result_corner_positions = COALESCE(excluded.result_corner_positions, race_entries.result_corner_positions),
+      result_weight = COALESCE(excluded.result_weight, race_entries.result_weight),
+      result_weight_change = COALESCE(excluded.result_weight_change, race_entries.result_weight_change)
   `, [
     raceId, postPosition, entry.horseNumber, horseId, horseName,
     age, sex, weight, jockeyId, jockeyName,
