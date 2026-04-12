@@ -25,6 +25,10 @@ import { evaluateAllPendingRaces } from '../src/lib/accuracy-tracker';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+// --results-only: 結果取得のみ (予想生成・照合をスキップ)。
+// paddock-watcher 等の日中呼び出し用。発走済みレースのみ対象にする。
+const resultsOnly = process.argv.includes('--results-only');
+
 async function main() {
   await ensureInitialized();
 
@@ -32,12 +36,30 @@ async function main() {
   const now = new Date();
   const jstOffset = 9 * 60 * 60_000;
   const jstYesterday = new Date(now.getTime() + jstOffset - 86400000).toISOString().split('T')[0];
-  const yesterday = process.argv[2] || jstYesterday;
-  const races = await dbAll<{ id: string; name: string }>(
-    "SELECT id, name FROM races WHERE date = ? AND status != '結果確定'",
-    [yesterday]
-  );
-  console.log(`[1/3] ${yesterday}の未確定レース: ${races.length}件`);
+  const yesterday = process.argv.find(a => /^\d{4}-\d{2}-\d{2}$/.test(a)) || jstYesterday;
+
+  // --results-only 時: 発走済みレースのみ対象 (発走時刻 + 20分 < 現在JST)
+  let races: { id: string; name: string }[];
+  if (resultsOnly) {
+    const jstNow = new Date(now.getTime() + jstOffset);
+    const cutoffHHMM = `${String(jstNow.getHours()).padStart(2, '0')}:${String(jstNow.getMinutes()).padStart(2, '0')}`;
+    // 発走時刻 + 20分 のバッファを考慮して、20分前の cutoff を使う
+    const cutoffMin = jstNow.getHours() * 60 + jstNow.getMinutes() - 20;
+    const cutoffH = String(Math.floor(cutoffMin / 60)).padStart(2, '0');
+    const cutoffM = String(cutoffMin % 60).padStart(2, '0');
+    const cutoff = `${cutoffH}:${cutoffM}`;
+    races = await dbAll<{ id: string; name: string }>(
+      "SELECT id, name FROM races WHERE date = ? AND status != '結果確定' AND time IS NOT NULL AND time <= ?",
+      [yesterday, cutoff]
+    );
+    console.log(`[results-only] ${yesterday} 発走済み未確定: ${races.length}件 (cutoff ${cutoff})`);
+  } else {
+    races = await dbAll<{ id: string; name: string }>(
+      "SELECT id, name FROM races WHERE date = ? AND status != '結果確定'",
+      [yesterday]
+    );
+    console.log(`[1/3] ${yesterday}の未確定レース: ${races.length}件`);
+  }
 
   let resultCount = 0;
   for (const race of races) {
@@ -75,6 +97,11 @@ async function main() {
     }
   }
   console.log(`\n結果確定: ${resultCount}/${races.length}件`);
+
+  if (resultsOnly) {
+    console.log('--results-only: 予想生成・照合をスキップ');
+    return;
+  }
 
   // 予想生成（昨日分）
   console.log('\n[2/3] 昨日の予想を生成中...');

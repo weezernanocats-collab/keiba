@@ -28,6 +28,7 @@ JSONL_FILE="${WORK_DIR}/chunks_$(date +%Y%m%d).jsonl"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 REGEN_SCRIPT="npx tsx ${SCRIPT_DIR}/gen-predictions-optimized.ts"
+RESULT_SCRIPT="npx tsx ${SCRIPT_DIR}/fetch-yesterday-results.ts"
 TODAY=$(date +%Y-%m-%d)
 
 # 再生成タイミング: 発走の何分前か
@@ -100,6 +101,14 @@ check_and_regen() {
     echo "  [$(date '+%H:%M:%S')] 再生成トリガー: ${trigger_hhmm}発走" >> "$LOG_FILE"
 
     mark_regen_done "$trigger_hhmm"
+
+    # 完走済みレース結果を取得 → 馬場バイアス計算用データを確保
+    (
+      cd "$PROJECT_DIR"
+      echo "  [$(date '+%H:%M:%S')] 結果取得開始 (発走済みレース)"
+      $RESULT_SCRIPT "$TODAY" --results-only 2>&1 | tail -3
+      echo "  [$(date '+%H:%M:%S')] 結果取得完了"
+    )
 
     # 該当レースのみ再生成 + Slack通知
     (
