@@ -886,71 +886,71 @@ function generateAIRankingBets(
   let bets: AIRankingBet[];
 
   if (gap12 > 0.08) {
-    // 一強: 1位が突出
+    // 一強: 1位が突出 → 単勝+複勝+馬連（3点）
     pattern = '一強';
     bets = [
       {
+        type: '単勝',
+        horses: [top[0]],
+        reasoning: `AI 1位 ${top[0].horseName}が突出（確率差${(gap12 * 100).toFixed(1)}%）。単勝勝負。`,
+        confidence: 'high',
+      },
+      {
+        type: '複勝',
+        horses: [top[0]],
+        reasoning: `AI 1位の複勝。堅実回収。`,
+        confidence: 'high',
+      },
+      {
         type: '馬連',
         horses: [top[0], top[1]],
-        reasoning: `AI 1位 ${top[0].horseName}が突出（確率差${(gap12 * 100).toFixed(1)}%）。2位との馬連。`,
-        confidence: 'high',
-      },
-      {
-        type: '馬連',
-        horses: [top[0], top[2]],
-        reasoning: `AI 1位から3位への押さえ。`,
+        reasoning: `AI 1-2位の馬連。`,
         confidence: 'medium',
-      },
-      {
-        type: 'ワイド',
-        horses: [top[0], top[1], top[2]],
-        reasoning: `AI上位3頭のワイドボックス（3点）。的中率重視。`,
-        confidence: 'high',
       },
     ];
   } else if (gap23 > 0.05) {
-    // 二強: 1位と2位が接近、3位以下と差
+    // 二強: 1位と2位が接近 → 複勝2頭+馬連（3点）
     pattern = '二強';
     bets = [
+      {
+        type: '複勝',
+        horses: [top[0], top[1]],
+        reasoning: `AI上位2頭の複勝。どちらかが3着内に入る期待。`,
+        confidence: 'high',
+      },
       {
         type: '馬連',
         horses: [top[0], top[1]],
         reasoning: `AI上位2頭が接近（差${(gap12 * 100).toFixed(1)}%）。本線。`,
-        confidence: 'high',
-      },
-      {
-        type: 'ワイド',
-        horses: [top[0], top[1], top[2]],
-        reasoning: `AI上位3頭ワイドボックス。3位の割り込みをカバー。`,
         confidence: 'medium',
       },
     ];
   } else if (gap34 > 0.03) {
-    // 三つ巴: 上位3頭が接近
+    // 三つ巴: 上位3頭が接近 → 複勝+ワイド（2点）
     pattern = '三つ巴';
     bets = [
       {
-        type: '馬連',
-        horses: [top[0], top[1], top[2]],
-        reasoning: `AI上位3頭が接戦。馬連ボックス（3点）。`,
+        type: '複勝',
+        horses: [top[0]],
+        reasoning: `AI 1位の複勝。接戦だが堅実に。`,
         confidence: 'medium',
       },
       {
         type: 'ワイド',
         horses: [top[0], top[1]],
-        reasoning: `AI 1-2位のワイド。最も的中期待が高い1点。`,
+        reasoning: `AI 1-2位のワイド。`,
         confidence: 'medium',
       },
     ];
   } else {
-    // 混戦: 差が小さい
+    // 混戦: 差が小さい → 複勝1点 or 見送り
     pattern = '混戦';
     if (confidence >= 50) {
       bets = [
         {
-          type: 'ワイド',
-          horses: [top[0], top[1]],
-          reasoning: `混戦レース。AI上位2頭のワイド1点に絞る。`,
+          type: '複勝',
+          horses: [top[0]],
+          reasoning: `混戦だがAI 1位の複勝で堅実に。`,
           confidence: 'low',
         },
       ];

@@ -162,7 +162,7 @@ export interface AIOnlyRanking {
 
 /** AI独自ランキングからの推奨買い目 */
 export interface AIRankingBet {
-  type: '馬連' | 'ワイド' | '単勝' | '見送り';
+  type: '馬連' | 'ワイド' | '単勝' | '複勝' | '見送り';
   horses: { horseNumber: number; horseName: string; aiRank: number; aiProb: number }[];
   reasoning: string;
   confidence: 'high' | 'medium' | 'low';
