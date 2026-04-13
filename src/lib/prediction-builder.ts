@@ -280,7 +280,23 @@ async function evaluateShosanForRace(
         firstCornerScore: fcScore.score,
         firstCornerFactors: fcScore.factors,
       };
+
+      // 1角確保スコアをmatchScoreに反映
+      // バックテスト: 1角1-2番手確保→ROI 234%, 3番手以降→ROI 103%
+      if (fcScore.score >= 65) {
+        c.matchScore = Math.min(100, c.matchScore + 10);
+        c.reasons.push(`1角確保◎(${fcScore.score}点)`);
+      } else if (fcScore.score >= 45) {
+        c.matchScore = Math.min(100, c.matchScore + 5);
+        c.reasons.push(`1角確保○(${fcScore.score}点)`);
+      } else {
+        c.matchScore = Math.max(0, c.matchScore - 10);
+        c.reasons.push(`1角確保△(${fcScore.score}点)`);
+      }
     }
+
+    // 1角確保スコア反映後に再ソート
+    shosanResult.candidates.sort((a, b) => b.matchScore - a.matchScore);
 
     (shosanResult as unknown as Record<string, unknown>).earlySpeedData = earlySpeedData;
   }

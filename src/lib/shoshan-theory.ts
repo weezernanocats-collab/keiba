@@ -281,11 +281,8 @@ function evaluateTheory1(
   else if (jockeyZone.zone === 3) score += 10;
   else if (jockeyZone.zone === 4) score += 5;
 
-  // 休養ボーナス（必須ではないが加点要素として残す）
-  if (restFromLastRace >= 42) {
-    score += 5;
-    reasons.push(`休養明け${Math.floor(restFromLastRace / 7)}週`);
-  }
+  // 休養: バックテストで42-90日はROI 87.8%(赤字)のためボーナス削除
+  // 短間隔(0-41日)172.7%, 長休養(91日+)194.2% → 休養日数はスコアに影響させない
 
   if (score < 45) return null;
 
