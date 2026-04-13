@@ -7,20 +7,20 @@
       "catboost": 0.95
     },
     "turf_mile": {
-      "xgb": 0.0,
-      "catboost": 1.0
+      "xgb": 0.25,
+      "catboost": 0.75
     },
     "turf_long": {
-      "xgb": 0.4,
-      "catboost": 0.6
+      "xgb": 0.0,
+      "catboost": 1.0
     },
     "dirt_short": {
       "xgb": 0.0,
       "catboost": 1.0
     },
     "dirt_long": {
-      "xgb": 0.05,
-      "catboost": 0.95
+      "xgb": 0.2,
+      "catboost": 0.8
     }
   }
 }
