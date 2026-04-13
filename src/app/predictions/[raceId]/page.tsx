@@ -112,6 +112,12 @@ interface PredictionData {
     }[];
     umarenRecommendations: { horses: number[]; confidence: string }[];
     warning?: string;
+    earlySpeedData?: Record<number, {
+      earlyPacePer200m: number;
+      earlyPaceRelative: number;
+      firstCornerScore: number;
+      firstCornerFactors: string[];
+    }>;
   };
 }
 
@@ -896,6 +902,33 @@ export default function PredictionDetailPage() {
                       <span className="text-sm font-bold text-orange-600 dark:text-orange-400">{c.matchScore}%</span>
                     </div>
                     <p className="text-xs text-muted mt-1">{c.reasons.join(' / ')}</p>
+                    {/* テン3F & 1角確保スコア */}
+                    {prediction.shosanPrediction?.earlySpeedData?.[c.horseNumber] && (() => {
+                      const es = prediction.shosanPrediction!.earlySpeedData![c.horseNumber];
+                      const fcColor = es.firstCornerScore >= 65 ? 'text-green-600 dark:text-green-400'
+                        : es.firstCornerScore >= 45 ? 'text-yellow-600 dark:text-yellow-400'
+                        : 'text-red-600 dark:text-red-400';
+                      return (
+                        <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                          {es.earlyPacePer200m > 0 && (
+                            <span className="text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded">
+                              テン {es.earlyPacePer200m.toFixed(2)}s/200m
+                              ({es.earlyPaceRelative >= 0 ? '+' : ''}{es.earlyPaceRelative.toFixed(2)})
+                            </span>
+                          )}
+                          <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+                            es.firstCornerScore >= 65 ? 'bg-green-50 dark:bg-green-900/30'
+                            : es.firstCornerScore >= 45 ? 'bg-yellow-50 dark:bg-yellow-900/30'
+                            : 'bg-red-50 dark:bg-red-900/30'
+                          } ${fcColor}`}>
+                            1角確保 {es.firstCornerScore}点
+                          </span>
+                          {es.firstCornerFactors.length > 0 && (
+                            <span className="text-xs text-muted">{es.firstCornerFactors.join(' / ')}</span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               ))}

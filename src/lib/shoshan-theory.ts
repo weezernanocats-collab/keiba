@@ -1,8 +1,9 @@
 /**
  * しょーさん予想: 先行力 × 乗り替わり × アゲ騎手 の理論
  *
- * 理論1: 近走先行できなかった馬 + アゲ騎手への乗り替わり（復調期待）
- * 理論2: 前走好走(好騎手騎乗) + アゲ騎手が継続/乗り替わり（好調継続）
+ * 理論1: 前走4着以下 + 先行力3回以上(10走JRA) + アゲ騎手乗替
+ *         バックテスト: 641件 ROI 140.6%（現行比+29pt）
+ * 理論2: 前走好走(好騎手騎乗) + アゲ騎手が乗り替わり（好調継続）
  */
 
 // ==================== アゲ騎手定義 ====================
@@ -116,8 +117,10 @@ function getFirstCornerPosition(cornerPositions: string): number | null {
 }
 
 /**
- * 先行力があるか: 直近10走以内のJRA（中央）レースで1角1-2番手を取った経験があるか
+ * 先行力判定: 直近10走以内のJRA（中央）レースで1角1-2番手を取った回数
  * 地方競馬の先行実績はカウントしない
+ *
+ * 理論1: 3回以上が条件（バックテスト: 3回+でROI 140.6%, 1回だと赤字）
  */
 function hasFrontRunningAbility(pastPerfs: PastPerf[]): { has: boolean; frontCount: number; totalRaces: number } {
   let frontCount = 0;
@@ -132,7 +135,7 @@ function hasFrontRunningAbility(pastPerfs: PastPerf[]): { has: boolean; frontCou
     totalRaces++;
     if (pos <= 2) frontCount++;
   }
-  return { has: frontCount >= 1, frontCount, totalRaces };
+  return { has: frontCount >= 3, frontCount, totalRaces };
 }
 
 /**
@@ -250,45 +253,27 @@ function evaluateTheory1(
   let score = 0;
 
   // 必須: 乗り替わり（アゲ騎手への交代）
+  // バックテスト: 乗替ROI 140.6% vs 継続98.5%
   if (!isJockeyChange) return null;
   reasons.push(`乗り替わり→${jockeyZone.name}(Z${jockeyZone.zone})`);
 
-  // 必須: 近走好走していない（好走馬は買わない）
-  if (recentGoodResult(pastPerfs, 2)) return null;
-  reasons.push('近走凡走');
+  // 必須: 前走4着以下
+  if (pastPerfs[0].position <= 3) return null;
+  reasons.push(`前走${pastPerfs[0].position}着`);
 
-  // 核心: 休養明けパターンを検出
-  // パターンA: 今走が休養明け（6週+）
-  // パターンB: 直近に休養があり、叩き2-3戦目
-  let restPattern = '';
-  let restWeeks = 0;
-
-  if (restFromLastRace >= 42) {
-    // パターンA: 今走が休養明け
-    restPattern = 'direct';
-    restWeeks = Math.floor(restFromLastRace / 7);
-    score += 25;
-    reasons.push(`休養明け${restWeeks}週`);
-  } else if (pastPerfs.length >= 2) {
-    // パターンB: 直近の走間に6週+の休養があったか
-    for (let k = 0; k < Math.min(3, pastPerfs.length - 1); k++) {
-      const gap = restDays(pastPerfs[k].date, pastPerfs[k + 1].date);
-      if (gap >= 42) {
-        restPattern = 'post-rest';
-        restWeeks = Math.floor(gap / 7);
-        const racesBack = k + 1; // 休養後何戦目か（今走含めず）
-        score += 30; // 叩き後はスコア高め
-        reasons.push(`休養${restWeeks}週後の叩き${racesBack + 1}戦目`);
-        break;
-      }
-    }
+  // 先行力回数でスコア加算（3回以上は前提条件でクリア済み）
+  const frontAbility = hasFrontRunningAbility(pastPerfs);
+  score += 30; // 基本スコア
+  if (frontAbility.frontCount >= 5) {
+    score += 15;
+    reasons.push(`先行力${frontAbility.frontCount}回/10走(強)`);
+  } else if (frontAbility.frontCount >= 4) {
+    score += 10;
+    reasons.push(`先行力${frontAbility.frontCount}回/10走`);
+  } else {
+    score += 5;
+    reasons.push(`先行力${frontAbility.frontCount}回/10走`);
   }
-
-  // 休養パターンなし → 対象外
-  if (!restPattern) return null;
-
-  // スコア加算: 基本
-  score += 20;
 
   // ゾーンボーナス
   if (jockeyZone.zone === 1) score += 15;
@@ -296,10 +281,11 @@ function evaluateTheory1(
   else if (jockeyZone.zone === 3) score += 10;
   else if (jockeyZone.zone === 4) score += 5;
 
-  // 先行実績ボーナス（過去に先行できた実績が多いほど）
-  const frontAbility = hasFrontRunningAbility(pastPerfs);
-  if (frontAbility.frontCount >= 3) score += 10;
-  else if (frontAbility.frontCount >= 2) score += 5;
+  // 休養ボーナス（必須ではないが加点要素として残す）
+  if (restFromLastRace >= 42) {
+    score += 5;
+    reasons.push(`休養明け${Math.floor(restFromLastRace / 7)}週`);
+  }
 
   if (score < 45) return null;
 

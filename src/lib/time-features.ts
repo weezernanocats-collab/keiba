@@ -265,3 +265,189 @@ export function calcL3fRelative(pastPerfs: PastPerfForL3f[]): number {
   }
   return wt > 0 ? ws / wt : 0;
 }
+
+// ==================== テン3F推定（前半ペース） ====================
+
+/**
+ * 前半タイム推定: 走破タイム − 上がり3F
+ * 距離で正規化して200mあたりのペースを返す（秒/200m）
+ *
+ * 1200m: 前半 = テン3F そのもの（600m区間）
+ * 1400m+: 前半 = スタート〜残り600m地点の区間タイム
+ */
+interface PastPerfForEarlySpeed {
+  time: string | null | undefined;
+  lastThreeFurlongs: string | null | undefined;
+  distance: number;
+  cornerPositions: string | null | undefined;
+  entries: number;
+  position: number;
+}
+
+export interface EarlySpeedProfile {
+  /** 前半ペース（秒/200m）- 小さいほど速い */
+  earlyPacePer200m: number;
+  /** 同距離帯平均との差（秒/200m）- 負=平均より速い */
+  earlyPaceRelative: number;
+  /** サンプル数 */
+  sampleCount: number;
+}
+
+// 距離帯別の前半ペース基準値（秒/200m）: 実データ75,473走から算出
+// 前半タイム = 走破タイム - L3F。前半距離 = distance - 600m。ペース = 前半タイム / (前半距離/200)
+const EARLY_PACE_BASELINES: Record<string, Record<number, number>> = {
+  '芝': {
+    1200: 11.55,
+    1400: 11.80,  // 1200と1600の中間推定
+    1600: 12.00,
+    1800: 12.21,
+    2000: 12.28,
+    2200: 12.35,
+    2400: 12.40,
+  },
+  'ダート': {
+    1200: 11.79,
+    1400: 12.29,
+    1600: 12.45,  // 1400と1800の中間推定
+    1700: 12.55,
+    1800: 12.65,
+    2000: 12.70,
+  },
+};
+
+function getEarlyPaceBaseline(trackType: string, distance: number): number {
+  const table = EARLY_PACE_BASELINES[trackType] || EARLY_PACE_BASELINES['ダート'];
+  if (!table) return 12.2;
+  const dists = Object.keys(table).map(Number).sort((a, b) => a - b);
+  // 最も近い距離の基準値を返す
+  let closest = dists[0];
+  let minDiff = Math.abs(distance - closest);
+  for (const d of dists) {
+    const diff = Math.abs(distance - d);
+    if (diff < minDiff) { closest = d; minDiff = diff; }
+  }
+  return table[closest];
+}
+
+export function calcEarlySpeedProfile(
+  pastPerfs: PastPerfForEarlySpeed[],
+  trackType: string = '芝',
+): EarlySpeedProfile {
+  const paces: number[] = [];
+
+  for (const p of pastPerfs) {
+    if (paces.length >= 5) break;
+    if (p.position >= 99) continue;
+    if (!p.distance || p.distance < 1000) continue;
+
+    const totalSec = parseTimeToSeconds(p.time);
+    const l3fSec = parseLastThreeFurlongs(p.lastThreeFurlongs);
+    if (totalSec <= 0 || l3fSec <= 0) continue;
+
+    const firstPartSec = totalSec - l3fSec;
+    const firstPartDist = p.distance - 600;
+    if (firstPartDist <= 0) continue;
+
+    const pacePer200m = firstPartSec / (firstPartDist / 200);
+    if (pacePer200m < 8 || pacePer200m > 18) continue; // 異常値除外
+
+    paces.push(pacePer200m);
+  }
+
+  if (paces.length === 0) {
+    return { earlyPacePer200m: 0, earlyPaceRelative: 0, sampleCount: 0 };
+  }
+
+  // 加重平均（直近重視）
+  let ws = 0, wt = 0;
+  for (let i = 0; i < paces.length; i++) {
+    const w = PACE_WEIGHTS[i] ?? 0.05;
+    ws += paces[i] * w;
+    wt += w;
+  }
+  const earlyPacePer200m = wt > 0 ? ws / wt : paces[0];
+
+  // 基準値との差
+  const baseline = getEarlyPaceBaseline(trackType, pastPerfs[0]?.distance || 1600);
+  const earlyPaceRelative = earlyPacePer200m - baseline;
+
+  return { earlyPacePer200m, earlyPaceRelative, sampleCount: paces.length };
+}
+
+// ==================== 1角2番手確保スコア ====================
+
+export interface FirstCornerScore {
+  /** 1角2番手以内の確保スコア (0-100)。高いほど確保しやすい */
+  score: number;
+  /** 判定理由 */
+  factors: string[];
+}
+
+/**
+ * レースコンテキストを考慮した1角2番手確保スコア
+ *
+ * 考慮要素:
+ * 1. 自馬のテン（前半ペース）の速さ
+ * 2. 同レース内の逃げ馬の数
+ * 3. 自馬より内枠にいる逃げ馬の数
+ * 4. 自馬の過去の先行成功率
+ */
+export function calcFirstCornerScore(
+  horse: {
+    earlySpeed: EarlySpeedProfile;
+    postPosition: number;
+    frontCount: number;     // 過去10走の1角1-2番手回数
+    totalRaces: number;     // 過去10走のJRA出走数
+  },
+  rivals: {
+    earlySpeed: EarlySpeedProfile;
+    postPosition: number;
+    frontCount: number;
+  }[],
+): FirstCornerScore {
+  const factors: string[] = [];
+  let score = 50; // 基本スコア
+
+  // 1. 自馬の前半ペース（速いほど+）
+  if (horse.earlySpeed.sampleCount > 0) {
+    const rel = horse.earlySpeed.earlyPaceRelative;
+    if (rel <= -0.3) { score += 15; factors.push(`テン速い(${rel.toFixed(2)}s/200m)`); }
+    else if (rel <= -0.1) { score += 8; factors.push(`テンやや速い`); }
+    else if (rel >= 0.3) { score -= 10; factors.push(`テン遅い`); }
+  }
+
+  // 2. 自馬の先行成功率
+  if (horse.totalRaces > 0) {
+    const rate = horse.frontCount / horse.totalRaces;
+    if (rate >= 0.5) { score += 15; factors.push(`先行率${(rate * 100).toFixed(0)}%`); }
+    else if (rate >= 0.3) { score += 8; factors.push(`先行率${(rate * 100).toFixed(0)}%`); }
+    else { score -= 5; }
+  }
+
+  // 3. 同レース内の逃げ馬数（テンが速い馬 = earlyPaceRelative < -0.1 & frontCount >= 2）
+  const fastRivals = rivals.filter(r =>
+    r.earlySpeed.sampleCount > 0 && r.earlySpeed.earlyPaceRelative < -0.1 && r.frontCount >= 2
+  );
+  if (fastRivals.length === 0) {
+    score += 15;
+    factors.push('同型なし');
+  } else if (fastRivals.length === 1) {
+    score += 5;
+    factors.push(`同型1頭`);
+  } else {
+    score -= 10 * (fastRivals.length - 1);
+    factors.push(`同型${fastRivals.length}頭(競合)`);
+  }
+
+  // 4. 内枠の速い馬の存在（自分より内にテンが速い逃げ馬 → 不利）
+  const innerFast = fastRivals.filter(r => r.postPosition < horse.postPosition);
+  if (innerFast.length >= 2) {
+    score -= 15;
+    factors.push(`内枠に速い馬${innerFast.length}頭`);
+  } else if (innerFast.length === 1) {
+    score -= 5;
+    factors.push('内枠に速い馬1頭');
+  }
+
+  return { score: Math.max(0, Math.min(100, score)), factors };
+}

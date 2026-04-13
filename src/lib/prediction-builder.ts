@@ -20,6 +20,7 @@ import {
   getJockeyCourseWinRateBatch,
 } from './queries';
 import { evaluateShosanTheory, type HorseEntry as ShosanHorseEntry, type PastPerf as ShosanPastPerf } from './shoshan-theory';
+import { calcEarlySpeedProfile, calcFirstCornerScore, type EarlySpeedProfile } from './time-features';
 import { dbAll } from './database';
 
 export interface BuildPredictionOptions {
@@ -213,5 +214,76 @@ async function evaluateShosanForRace(
     }
   }
 
-  return evaluateShosanTheory(date, racecourseName, horseEntries, ppForShosan, prevJockeyMap, raceName);
+  const shosanResult = evaluateShosanTheory(date, racecourseName, horseEntries, ppForShosan, prevJockeyMap, raceName);
+
+  // テン3F推定 & 1角確保スコアを全エントリーに対して計算
+  const JRA_VENUES = ['中京', '中山', '京都', '函館', '小倉', '新潟', '札幌', '東京', '福島', '阪神'];
+  const isJraVenue = (n?: string) => !!n && JRA_VENUES.some(v => n.includes(v));
+  const getFC = (cp: string) => { const n = parseInt(cp.split('-')[0]); return n > 0 ? n : null; };
+
+  const earlySpeedMap = new Map<number, { speed: EarlySpeedProfile; frontCount: number; totalRaces: number; postPosition: number }>();
+
+  for (const re of entries) {
+    const perfs = (pastPerfsMap.get(re.horseId) || []) as Array<{
+      time: string; lastThreeFurlongs: string; distance: number; trackType: string;
+      cornerPositions?: string; entries?: number; position: number; racecourseName?: string;
+    }>;
+
+    const speed = calcEarlySpeedProfile(
+      perfs.map(p => ({
+        time: p.time,
+        lastThreeFurlongs: p.lastThreeFurlongs,
+        distance: p.distance,
+        cornerPositions: p.cornerPositions || '',
+        entries: p.entries || 0,
+        position: p.position,
+      })),
+      perfs[0]?.trackType || '芝',
+    );
+
+    // 先行回数
+    let frontCount = 0, totalRaces = 0;
+    for (const pp of perfs.slice(0, 10)) {
+      if (!isJraVenue(pp.racecourseName)) continue;
+      const pos = getFC(pp.cornerPositions || '');
+      if (pos === null) continue;
+      totalRaces++;
+      if (pos <= 2) frontCount++;
+    }
+
+    earlySpeedMap.set(re.horseNumber, { speed, frontCount, totalRaces, postPosition: re.postPosition || 0 });
+  }
+
+  // 候補にテン3F & 1角確保スコアを付与
+  if (shosanResult && shosanResult.candidates.length > 0) {
+    const allRivals = [...earlySpeedMap.entries()].map(([_, v]) => ({
+      earlySpeed: v.speed,
+      postPosition: v.postPosition,
+      frontCount: v.frontCount,
+    }));
+
+    const earlySpeedData: Record<number, { earlyPacePer200m: number; earlyPaceRelative: number; firstCornerScore: number; firstCornerFactors: string[] }> = {};
+
+    for (const c of shosanResult.candidates) {
+      const me = earlySpeedMap.get(c.horseNumber);
+      if (!me) continue;
+
+      const rivals = allRivals.filter(r => r.postPosition !== me.postPosition);
+      const fcScore = calcFirstCornerScore(
+        { earlySpeed: me.speed, postPosition: me.postPosition, frontCount: me.frontCount, totalRaces: me.totalRaces },
+        rivals,
+      );
+
+      earlySpeedData[c.horseNumber] = {
+        earlyPacePer200m: Math.round(me.speed.earlyPacePer200m * 100) / 100,
+        earlyPaceRelative: Math.round(me.speed.earlyPaceRelative * 100) / 100,
+        firstCornerScore: fcScore.score,
+        firstCornerFactors: fcScore.factors,
+      };
+    }
+
+    (shosanResult as unknown as Record<string, unknown>).earlySpeedData = earlySpeedData;
+  }
+
+  return shosanResult;
 }
