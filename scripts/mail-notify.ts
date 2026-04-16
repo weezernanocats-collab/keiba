@@ -237,13 +237,12 @@ async function main() {
     return;
   }
 
-  // デフォルト: 朝一通知（全レース送信 + スナップショット保存）
-  let sentCount = 0;
-
-  for (const { race, shoshan } of racesWithShoshan) {
-    const raceLabel = `${race.racecourse_name}${race.race_number}R ${race.race_name}`;
-    const subject = `🐴 しょーさん予想: ${raceLabel}（${race.time || '??:??'}発走）`;
-    const html = buildMailHtml(date, race, shoshan);
+  // デフォルト: 朝一通知（全レースを1通にまとめて送信 + スナップショット保存）
+  if (racesWithShoshan.length === 0) {
+    console.log(`[mail] ${date}: しょーさん候補なし。メール送信スキップ`);
+  } else {
+    const subject = `🐴 しょーさん予想一覧 ${date}（${racesWithShoshan.length}レース）`;
+    const html = buildMorningSummaryHtml(date, racesWithShoshan);
 
     await transporter.sendMail({
       from: `KEIBA MASTER <${GMAIL_USER}>`,
@@ -252,14 +251,9 @@ async function main() {
       html,
     });
 
-    console.log(`[mail] 送信完了: ${raceLabel} → ${NOTIFY_EMAIL_TO}`);
-    sentCount++;
-  }
+    console.log(`[mail] 朝一通知送信完了: ${racesWithShoshan.length}レース → ${NOTIFY_EMAIL_TO}`);
 
-  if (sentCount === 0) {
-    console.log(`[mail] ${date} ${raceFilter || '全レース'}: しょーさん候補なし。メール送信スキップ`);
-  } else {
-    // 朝一送信後にスナップショット保存
+    // スナップショット保存
     const allRows = raceFilter ? await dbAll<RaceRow>(`
       SELECT r.id as race_id, r.name as race_name, r.racecourse_name,
              r.race_number, r.time, p.analysis_json
@@ -275,18 +269,14 @@ async function main() {
       } catch { /* ignore */ }
     }
     saveSnapshot(date, allFp);
-    console.log(`[mail] スナップショット保存完了 (${sentCount}件送信, ${Object.keys(allFp).length}レース記録)`);
+    console.log(`[mail] スナップショット保存完了 (${Object.keys(allFp).length}レース記録)`);
   }
 }
 
 // ==================== メール本文生成 ====================
 
-function buildMailHtml(
-  date: string,
-  race: RaceRow,
-  shoshan: ShosanPrediction,
-  changeNote?: string,
-): string {
+/** 1レース分のHTMLセクションを生成（朝一まとめ・7分前単体の両方で使う） */
+function buildRaceSection(race: RaceRow, shoshan: ShosanPrediction): string {
   const timeStr = race.time || '??:??';
   const header = `${race.racecourse_name} ${race.race_number}R ${race.race_name}（${timeStr}発走）`;
 
@@ -296,7 +286,6 @@ function buildMailHtml(
     const zoneLabel = `Z${c.jockeyZone} ${c.jockeyName}`;
     const scoreColor = c.matchScore >= 70 ? '#ea580c' : c.matchScore >= 55 ? '#ca8a04' : '#6b7280';
 
-    // 1角確保スコア
     let earlySpeedHtml = '';
     if (shoshan.earlySpeedData?.[c.horseNumber]) {
       const es = shoshan.earlySpeedData[c.horseNumber];
@@ -326,7 +315,6 @@ function buildMailHtml(
       </tr>`;
   }).join('');
 
-  // 馬連推奨
   let umarenHtml = '';
   if (shoshan.umarenRecommendations.length > 0) {
     const recs = shoshan.umarenRecommendations.map(r => {
@@ -336,28 +324,61 @@ function buildMailHtml(
     umarenHtml = `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #fed7aa;"><strong style="font-size:13px;">馬連推奨:</strong> ${recs}</div>`;
   }
 
-  // 警告
   const warningHtml = shoshan.warning
     ? `<div style="margin-bottom:8px;padding:6px 10px;background:#fef9c3;border:1px solid #facc15;border-radius:6px;font-size:12px;color:#854d0e;">⚠️ ${shoshan.warning}</div>`
     : '';
 
-  const subtitle = changeNote
-    ? `${date} 発走前再生成で予想が${changeNote}されました`
-    : `${date} 朝一予想 — しょーさん理論該当馬`;
+  return `
+    <div style="margin-bottom:16px;padding:12px;border:2px solid #fb923c;border-radius:12px;background:#fff7ed;">
+      <h2 style="margin:0 0 8px;font-size:15px;color:#9a3412;">🏇 ${header}</h2>
+      ${warningHtml}
+      <table style="width:100%;border-collapse:collapse;">
+        ${candidateRows}
+      </table>
+      ${umarenHtml}
+    </div>`;
+}
+
+/** 朝一まとめメール（全レースを1通に） */
+function buildMorningSummaryHtml(
+  date: string,
+  races: { race: RaceRow; shoshan: ShosanPrediction }[],
+): string {
+  const sections = races.map(({ race, shoshan }) => buildRaceSection(race, shoshan)).join('');
+
+  return `
+    <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1f2937;">
+      <h1 style="font-size:20px;color:#9a3412;border-bottom:2px solid #fb923c;padding-bottom:8px;">
+        🐴 しょーさん予想一覧 — ${date}
+      </h1>
+      <p style="font-size:13px;color:#6b7280;margin-bottom:16px;">
+        本日のしょーさん理論該当馬（${races.length}レース）
+      </p>
+      ${sections}
+      <p style="font-size:11px;color:#9ca3af;margin-top:16px;text-align:center;">
+        KEIBA MASTER — 先行力 × 乗り替わり × アゲ騎手
+      </p>
+    </div>`;
+}
+
+/** 7分前更新メール（1レース単体） */
+function buildMailHtml(
+  date: string,
+  race: RaceRow,
+  shoshan: ShosanPrediction,
+  changeNote: string,
+): string {
+  const timeStr = race.time || '??:??';
+  const header = `${race.racecourse_name} ${race.race_number}R ${race.race_name}（${timeStr}発走）`;
+  const section = buildRaceSection(race, shoshan);
 
   return `
     <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1f2937;">
       <h1 style="font-size:18px;color:#9a3412;border-bottom:2px solid #fb923c;padding-bottom:8px;">
-        ${changeNote ? '🔄' : '🐴'} ${header}
+        🔄 ${header}
       </h1>
-      <p style="font-size:12px;color:#6b7280;margin-bottom:12px;">${subtitle}</p>
-      ${warningHtml}
-      <div style="padding:12px;border:2px solid #fb923c;border-radius:12px;background:#fff7ed;">
-        <table style="width:100%;border-collapse:collapse;">
-          ${candidateRows}
-        </table>
-        ${umarenHtml}
-      </div>
+      <p style="font-size:12px;color:#6b7280;margin-bottom:12px;">${date} 発走前再生成で予想が${changeNote}されました</p>
+      ${section}
       <p style="font-size:11px;color:#9ca3af;margin-top:16px;text-align:center;">
         KEIBA MASTER — 先行力 × 乗り替わり × アゲ騎手
       </p>
