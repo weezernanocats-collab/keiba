@@ -124,6 +124,12 @@ check_and_regen() {
       # Slack通知
       RACE_INFO=$(echo "$races_at_time" | while IFS=$'\t' read -r _t v r n; do echo "${v}${r}R ${n}"; done | tr '\n' '、' | sed 's/、$//')
       bash "${SCRIPT_DIR}/slack-notify.sh" "🐴 予想再生成完了 (${trigger_hhmm}発走前)\n${RACE_INFO}\nパドック解説反映済み"
+
+      # しょーさん予想メール通知（該当馬がいるレースのみ送信）
+      echo "$races_at_time" | while IFS=$'\t' read -r _t v r n; do
+        npx tsx "${SCRIPT_DIR}/mail-notify.ts" --date "$TODAY" --race "${v}${r}" 2>&1 | tail -1
+      done
+
       echo "  *** 再生成完了 ($(date '+%H:%M:%S')) ***"
     ) &
   fi
