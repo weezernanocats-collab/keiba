@@ -28,7 +28,7 @@ const AGE_JOCKEYS: JockeyZone[] = [
   { id: '01157', name: '鮫島駿', zone: 2 },
   { id: '01160', name: '荻野極', zone: 2 },
   // Zone 3: 先行意識が高いが、Zone 2より信頼度低い
-  { id: '01075', name: '田辺', zone: 3 },
+  // 田辺: 除外（2026-04-16）
   { id: '01144', name: '菱田', zone: 3 },
   { id: '01200', name: '西塚', zone: 3 },
   { id: '01150', name: '石川', zone: 3 },
