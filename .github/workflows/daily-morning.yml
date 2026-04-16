@@ -60,6 +60,15 @@ jobs:
           echo "Regenerating predictions for $TODAY"
           npx tsx scripts/gen-predictions-optimized.ts --date "$TODAY" --regen
 
+      - name: Send Shoshan email notifications (朝一しょーさん予想メール通知)
+        if: github.event.inputs.job == '' || github.event.inputs.job == 'morning'
+        run: |
+          echo "GMAIL_USER=\"${{ secrets.GMAIL_USER }}\"" >> .env.local
+          echo "GMAIL_APP_PASSWORD=\"${{ secrets.GMAIL_APP_PASSWORD }}\"" >> .env.local
+          echo "NOTIFY_EMAIL_TO=\"${{ secrets.NOTIFY_EMAIL_TO }}\"" >> .env.local
+          TODAY=$(date -u -d '+9 hours' '+%Y-%m-%d')
+          npx tsx scripts/mail-notify.ts --date "$TODAY"
+
       - name: Cleanup
         if: always()
         run: rm -f .env.local
