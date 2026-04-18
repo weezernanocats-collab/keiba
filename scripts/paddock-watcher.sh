@@ -121,14 +121,19 @@ check_and_regen() {
         RACE_NAMES="${RACE_NAMES}${venue}${rnum}R ${rname}\n"
       done
 
-      # Slack通知
-      RACE_INFO=$(echo "$races_at_time" | while IFS=$'\t' read -r _t v r n; do echo "${v}${r}R ${n}"; done | tr '\n' '、' | sed 's/、$//')
-      bash "${SCRIPT_DIR}/slack-notify.sh" "🐴 予想再生成完了 (${trigger_hhmm}発走前)\n${RACE_INFO}\nパドック解説反映済み"
-
       # しょーさん予想メール通知（朝一と比較して変更があるレースのみ送信）
+      # + しょーさん候補があるレースのみSlack通知
+      SHOSHAN_RACES=""
       echo "$races_at_time" | while IFS=$'\t' read -r _t v r n; do
-        npx tsx "${SCRIPT_DIR}/mail-notify.ts" --date "$TODAY" --race "${v}${r}" --diff 2>&1 | tail -1
+        MAIL_OUT=$(npx tsx "${SCRIPT_DIR}/mail-notify.ts" --date "$TODAY" --race "${v}${r}" --diff 2>&1 | tail -1)
+        echo "  $MAIL_OUT"
+        if echo "$MAIL_OUT" | grep -q "送信"; then
+          SHOSHAN_RACES="${SHOSHAN_RACES}${v}${r}R ${n}\n"
+        fi
       done
+      if [ -n "$SHOSHAN_RACES" ]; then
+        bash "${SCRIPT_DIR}/slack-notify.sh" "🐴 しょーさん予想更新 (${trigger_hhmm}発走前)\n${SHOSHAN_RACES}メール通知済み"
+      fi
 
       echo "  *** 再生成完了 ($(date '+%H:%M:%S')) ***"
     ) &
