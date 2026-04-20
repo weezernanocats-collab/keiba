@@ -1150,6 +1150,130 @@ export default function PredictionDetailPage() {
         );
       })()}
 
+      {/* しょーさん × AI × 休養フィルタ */}
+      {prediction.shosanPrediction?.restFilteredCandidates && prediction.shosanPrediction.restFilteredCandidates.length > 0 && (() => {
+        const aiTop3Set = new Set(prediction.topPicks.slice(0, 3).map(p => p.horseNumber));
+        const sweetSpotRest: typeof prediction.shosanPrediction.restFilteredCandidates = [];
+        const aiMissedRest: typeof prediction.shosanPrediction.restFilteredCandidates = [];
+        const aiAgreedRest: typeof prediction.shosanPrediction.restFilteredCandidates = [];
+
+        for (const c of prediction.shosanPrediction.restFilteredCandidates!) {
+          const horseInTop3 = aiTop3Set.has(c.horseNumber);
+          const horsePick = prediction.topPicks.find(p => p.horseNumber === c.horseNumber);
+          const odds = horsePick && 'odds' in horsePick ? (horsePick as { odds?: number }).odds : undefined;
+
+          if (horseInTop3 && c.matchScore >= 65 && odds && odds >= 5) {
+            sweetSpotRest.push(c);
+          } else if (horseInTop3) {
+            aiAgreedRest.push(c);
+          } else {
+            aiMissedRest.push(c);
+          }
+        }
+
+        if (sweetSpotRest.length === 0 && aiAgreedRest.length === 0 && aiMissedRest.length === 0) return null;
+
+        return (
+          <div className="scroll-mt-32">
+            <div className="border-2 border-emerald-400 dark:border-emerald-600 rounded-xl p-6 bg-emerald-50/50 dark:bg-emerald-900/20">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="px-2 py-0.5 rounded text-xs font-bold bg-emerald-500 text-white">SHO×AI×休養</span>
+                <h2 className="text-lg font-bold">しょーさん × AI × 休養</h2>
+              </div>
+              <p className="text-xs text-muted mb-4">休養フィルタ版のしょーさん候補 × AI予想の掛け合わせ（最高信頼度）</p>
+
+              {sweetSpotRest.length > 0 && (
+                <div className="mb-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">🔥</span>
+                    <h3 className="text-sm font-bold text-emerald-700 dark:text-emerald-300">スイートスポット + 休養適正</h3>
+                  </div>
+                  <p className="text-xs text-muted mb-2">しょーさん65%+ × AI Top3 × オッズ5倍+ × 好走休養ゾーン</p>
+                  <div className="space-y-2">
+                    {sweetSpotRest.map(c => {
+                      const horsePick = prediction.topPicks.find(p => p.horseNumber === c.horseNumber);
+                      const odds = horsePick && 'odds' in horsePick ? (horsePick as { odds?: number }).odds : undefined;
+                      return (
+                        <div key={c.horseNumber} className="flex items-center gap-3 p-3 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 border-2 border-emerald-300 dark:border-emerald-700">
+                          <span className="text-xl">🔥</span>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-bold text-emerald-900 dark:text-emerald-100">{c.horseNumber}番 {c.horseName}</span>
+                              <span className="text-xs text-emerald-700 dark:text-emerald-300">SHO {c.matchScore}% / AI Top3</span>
+                              {odds && <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300">{odds.toFixed(1)}倍</span>}
+                              {c.restDays !== undefined && <span className="px-1.5 py-0.5 rounded text-xs font-bold bg-emerald-200 dark:bg-emerald-800 text-emerald-800 dark:text-emerald-200">{c.restDays}日</span>}
+                            </div>
+                            <p className="text-xs text-muted mt-0.5">理論{c.theory} / Z{c.jockeyZone} {c.jockeyName}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {aiMissedRest.length > 0 && (
+                <div className="mb-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">💎</span>
+                    <h3 className="text-sm font-bold text-emerald-700 dark:text-emerald-300">AI見落とし + 休養適正</h3>
+                  </div>
+                  <p className="text-xs text-muted mb-2">AIは推さないが、しょーさん理論 + 好走休養ゾーンに合致</p>
+                  <div className="space-y-2">
+                    {aiMissedRest.map(c => {
+                      const horsePick = prediction.topPicks.find(p => p.horseNumber === c.horseNumber);
+                      const odds = horsePick && 'odds' in horsePick ? (horsePick as { odds?: number }).odds : undefined;
+                      return (
+                        <div key={c.horseNumber} className="flex items-center gap-3 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-300 dark:border-emerald-700">
+                          <span className="text-xl">💎</span>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-bold">{c.horseNumber}番 {c.horseName}</span>
+                              <span className="text-xs text-emerald-700 dark:text-emerald-300">SHO {c.matchScore}%</span>
+                              {odds && <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300">{odds.toFixed(1)}倍</span>}
+                              {c.restDays !== undefined && <span className="px-1.5 py-0.5 rounded text-xs font-bold bg-emerald-200 dark:bg-emerald-800 text-emerald-800 dark:text-emerald-200">{c.restDays}日</span>}
+                            </div>
+                            <p className="text-xs text-muted mt-0.5">理論{c.theory} / Z{c.jockeyZone} {c.jockeyName}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {aiAgreedRest.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">⚠️</span>
+                    <h3 className="text-sm font-bold text-gray-600 dark:text-gray-400">AI同意 + 休養適正（人気想定 / 参考）</h3>
+                  </div>
+                  <div className="space-y-2">
+                    {aiAgreedRest.map(c => {
+                      const horsePick = prediction.topPicks.find(p => p.horseNumber === c.horseNumber);
+                      const odds = horsePick && 'odds' in horsePick ? (horsePick as { odds?: number }).odds : undefined;
+                      return (
+                        <div key={c.horseNumber} className="flex items-center gap-3 p-2 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
+                          <span className="text-base opacity-50">⚠️</span>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-medium text-sm">{c.horseNumber}番 {c.horseName}</span>
+                              <span className="text-xs text-gray-500">SHO {c.matchScore}% / AI Top3</span>
+                              {odds && <span className="text-xs">{odds.toFixed(1)}倍</span>}
+                              {c.restDays !== undefined && <span className="text-xs text-gray-500">{c.restDays}日</span>}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* サマリー */}
       <div id="summary" ref={setSectionRefWrapped('summary')} className="bg-card-bg border border-card-border rounded-xl p-6 scroll-mt-32">
         <h2 className="text-lg font-bold mb-3">予想サマリー</h2>
