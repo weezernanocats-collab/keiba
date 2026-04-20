@@ -109,6 +109,7 @@ interface PredictionData {
       jockeyZone: number;
       jockeyName: string;
       reasons: string[];
+      restDays?: number;
     }[];
     umarenRecommendations: { horses: number[]; confidence: string }[];
     warning?: string;
@@ -118,6 +119,17 @@ interface PredictionData {
       firstCornerScore: number;
       firstCornerFactors: string[];
     }>;
+    restFilteredCandidates?: {
+      horseNumber: number;
+      horseName: string;
+      theory: 1 | 2;
+      matchScore: number;
+      jockeyZone: number;
+      jockeyName: string;
+      reasons: string[];
+      restDays?: number;
+    }[];
+    restFilteredUmarenRecommendations?: { horses: number[]; confidence: string }[];
   };
 }
 
@@ -945,6 +957,62 @@ export default function PredictionDetailPage() {
                         : rec.confidence === '中' ? 'bg-yellow-100 dark:bg-yellow-900/30 border-yellow-400 text-yellow-700 dark:text-yellow-300'
                         : 'bg-gray-100 dark:bg-gray-800 border-gray-300 text-gray-600 dark:text-gray-400'
                     }`}>
+                      {rec.horses.join(' - ')} <span className="text-xs">({rec.confidence})</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* しょーさん予想 休養フィルタ版 */}
+      {prediction.shosanPrediction?.restFilteredCandidates && prediction.shosanPrediction.restFilteredCandidates.length > 0 && (
+        <div className="scroll-mt-32">
+          <div className="border-2 border-green-400 dark:border-green-600 rounded-xl p-6 bg-green-50/50 dark:bg-green-900/20">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="px-2 py-0.5 rounded text-xs font-bold bg-green-500 text-white">休養</span>
+              <h2 className="text-lg font-bold">しょーさん予想（休養フィルタ版）</h2>
+            </div>
+            <p className="text-xs text-muted mb-4">好走ゾーン（0-27日/56-69日/91-120日）に該当する候補のみ（バックテストROI 147-155%）</p>
+
+            <div className="space-y-3">
+              {prediction.shosanPrediction.restFilteredCandidates.map((c, idx) => (
+                <div key={c.horseNumber} className="flex items-start gap-3 p-3 rounded-lg bg-white/70 dark:bg-gray-800/70 border border-green-200 dark:border-green-800">
+                  <span className={`text-lg font-black ${idx === 0 ? 'text-green-600' : idx === 1 ? 'text-green-500' : 'text-green-400'}`}>
+                    {['◎', '○', '▲'][idx] || '△'}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold">{c.horseNumber}番 {c.horseName}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${c.theory === 1 ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' : 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300'}`}>
+                        理論{c.theory}
+                      </span>
+                      <span className="text-xs text-muted">Z{c.jockeyZone} {c.jockeyName}</span>
+                      {c.restDays !== undefined && (
+                        <span className="px-1.5 py-0.5 rounded text-xs font-bold bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300">
+                          {c.restDays}日
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1 flex items-center gap-2">
+                      <span className={`font-bold ${c.matchScore >= 70 ? 'text-orange-600' : c.matchScore >= 55 ? 'text-yellow-600' : 'text-gray-500'}`}>
+                        {c.matchScore}%
+                      </span>
+                      <span className="text-xs text-muted truncate">{c.reasons.join(' / ')}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {prediction.shosanPrediction.restFilteredUmarenRecommendations && prediction.shosanPrediction.restFilteredUmarenRecommendations.length > 0 && (
+              <div className="border-t border-green-200 dark:border-green-800 pt-3 mt-3">
+                <h3 className="text-sm font-bold mb-2">馬連推奨（休養版）</h3>
+                <div className="flex flex-wrap gap-2">
+                  {prediction.shosanPrediction.restFilteredUmarenRecommendations.map((rec, i) => (
+                    <span key={i} className="px-3 py-1.5 rounded-lg text-sm font-bold border bg-green-100 dark:bg-green-900/30 border-green-400 text-green-700 dark:text-green-300">
                       {rec.horses.join(' - ')} <span className="text-xs">({rec.confidence})</span>
                     </span>
                   ))}

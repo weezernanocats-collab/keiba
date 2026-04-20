@@ -100,12 +100,33 @@ export interface ShosanCandidate {
   jockeyName: string;
   prevJockeyName?: string;
   reasons: string[];     // 選出理由
+  restDays?: number;     // 前走からの休養日数
 }
 
 export interface ShosanResult {
   candidates: ShosanCandidate[];
   umarenRecommendations: { horses: number[]; confidence: string }[];
   warning?: string;  // 適用注意（未勝利戦・3歳限定戦等）
+  // 休養フィルタ版（0-27日 OR 56-69日 OR 91-120日のみ）: バックテストROI 147-155%
+  restFilteredCandidates: ShosanCandidate[];
+  restFilteredUmarenRecommendations: { horses: number[]; confidence: string }[];
+}
+
+// ==================== 休養フィルタ ====================
+
+/**
+ * 休養日数が好走ゾーンに入っているか判定
+ * バックテスト（2025-01〜2026-04, 時系列バリデーション済み）:
+ *   0-27日: ROI 113-153%（連戦 = 好調サイン）
+ *   56-69日: ROI 127-190%（短期放牧明け）
+ *   91-120日: ROI 184-321%（休み明け一発）
+ *   それ以外: ROI 赤字（28-55日, 70-90日, 121日+）
+ */
+function isGoodRestZone(days: number): boolean {
+  if (days <= 27) return true;
+  if (days >= 56 && days <= 69) return true;
+  if (days >= 91 && days <= 120) return true;
+  return false;
 }
 
 // ==================== 先行力判定 ====================
@@ -120,7 +141,7 @@ function getFirstCornerPosition(cornerPositions: string): number | null {
  * 先行力判定: 直近10走以内のJRA（中央）レースで1角1-2番手を取った回数
  * 地方競馬の先行実績はカウントしない
  *
- * 理論1: 3回以上が条件（バックテスト: 3回+でROI 140.6%, 1回だと赤字）
+ * 理論1: 2回以上が条件（2026-04-20変更: 3→2回）
  */
 function hasFrontRunningAbility(pastPerfs: PastPerf[]): { has: boolean; frontCount: number; totalRaces: number } {
   let frontCount = 0;
@@ -135,7 +156,7 @@ function hasFrontRunningAbility(pastPerfs: PastPerf[]): { has: boolean; frontCou
     totalRaces++;
     if (pos <= 2) frontCount++;
   }
-  return { has: frontCount >= 3, frontCount, totalRaces };
+  return { has: frontCount >= 2, frontCount, totalRaces };
 }
 
 /**
@@ -238,7 +259,19 @@ export function evaluateShosanTheory(
   // 馬連推奨
   const umarenRecommendations = generateUmarenRecommendations(top);
 
-  return { candidates: top, umarenRecommendations, warning };
+  // 休養フィルタ版: 好走ゾーン（0-27日, 56-69日, 91-120日）のみ抽出
+  const restFiltered = candidates
+    .filter(c => c.restDays !== undefined && isGoodRestZone(c.restDays))
+    .slice(0, 3);
+  const restFilteredUmarenRecommendations = generateUmarenRecommendations(restFiltered);
+
+  return {
+    candidates: top,
+    umarenRecommendations,
+    warning,
+    restFilteredCandidates: restFiltered,
+    restFilteredUmarenRecommendations,
+  };
 }
 
 function evaluateTheory1(
@@ -281,8 +314,8 @@ function evaluateTheory1(
   else if (jockeyZone.zone === 3) score += 10;
   else if (jockeyZone.zone === 4) score += 5;
 
-  // 休養: バックテストで42-90日はROI 87.8%(赤字)のためボーナス削除
-  // 短間隔(0-41日)172.7%, 長休養(91日+)194.2% → 休養日数はスコアに影響させない
+  // 休養日数をreasonsに記録
+  reasons.push(`休養${restFromLastRace}日`);
 
   if (score < 45) return null;
 
@@ -295,6 +328,7 @@ function evaluateTheory1(
     jockeyName: jockeyZone.name,
     prevJockeyName: undefined,
     reasons,
+    restDays: restFromLastRace,
   };
 }
 
@@ -356,6 +390,8 @@ function evaluateTheory2(
   else if (jockeyZone.zone === 3) score += 20; // バックテストROI 270%
   else if (jockeyZone.zone === 4) score += 5;
 
+  reasons.push(`休養${rest}日`);
+
   if (score < 45) return null;
 
   return {
@@ -366,6 +402,7 @@ function evaluateTheory2(
     jockeyZone: jockeyZone.zone,
     jockeyName: jockeyZone.name,
     reasons,
+    restDays: rest,
   };
 }
 

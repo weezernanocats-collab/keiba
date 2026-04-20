@@ -56,6 +56,7 @@ interface ShosanCandidate {
   jockeyZone: number;
   jockeyName: string;
   reasons: string[];
+  restDays?: number;
 }
 
 interface EarlySpeedEntry {
@@ -70,6 +71,8 @@ interface ShosanPrediction {
   umarenRecommendations: { horses: number[]; confidence: string }[];
   warning?: string;
   earlySpeedData?: Record<number, EarlySpeedEntry>;
+  restFilteredCandidates?: ShosanCandidate[];
+  restFilteredUmarenRecommendations?: { horses: number[]; confidence: string }[];
 }
 
 interface RaceRow {
