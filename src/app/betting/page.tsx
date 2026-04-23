@@ -34,6 +34,8 @@ interface BetTarget {
 }
 
 const BET_TYPES = ['単勝', '複勝', '馬連', '馬単', 'ワイド', '三連複', '三連単'];
+const USERS = ['naoto', 'friend1', 'friend2'];
+const USER_KEY = 'keiba-betting-user';
 
 function getToday(): string {
   const d = new Date();
@@ -56,6 +58,7 @@ export default function BettingPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [selectedDate, setSelectedDate] = useState(getNextSaturday());
+  const [userId, setUserId] = useState('naoto');
 
   // フォーム
   const [formDate, setFormDate] = useState(getNextSaturday());
@@ -68,15 +71,25 @@ export default function BettingPage() {
   const [formAutoDistribute, setFormAutoDistribute] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    const saved = localStorage.getItem(USER_KEY);
+    if (saved && USERS.includes(saved)) setUserId(saved);
+  }, []);
+
+  const switchUser = (id: string) => {
+    setUserId(id);
+    localStorage.setItem(USER_KEY, id);
+  };
+
   const fetchTargets = useCallback(async () => {
     try {
-      const res = await fetch(`/api/betting?date=${selectedDate}`);
+      const res = await fetch(`/api/betting?date=${selectedDate}&userId=${userId}`);
       const data = await res.json();
       setTargets(data.targets || []);
     } catch (e) {
       console.error(e);
     }
-  }, [selectedDate]);
+  }, [selectedDate, userId]);
 
   const fetchRaces = useCallback(async (date: string) => {
     try {
@@ -119,6 +132,7 @@ export default function BettingPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          userId,
           date: formDate,
           raceId: formRaceId || null,
           raceLabel: formRaceLabel,
@@ -169,7 +183,7 @@ export default function BettingPage() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold">馬券セット</h1>
         <button
           onClick={() => { setShowForm(!showForm); setFormDate(selectedDate); }}
@@ -177,6 +191,23 @@ export default function BettingPage() {
         >
           {showForm ? '閉じる' : '+ 新規'}
         </button>
+      </div>
+
+      {/* ユーザー切替 */}
+      <div className="flex gap-2 mb-4">
+        {USERS.map(u => (
+          <button
+            key={u}
+            onClick={() => switchUser(u)}
+            className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${
+              userId === u
+                ? 'bg-gray-800 text-white border-gray-800'
+                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+            }`}
+          >
+            {u}
+          </button>
+        ))}
       </div>
 
       {/* 日付選択 */}

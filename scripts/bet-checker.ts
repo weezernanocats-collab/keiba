@@ -36,29 +36,54 @@ const db = createClient({
 const BASE_URL = 'https://race.netkeiba.com';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
-interface WinOdds { horseNumber: number; odds: number }
+// netkeiba API type番号
+const BET_TYPE_API: Record<string, number> = {
+  '単勝': 1, '複勝': 1, '馬連': 4, 'ワイド': 5, '馬単': 6, '三連複': 7, '三連単': 8,
+};
 
-async function scrapeOdds(raceId: string): Promise<WinOdds[]> {
-  const apiUrl = `${BASE_URL}/api/api_get_jra_odds.html?race_id=${raceId}&type=1&action=init&compress=0`;
+interface OddsEntry { key: string; odds: number; minOdds?: number; maxOdds?: number }
+
+async function fetchOddsFromApi(raceId: string, apiType: number): Promise<Map<string, OddsEntry>> {
+  const apiUrl = `${BASE_URL}/api/api_get_jra_odds.html?race_id=${raceId}&type=${apiType}&action=init&compress=0`;
   const response = await fetch(apiUrl, {
     headers: { 'User-Agent': USER_AGENT },
     signal: AbortSignal.timeout(15000),
   });
 
-  if (!response.ok) return [];
+  if (!response.ok) return new Map();
 
   const text = await response.text();
   let data: { data?: { odds?: Record<string, Record<string, [string, string, string]>> } };
-  try { data = JSON.parse(text); } catch { return []; }
-  if (!data.data?.odds?.['1']) return [];
+  try { data = JSON.parse(text); } catch { return new Map(); }
 
-  const result: WinOdds[] = [];
-  for (const [numStr, values] of Object.entries(data.data.odds['1'])) {
-    const horseNumber = parseInt(numStr);
-    const odds = parseFloat(values[0]);
-    if (horseNumber > 0 && odds > 0) result.push({ horseNumber, odds });
+  const result = new Map<string, OddsEntry>();
+  const oddsData = data.data?.odds;
+  if (!oddsData) return result;
+
+  // type=1: odds['1']=単勝, odds['2']=複勝
+  // type=4: odds['4']=馬連  key="XXYY" (XX<YY)
+  // type=5: odds['5']=ワイド key="XXYY" values=[minOdds, maxOdds, popularity]
+  // type=6: odds['6']=馬単  key="XXYY" (XX=1着, YY=2着, 順序あり)
+  // type=7: odds['7']=三連複 key="XXYYZZ" (XX<YY<ZZ)
+  // type=8: odds['8']=三連単 key="XXYYZZ" (順序あり)
+  for (const [typeKey, entries] of Object.entries(oddsData)) {
+    for (const [key, values] of Object.entries(entries)) {
+      const oddsVal = parseFloat(values[0].replace(/,/g, ''));
+      if (oddsVal > 0) {
+        const entry: OddsEntry = { key, odds: oddsVal };
+        if (typeKey === '5') {
+          entry.minOdds = oddsVal;
+          entry.maxOdds = parseFloat(values[1].replace(/,/g, ''));
+        }
+        result.set(key, entry);
+      }
+    }
   }
   return result;
+}
+
+function padHorseNum(n: number): string {
+  return n.toString().padStart(2, '0');
 }
 
 function parseCombination(label: string): number[] {
@@ -87,46 +112,51 @@ async function checkAndNotify(target: BetTarget): Promise<boolean> {
     return false;
   }
 
+  // API type を決定
+  const apiType = BET_TYPE_API[target.bet_type];
+  if (!apiType) {
+    console.log(`  [${target.race_label}] ${target.bet_type} は自動オッズ取得未対応`);
+    return false;
+  }
+
   // オッズ取得
-  const winOdds = await scrapeOdds(raceId);
-  if (winOdds.length === 0) {
+  const oddsMap = await fetchOddsFromApi(raceId, apiType);
+  if (oddsMap.size === 0) {
     console.log(`  [${target.race_label}] オッズ取得失敗`);
     return false;
   }
 
-  const oddsMap = new Map(winOdds.map(w => [w.horseNumber, w.odds]));
-
   // 組み合わせごとのオッズを取得
-  // 単勝/複勝: 馬番1つ → 単勝オッズ
-  // 馬連等: 馬番2つ → odds テーブルから取得が必要だが、まずは単勝オッズで近似
   const betCombinations: { label: string; odds: number }[] = [];
 
-  if (['単勝', '複勝'].includes(target.bet_type)) {
-    for (const combo of combinations) {
-      const nums = parseCombination(combo);
-      if (nums.length === 1) {
-        const odds = oddsMap.get(nums[0]);
-        if (odds) betCombinations.push({ label: combo, odds });
-      }
-    }
-  } else {
-    // 馬連/馬単等: odds テーブルから該当オッズを取得
-    for (const combo of combinations) {
-      const nums = parseCombination(combo);
-      if (nums.length >= 2) {
-        // 馬連オッズはnetkeiba APIで type=4 (馬連) を取得する必要がある
-        // 暫定: odds テーブルから取得
-        const row = await db.execute({
-          sql: `SELECT odds FROM odds WHERE race_id = ? AND bet_type = ? AND horse_number1 = ?`,
-          args: [raceId, target.bet_type, nums[0]],
-        });
+  for (const combo of combinations) {
+    const nums = parseCombination(combo);
+    let lookupKey: string | null = null;
 
-        // 馬連等の場合、horse_number1 だけでは特定できないので
-        // 個別のオッズが取れない場合はスキップ
-        // TODO: 馬連/三連複等のオッズ取得を実装
-        if (row.rows.length > 0) {
-          betCombinations.push({ label: combo, odds: row.rows[0].odds as number });
-        }
+    if (['単勝', '複勝'].includes(target.bet_type) && nums.length === 1) {
+      lookupKey = padHorseNum(nums[0]);
+    } else if (['馬連', 'ワイド'].includes(target.bet_type) && nums.length === 2) {
+      // 馬連/ワイド: key = "XXYY" (XX < YY、順不同)
+      const sorted = [nums[0], nums[1]].sort((a, b) => a - b);
+      lookupKey = padHorseNum(sorted[0]) + padHorseNum(sorted[1]);
+    } else if (target.bet_type === '馬単' && nums.length === 2) {
+      // 馬単: key = "XXYY" (XX=1着, YY=2着、順序あり)
+      lookupKey = padHorseNum(nums[0]) + padHorseNum(nums[1]);
+    } else if (target.bet_type === '三連複' && nums.length === 3) {
+      // 三連複: key = "XXYYZZ" (XX < YY < ZZ)
+      const sorted = [...nums].sort((a, b) => a - b);
+      lookupKey = sorted.map(padHorseNum).join('');
+    } else if (target.bet_type === '三連単' && nums.length === 3) {
+      // 三連単: key = "XXYYZZ" (順序あり)
+      lookupKey = nums.map(padHorseNum).join('');
+    }
+
+    if (lookupKey) {
+      const entry = oddsMap.get(lookupKey);
+      if (entry) {
+        // ワイドは最低オッズ(minOdds)を使用（保守的に計算）
+        const odds = target.bet_type === 'ワイド' && entry.minOdds ? entry.minOdds : entry.odds;
+        betCombinations.push({ label: combo, odds });
       }
     }
   }
