@@ -39,6 +39,12 @@ function getJSTDate(offsetDays = 0): string {
   return jst.toISOString().split('T')[0];
 }
 
+function getJSTTimestamp(): string {
+  const jstOffset = 9 * 60 * 60_000;
+  const jst = new Date(Date.now() + jstOffset);
+  return jst.toISOString().replace('T', ' ').slice(0, 19);
+}
+
 function parseArgs(): string[] {
   const dates: string[] = [];
   const args = process.argv.slice(2);
@@ -146,6 +152,7 @@ async function main() {
       const odds = await scrapeOdds(raceId);
 
       if (odds.win.length > 0) {
+        const snapshotTime = getJSTTimestamp();
         for (const w of odds.win) {
           await db.execute({
             sql: `INSERT INTO odds (race_id, bet_type, horse_number1, odds) VALUES (?, '単勝', ?, ?)
@@ -155,6 +162,11 @@ async function main() {
           await db.execute({
             sql: `UPDATE race_entries SET odds = ? WHERE race_id = ? AND horse_number = ?`,
             args: [w.odds, raceId, w.horseNumber],
+          });
+          // オッズ時系列スナップショット保存
+          await db.execute({
+            sql: `INSERT INTO odds_snapshots (race_id, horse_number, odds, snapshot_time) VALUES (?, ?, ?, ?)`,
+            args: [raceId, w.horseNumber, w.odds, snapshotTime],
           });
         }
         totalWin += odds.win.length;

@@ -29,10 +29,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 REGEN_SCRIPT="npx tsx ${SCRIPT_DIR}/gen-predictions-optimized.ts"
 RESULT_SCRIPT="npx tsx ${SCRIPT_DIR}/fetch-yesterday-results.ts"
+ODDS_SCRIPT="npx tsx ${SCRIPT_DIR}/odds-snapshot.ts"
 TODAY=$(date +%Y-%m-%d)
 
 # 再生成タイミング: 発走の何分前か
 REGEN_MINUTES_BEFORE=7
+# オッズ急落閾値（%）— odds-watcher.sh に渡す
+ODDS_DROP_THRESHOLD=30
 
 mkdir -p "$WORK_DIR"
 
@@ -63,15 +66,15 @@ touch "$REGEN_DONE_FILE"
 is_regen_done() { grep -qF "$1" "$REGEN_DONE_FILE" 2>/dev/null || false; }
 mark_regen_done() { echo "$1" >> "$REGEN_DONE_FILE"; }
 
-# レース発走時刻+競馬場+レース番号リスト取得
+# レース発走時刻+競馬場+レース番号+race_idリスト取得
 RACE_LIST_FILE="${WORK_DIR}/race_list.txt"
 cd "$PROJECT_DIR"
 node --env-file=.env.local -e "
 const { createClient } = require('@libsql/client');
 const db = createClient({ url: process.env.TURSO_DATABASE_URL.replace('libsql://', 'https://'), authToken: process.env.TURSO_AUTH_TOKEN });
 (async () => {
-  const r = await db.execute(\"SELECT time, racecourse_name, race_number, name FROM races WHERE date = '${TODAY}' AND time IS NOT NULL ORDER BY time\");
-  r.rows.forEach(row => console.log(row.time + '\t' + row.racecourse_name + '\t' + row.race_number + '\t' + row.name));
+  const r = await db.execute(\"SELECT id, time, racecourse_name, race_number, name FROM races WHERE date = '${TODAY}' AND time IS NOT NULL ORDER BY time\");
+  r.rows.forEach(row => console.log(row.time + '\t' + row.racecourse_name + '\t' + row.race_number + '\t' + row.name + '\t' + row.id));
 })();
 " 2>/dev/null | grep -E '^[0-9]{2}:[0-9]{2}' > "$RACE_LIST_FILE"
 
@@ -89,6 +92,18 @@ echo ""
 echo "=== 朝一しょーさん予想通知 ==="
 npx tsx "${SCRIPT_DIR}/mail-notify.ts" --date "$TODAY" 2>&1 | tail -3
 npx tsx "${SCRIPT_DIR}/line-notify.ts" --date "$TODAY" 2>&1 | tail -3
+echo ""
+
+# 朝一オッズスナップショット保存（急落検知のベースライン）
+echo "=== 朝一オッズスナップショット ==="
+(cd "$PROJECT_DIR" && $ODDS_SCRIPT --date "$TODAY" --snapshot 2>&1 | tail -3)
+echo ""
+
+# オッズ監視デーモン起動（独立プロセス: 10秒間隔で急落検知）
+echo "=== オッズ監視デーモン起動 ==="
+bash "${SCRIPT_DIR}/odds-watcher.sh" --threshold "$ODDS_DROP_THRESHOLD" &
+ODDS_WATCHER_PID=$!
+echo "PID: $ODDS_WATCHER_PID"
 echo ""
 
 # 発走7分前チェック: 現在時刻から7分後の発走レースがあれば再生成
@@ -145,6 +160,7 @@ check_and_regen() {
     ) &
   fi
 }
+
 
 # メインループ
 CHUNK_NUM=0
@@ -208,6 +224,11 @@ while true; do
   HOUR=$(date +%H)
   if [ "$HOUR" -ge 17 ]; then
     echo ""
+    # odds-watcher を停止
+    if [ -n "$ODDS_WATCHER_PID" ]; then
+      kill "$ODDS_WATCHER_PID" 2>/dev/null || true
+      echo "odds-watcher 停止 (PID: $ODDS_WATCHER_PID)"
+    fi
     echo "=== 監視終了 $(date '+%H:%M:%S') ==="
     echo "ログ: $LOG_FILE"
     break

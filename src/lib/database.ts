@@ -409,6 +409,26 @@ const SCHEMA_STATEMENTS: InStatement[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_odds_snapshots_race ON odds_snapshots(race_id, horse_number, snapshot_time)`,
 
+  // 馬券セット（買い目ターゲット）テーブル
+  `CREATE TABLE IF NOT EXISTS bet_targets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL DEFAULT 'default',
+    date TEXT NOT NULL,
+    race_id TEXT,
+    race_label TEXT NOT NULL,
+    bet_type TEXT NOT NULL,
+    combinations TEXT NOT NULL,
+    budget INTEGER NOT NULL,
+    min_synthetic_odds REAL NOT NULL DEFAULT 2.5,
+    auto_distribute INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'active',
+    result_json TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (race_id) REFERENCES races(id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_bet_targets_date_user ON bet_targets(date, user_id, status)`,
+
   // マイグレーション: race_entries に odds/popularity カラム追加
   // ALTER TABLE ... ADD COLUMN はカラムが既に存在するとエラーになるため、
   // 存在チェック付きで実行する（SQLite は IF NOT EXISTS をサポートしないため try-catch で対応）

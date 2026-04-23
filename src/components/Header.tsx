@@ -22,6 +22,7 @@ export default function Header() {
     { href: '/jockeys', label: '騎手情報' },
     { href: '/predictions', label: 'AI予想' },
     { href: '/stats', label: '的中率分析' },
+    { href: '/betting', label: '馬券セット' },
     { href: '/favorites', label: 'お気に入り' },
     { href: '/calendar', label: 'カレンダー' },
   ];
