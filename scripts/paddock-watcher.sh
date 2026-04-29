@@ -88,10 +88,9 @@ head -5 "$RACE_LIST_FILE"
 echo "..."
 echo ""
 
-# 朝一しょーさん予想通知（メール+LINE） + スナップショット保存（7分前差分検知の基準）
+# 朝一しょーさん予想通知（メール） + スナップショット保存（7分前差分検知の基準）
 echo "=== 朝一しょーさん予想通知 ==="
 npx tsx "${SCRIPT_DIR}/mail-notify.ts" --date "$TODAY" 2>&1 | tail -3
-npx tsx "${SCRIPT_DIR}/line-notify.ts" --date "$TODAY" 2>&1 | tail -3
 echo ""
 
 # 朝一オッズスナップショット保存（急落検知のベースライン）

@@ -88,3 +88,9 @@ jobs:
           git add model/
           git commit -m "chore: 週次モデル再学習 XGBoost+CatBoost ($(date -u +%Y-%m-%d))"
           git push
+
+  # モデル更新後にNotion更新
+  update-notion:
+    needs: retrain
+    uses: ./.github/workflows/update-notion.yml
+    secrets: inherit

@@ -86,10 +86,10 @@ interface RaceRow {
 
 // ==================== スナップショット ====================
 
-/** しょーさん候補のフィンガープリント（馬番+理論+スコアのソート済み文字列） */
+/** しょーさん候補のフィンガープリント（馬番+理論のソート済み文字列。スコア変動では通知しない） */
 function fingerprint(shoshan: ShosanPrediction): string {
   return shoshan.candidates
-    .map(c => `${c.horseNumber}:T${c.theory}:${c.matchScore}`)
+    .map(c => `${c.horseNumber}:T${c.theory}`)
     .sort()
     .join('|');
 }

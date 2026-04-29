@@ -1,0 +1,39 @@
+name: Update Notion Dashboard
+
+on:
+  # 他のワークフローから呼び出し可能
+  workflow_call:
+  # 手動実行
+  workflow_dispatch:
+  # 結果確定後（daily-results と同じタイミング + 30分）
+  schedule:
+    - cron: '0 9 * * *'  # 18:00 JST
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create .env.local
+        run: |
+          echo "TURSO_DATABASE_URL=${{ secrets.TURSO_DATABASE_URL }}" > .env.local
+          echo "TURSO_AUTH_TOKEN=${{ secrets.TURSO_AUTH_TOKEN }}" >> .env.local
+          echo "NOTION_API_TOKEN=${{ secrets.NOTION_API_TOKEN }}" >> .env.local
+
+      - name: Update Notion page
+        run: npx tsx scripts/update-notion.ts
+
+      - name: Cleanup
+        if: always()
+        run: rm -f .env.local

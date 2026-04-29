@@ -12,7 +12,6 @@ jobs:
   results:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -37,3 +36,9 @@ jobs:
       - name: Cleanup
         if: always()
         run: rm -f .env.local
+
+  # 結果確定後にNotion更新
+  update-notion:
+    needs: results
+    uses: ./.github/workflows/update-notion.yml
+    secrets: inherit
