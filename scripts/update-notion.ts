@@ -275,6 +275,88 @@ async function main() {
   blocks.push(bulletItem('パドック監視: YouTube Live音声 → Whisper文字起こし → LLM要約 → 発走7分前に予想再生成'));
   blocks.push(bulletItem('オッズ監視: 10秒間隔で急落検知 → 発走3分前に条件判定 → Slack通知'));
   blocks.push(bulletItem('馬券セット: ユーザー別買い目管理 → 合成オッズ計算 → 均等払い戻し配分'));
+
+  blocks.push(heading2('システム全体図'));
+  blocks.push(heading3('データ収集 → DB → 予想'));
+  blocks.push(codeBlock(
+`netkeiba ──Cheerio──→ レース/出走表/過去成績/オッズ ──→ ┐
+                                                     │
+YouTube Live ─yt-dlp→ ffmpeg → Whisper → パドック情報 ─→ ┤
+                                                     ▼
+                                              ┌──────────────┐
+                                              │  Turso DB    │
+                                              │  races       │
+                                              │  entries     │
+                                              │  predictions │
+                                              │  bet_targets │
+                                              │  odds_snaps  │
+                                              └──────┬───────┘
+                                                     │
+                              ┌───────────────────────┤
+                              ▼                       ▼
+                       ┌────────────┐          ┌───────────┐
+                       │ 予想エンジン  │          │ Web UI    │
+                       │ XGBoost    │          │ (Vercel)  │
+                       │ + CatBoost │          │ Next.js16 │
+                       │ +しょーさん  │          └───────────┘
+                       └────────────┘`, 'plain text'));
+
+  blocks.push(heading3('レースデイ自動化 → 通知'));
+  blocks.push(codeBlock(
+`paddock-watcher.sh           odds-watcher.sh
+  │                             │
+  ├─ 60秒ごと音声文字起こし        ├─ 10秒ごとオッズ取得
+  ├─ 発走7分前 → 予想再生成       ├─ T-30〜T-5分 スナップ保存
+  └─ 変更あり → メール通知         ├─ 30%急落 → Slack通知
+                                └─ T-3分 → bet-checker
+                                           │
+                                    条件クリア → Slack+メール
+                                           │
+                                           ▼
+                                      ユーザー(3人)
+                                      └→ IPATで購入
+
+GitHub Actions (CI/CD)
+  ├─ 毎朝 06:15  予想生成
+  ├─ 毎夕 17:30  結果取得 + 精度計算
+  ├─ 毎週日曜    モデル再学習
+  └─ 毎日       Notion更新`, 'plain text'));
+
+  blocks.push(heading2('レースデイの流れ'));
+  blocks.push(codeBlock(
+`時刻        イベント                         実行元
+─────────────────────────────────────────────────────────
+06:15  ┃  レース・出走表取得 → 予想生成          GitHub Actions
+       ┃
+09:00  ┃  paddock-watcher.sh 起動              ローカルMac
+       ┃  ├─ 朝一しょーさん予想メール送信
+       ┃  ├─ 朝一オッズスナップショット保存
+       ┃  └─ odds-watcher.sh 起動（10秒間隔）
+       ┃
+       ┃  ┌─ 60秒ごと ─────────────────────┐
+       ┃  │  YouTube音声取得 → Whisper文字起こし │
+       ┃  └────────────────────────────────┘
+       ┃
+       ┃  ┌─ 10秒ごと ─────────────────────┐
+       ┃  │  全レースオッズ取得                  │
+       ┃  │  T-30/25/20/15/10/5分でスナップ保存  │
+       ┃  │  30%以上急落 → Slack通知             │
+       ┃  └────────────────────────────────┘
+       ┃
+T-7min ┃  発走7分前 ─────────────────────────
+       ┃  ├─ 完走済みレース結果取得（馬場バイアス用）
+       ┃  ├─ 該当レース予想を再生成
+       ┃  └─ しょーさん予想変更あればメール通知
+       ┃
+T-3min ┃  発走3分前 ─────────────────────────
+       ┃  ├─ bet_targets の合成オッズ計算
+       ┃  ├─ 条件クリア → Slack + メール通知
+       ┃  └─ ユーザーがIPATで購入
+       ┃
+17:00  ┃  paddock-watcher 自動終了
+       ┃
+17:30  ┃  全レース結果取得 → 精度計算            GitHub Actions
+       ┃  └─ Notion ダッシュボード更新`, 'plain text'));
   blocks.push(divider());
 
   // ---- しょーさん予想の仕様 ----
