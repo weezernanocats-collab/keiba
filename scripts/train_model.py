@@ -30,6 +30,17 @@ MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "model")
 LOCAL_DATA_FILE = os.path.join(MODEL_DIR, "training_data.json")
 MIN_CATEGORY_SAMPLES = 3000
 
+# カテゴリ別オッズ重み（CatBoostと同じ設定: ROI 77.6% → 89.0%）
+# XGBoostにはfeature_weightsがないため、オッズ特徴量を直接スケーリングして同等効果を得る
+CATEGORY_ODDS_WEIGHTS = {
+    'turf_sprint': 0.0,   # オッズ無視
+    'turf_mile': 1.0,     # オッズ全力
+    'turf_long': 0.3,     # オッズ参考
+    'dirt_short': 0.0,    # オッズ無視
+    'dirt_long': 0.0,     # オッズ無視
+}
+GLOBAL_ODDS_WEIGHT = 0.3  # グローバルモデルのオッズ重み
+
 # カテゴリ定義: (trackType_encoded, distance_min, distance_max)
 CATEGORIES = {
     'turf_sprint': (0, 0, 1400),
@@ -243,9 +254,22 @@ def load_local_data():
 
 # ==================== モデル学習 ====================
 
+def apply_odds_scaling(X, odds_feat_idx, odds_weight):
+    """オッズ特徴量をスケーリングしたコピーを返す（XGBoostにfeature_weightsがないため）"""
+    if odds_feat_idx is None or odds_weight == 1.0:
+        return X
+    X_scaled = X.copy()
+    X_scaled[:, odds_feat_idx] *= odds_weight
+    return X_scaled
+
+
 def train_ranker_model(X_train, y_train, groups_train, X_eval, y_eval, groups_eval,
-                       sample_weight=None):
+                       sample_weight=None, odds_feat_idx=None, odds_weight=1.0):
     """XGBRanker (LambdaMART) を学習"""
+    # オッズ特徴量スケーリング（CatBoostのfeature_weights相当）
+    X_train = apply_odds_scaling(X_train, odds_feat_idx, odds_weight)
+    X_eval = apply_odds_scaling(X_eval, odds_feat_idx, odds_weight)
+
     model = xgb.XGBRanker(
         n_estimators=600,
         max_depth=6,
@@ -497,10 +521,16 @@ def main():
 
     # ==================== グローバルモデル ====================
     print("\n=== グローバルモデル学習 (オッズ加重NDCG) ===")
+    # オッズ特徴量のインデックスを特定
+    odds_feat_idx = feature_names.index('oddsLogTransform') if 'oddsLogTransform' in feature_names else None
+    if odds_feat_idx is not None:
+        print(f"  グローバル odds_weight={GLOBAL_ODDS_WEIGHT}")
     model = train_ranker_model(
         X_train, y_train, groups_train,
         X_cal, y_cal, groups_cal,
         sample_weight=train_weights,
+        odds_feat_idx=odds_feat_idx,
+        odds_weight=GLOBAL_ODDS_WEIGHT,
     )
 
     # 標準リレバンスでの評価
@@ -581,10 +611,17 @@ def main():
             cat_recency_group_weights = np.array(cat_recency_group_weights, dtype=np.float32)
             cat_train_weights = cat_train_weights * cat_recency_group_weights
 
+        # カテゴリ別オッズ重み
+        cat_ow = CATEGORY_ODDS_WEIGHTS.get(cat_name, GLOBAL_ODDS_WEIGHT)
+        if odds_feat_idx is not None:
+            print(f"  odds_weight={cat_ow}")
+
         cat_model = train_ranker_model(
             X[cat_train_ordered], y_standard[cat_train_ordered], cat_groups_train,
             X[cat_cal_ordered], y_standard[cat_cal_ordered], cat_groups_cal,
             sample_weight=cat_train_weights,
+            odds_feat_idx=odds_feat_idx,
+            odds_weight=cat_ow,
         )
 
         cat_val = evaluate_ranker(

@@ -262,7 +262,7 @@ async function main() {
       ['言語', 'TypeScript 5.9'],
       ['DB', 'Turso (libsql, HTTPS接続)'],
       ['ホスティング', 'Vercel'],
-      ['MLモデル', 'XGBoost + CatBoost (Python, 週次再学習)'],
+      ['MLモデル', 'XGBoost + CatBoost v16.0 (カテゴリ別オッズ重み最適化, 週次再学習)'],
       ['スクレイピング', 'Cheerio + yt-dlp + Whisper'],
       ['通知', 'Nodemailer (Gmail) + Slack Webhook'],
       ['スタイル', 'Tailwind CSS 4'],
@@ -445,9 +445,24 @@ T-3min ┃  発走3分前 ──────────────────
   blocks.push(bulletItem('Phase 2: Playwright でIPAT自動操作（Mac常時起動、1人検証）'));
   blocks.push(bulletItem('Phase 3: React Native アプリで3人同時自動購入'));
   blocks.push(heading2('予想改善'));
+  blocks.push(heading3('v16.0: カテゴリ別オッズ重み最適化（2026-05-03）'));
+  blocks.push(bulletItem('問題: AIの1位予測が1番人気と96.9%一致 → 市場のコピーでROI 77.6%'));
+  blocks.push(bulletItem('対策: カテゴリごとにオッズ特徴量の影響度を最適化'));
+  blocks.push(tableBlock(
+    ['カテゴリ', 'オッズ重み', '方針'],
+    [
+      ['芝スプリント', '0.0（無視）', '追い切り・血統で勝負'],
+      ['芝マイル', '1.0（全力）', '市場が最も正確な距離帯'],
+      ['芝長距離', '0.3（参考）', '展開・持続力が重要'],
+      ['ダート短距離', '0.0（無視）', '騎手力・仕上がりで勝負'],
+      ['ダート長距離', '0.0（無視）', '前走・脚質・調教師で勝負'],
+    ],
+  ));
+  blocks.push(bulletItem('結果: テストセットROI 77.6% → 89.0%（+11.4pt）'));
+  blocks.push(bulletItem('新特徴量: jockeyChanged（乗り替わり）、earlyPositionRatio（一角確保率）'));
+  blocks.push(heading3('次の施策'));
+  blocks.push(bulletItem('EVフィルタ戦略: no-oddsモデル確率×オッズでバリューベット検出'));
   blocks.push(bulletItem('パターン仮説の蓄積・再検証（500頭到達目標: 2026年6月）'));
-  blocks.push(bulletItem('オッズ急落シグナルの分析（直前3倍以下の急落馬: 的中率50%）'));
-  blocks.push(bulletItem('信頼度の再構築（現在90+に集中し機能していない）'));
   blocks.push(bulletItem('馬券種の最適化（複勝・ワイドでのROI検証）'));
   blocks.push(divider());
 

@@ -601,6 +601,21 @@ function applyCalibration(probs: number[], cal: CalibrationData): number[] {
   return sum > 0 ? calibrated.map(v => v / sum) : calibrated;
 }
 
+// ==================== Odds weight (XGBoost) ====================
+
+/**
+ * XGBoost カテゴリ別オッズ重み（学習時と同じスケーリングを推論時に適用）
+ * CatBoostはfeature_weightsがツリー分割時に効くため推論時スケーリング不要
+ */
+const XGB_CATEGORY_ODDS_WEIGHTS: Record<string, number> = {
+  turf_sprint: 0.0,
+  turf_mile: 1.0,
+  turf_long: 0.3,
+  dirt_short: 0.0,
+  dirt_long: 0.0,
+};
+const XGB_GLOBAL_ODDS_WEIGHT = 0.3;
+
 // ==================== Category selection ====================
 
 /**
@@ -675,9 +690,18 @@ function predictWithRankerProbs(
   horses: MLHorseInput[],
   featureNames: string[],
   calibration: CalibrationData | null,
+  oddsWeight?: number,
 ): number[] {
+  const oddsIdx = oddsWeight != null && oddsWeight !== 1.0
+    ? featureNames.indexOf('oddsLogTransform')
+    : -1;
+
   const rawScores = horses.map(h => {
     const featureArray = featureDictToArray(h.features, featureNames);
+    // XGBoost: 学習時と同じオッズスケーリングを適用
+    if (oddsIdx >= 0) {
+      featureArray[oddsIdx] *= oddsWeight!;
+    }
     return predictRawScore(model, featureArray);
   });
 
@@ -831,7 +855,11 @@ export async function callMLPredict(
         }
 
         // XGBoost + CatBoost のアンサンブル推論
-        const xgbProbs = predictWithRankerProbs(selectedXgbModel, horses, cachedFeatureNames, cachedCalibration);
+        // XGBoostは学習時にオッズ列をスケーリングしているため、推論時も同じスケーリングが必要
+        const xgbOddsWeight = cat
+          ? (XGB_CATEGORY_ODDS_WEIGHTS[cat] ?? XGB_GLOBAL_ODDS_WEIGHT)
+          : XGB_GLOBAL_ODDS_WEIGHT;
+        const xgbProbs = predictWithRankerProbs(selectedXgbModel, horses, cachedFeatureNames, cachedCalibration, xgbOddsWeight);
         const cbProbs = predictWithCatBoost(selectedCbModel, horses, cachedFeatureNames, cachedCatBoostCalibration);
 
         // カテゴリ別重みがあれば使用
@@ -855,8 +883,13 @@ export async function callMLPredict(
 
       // XGBoostのみ
       {
+        const xgbOddsW = cat
+          ? (XGB_CATEGORY_ODDS_WEIGHTS[cat] ?? XGB_GLOBAL_ODDS_WEIGHT)
+          : XGB_GLOBAL_ODDS_WEIGHT;
+        const oddsIdx = xgbOddsW !== 1.0 ? cachedFeatureNames!.indexOf('oddsLogTransform') : -1;
         const rawScores = horses.map(h => {
           const featureArray = featureDictToArray(h.features, cachedFeatureNames!);
+          if (oddsIdx >= 0) featureArray[oddsIdx] *= xgbOddsW;
           return predictRawScore(selectedXgbModel, featureArray);
         });
         let probs = softmax(rawScores);
