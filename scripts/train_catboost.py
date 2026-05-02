@@ -29,6 +29,17 @@ CATEGORIES = {
     'dirt_long': (1, 1601, 99999),
 }
 
+# カテゴリ別オッズ重み（実験で検証済み: ROI 77.6% → 89.0%）
+# 芝マイルのみ市場オッズを全力活用、他カテゴリはオッズ抑制して非市場特徴量を重視
+CATEGORY_ODDS_WEIGHTS = {
+    'turf_sprint': 0.0,   # オッズ無視 → 追い切り・血統が活きる
+    'turf_mile': 1.0,     # オッズ全力 → 市場が最も正確な距離帯
+    'turf_long': 0.3,     # オッズ参考 → 展開・持続力が重要
+    'dirt_short': 0.0,    # オッズ無視 → 騎手力・仕上がりが活きる
+    'dirt_long': 0.0,     # オッズ無視 → 前走・脚質・調教師が活きる
+}
+GLOBAL_ODDS_WEIGHT = 0.3  # グローバルモデルのオッズ重み（フォールバック用）
+
 
 # ==================== ユーティリティ (train_model.py と共通) ====================
 
@@ -171,7 +182,7 @@ def expand_group_weights_to_samples(groups, group_weights):
 
 def train_catboost_ranker(X_train, y_train, groups_train,
                           X_eval, y_eval, groups_eval,
-                          sample_weight=None):
+                          sample_weight=None, feature_weights=None):
     """CatBoost YetiRank を学習"""
     train_query_ids = groups_to_query_ids(groups_train)
     eval_query_ids = groups_to_query_ids(groups_eval)
@@ -189,7 +200,7 @@ def train_catboost_ranker(X_train, y_train, groups_train,
         group_id=eval_query_ids,
     )
 
-    model = CatBoostRanker(
+    params = dict(
         iterations=1500,
         learning_rate=0.02,
         depth=6,
@@ -203,7 +214,10 @@ def train_catboost_ranker(X_train, y_train, groups_train,
         border_count=128,
         random_strength=0.5,
     )
+    if feature_weights:
+        params['feature_weights'] = feature_weights
 
+    model = CatBoostRanker(**params)
     model.fit(train_pool, eval_set=eval_pool)
     return model
 
@@ -512,10 +526,17 @@ def main():
 
     # ==================== グローバルモデル ====================
     print("\n=== CatBoost グローバルモデル学習 ===")
+    # オッズ特徴量のインデックスを特定
+    odds_feat_idx = feature_names.index('oddsLogTransform') if 'oddsLogTransform' in feature_names else None
+    global_fw = {odds_feat_idx: GLOBAL_ODDS_WEIGHT} if odds_feat_idx is not None else None
+    if global_fw:
+        print(f"  グローバル odds_weight={GLOBAL_ODDS_WEIGHT}")
+
     model = train_catboost_ranker(
         X_train, y_train, groups_train,
         X_cal, y_cal, groups_cal,
         sample_weight=train_weights,
+        feature_weights=global_fw,
     )
 
     print("\n--- 検証セット ---")
@@ -597,10 +618,17 @@ def main():
             cat_recency_group_weights = np.array(cat_recency_group_weights, dtype=np.float32)
             cat_train_weights = cat_train_weights * cat_recency_group_weights
 
+        # カテゴリ別オッズ重み
+        cat_ow = CATEGORY_ODDS_WEIGHTS.get(cat_name, GLOBAL_ODDS_WEIGHT)
+        cat_fw = {odds_feat_idx: cat_ow} if odds_feat_idx is not None else None
+        if cat_fw:
+            print(f"  odds_weight={cat_ow}")
+
         cat_model = train_catboost_ranker(
             X[cat_train_ordered], y_standard[cat_train_ordered], cat_groups_train,
             X[cat_cal_ordered], y_standard[cat_cal_ordered], cat_groups_cal,
             sample_weight=cat_train_weights,
+            feature_weights=cat_fw,
         )
 
         cat_val = evaluate_catboost(
@@ -742,6 +770,10 @@ def main():
         'category_metrics': category_metrics,
         'categories_trained': list(category_metrics.keys()),
         'ensemble_weights': ensemble_weights,
+        'odds_suppression': {
+            'global_odds_weight': GLOBAL_ODDS_WEIGHT,
+            'category_odds_weights': CATEGORY_ODDS_WEIGHTS,
+        },
     }
 
     with open(meta_path, 'w', encoding='utf-8') as f:

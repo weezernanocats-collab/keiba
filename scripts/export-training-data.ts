@@ -116,6 +116,9 @@ const FEATURE_NAMES = [
   'conditionXstyle',          // 馬場状態×脚質（重馬場での逃げ馬有利度など）
   // v15.0: 追い切り評価
   'oikiriRank',               // 追い切り評価 (A=3, B=2, C=1, D=0, 不明=1.5)
+  // v16.0: ドメイン知識復活（オッズ支配を減らした削減モデルで有効性を再検証）
+  'jockeyChanged',            // 乗り替わりフラグ (0=同騎手, 1=乗替)
+  'earlyPositionRatio',       // 一角確保率（直近5走の1角位置/出走頭数 加重平均、低い=前方）
 ];
 
 const SEX_ENCODE: Record<string, number> = { '牡': 0, '牝': 1, 'セ': 2 };
@@ -701,9 +704,11 @@ async function main() {
 
       // 騎手乗替シグナル
       let jockeySwitchQuality = 0;
+      let jockeyChanged = 0;
       if (horsePerfs.length > 0 && entry.jockey_name) {
         const lastJockey = horsePerfs[0].jockey_name;
         if (lastJockey && lastJockey !== entry.jockey_name) {
+          jockeyChanged = 1;
           // 乗り替わりあり → 騎手力スコア差で品質を近似
           jockeySwitchQuality = (scores.jockeyAbility ?? 50) - 50; // 正値=格上乗替
         }
@@ -996,6 +1001,7 @@ async function main() {
           case 'jockeyCourseWinRate': return jockeyCourseWR;
           // v6.0 新特徴量
           case 'jockeySwitchQuality': return jockeySwitchQuality;
+          case 'jockeyChanged': return jockeyChanged;
           case 'cornerDelta': return cornerDelta;
           case 'avgMarginWhenWinning': return avgMarginWin;
           case 'avgMarginWhenLosing': return avgMarginLose;

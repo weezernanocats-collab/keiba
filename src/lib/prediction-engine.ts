@@ -273,12 +273,26 @@ export async function generatePrediction(
 
     // v6.0: 騎手乗替シグナル
     let jockeySwitchQuality = 0;
+    let jockeyChanged = 0;
     if (pp.length > 0 && sh.entry.jockeyName) {
       const lastJockey = pp[0].jockeyName;
       if (lastJockey && lastJockey !== sh.entry.jockeyName) {
         jockeySwitchQuality = (sh.scores.jockeyAbility ?? 50) - 50;
+        jockeyChanged = 1;
       }
     }
+
+    // 一角確保率（直近5走で1コーナー3番手以内の割合）
+    const earlyPositionRatio = (() => {
+      const recent = pp.slice(0, 5).filter(p => p.cornerPositions);
+      if (recent.length === 0) return 0.5;
+      let earlyCount = 0;
+      for (const p of recent) {
+        const firstCorner = parseInt(p.cornerPositions!.split('-')[0]);
+        if (!isNaN(firstCorner) && firstCorner <= 3) earlyCount++;
+      }
+      return earlyCount / recent.length;
+    })();
 
     // v6.0: コーナー加速（直近5走平均）
     let cornerDelta = 0;
@@ -447,6 +461,9 @@ export async function generatePrediction(
           drawBiasZScore: drawBiasMap.get(sh.entry.postPosition) ?? 0,
           // v15.0: 追い切り評価
           oikiriRank: oikiriMap.get(sh.entry.horseNumber) ?? 1.5,
+          // v16.0: 乗り替わり + 一角確保率
+          jockeyChanged,
+          earlyPositionRatio,
           // v12.0: タイム指数
           ...(() => {
             const tiPerfs = pp.slice(0, 10).map(p => p.timeIndex).filter((ti): ti is number => ti != null);

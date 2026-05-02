@@ -145,6 +145,9 @@ interface ContextualFeatures {
   drawBiasZScore?: number | undefined;
   // v15.0: 追い切り評価
   oikiriRank?: number | undefined;
+  // v16.0: ドメイン知識復活
+  jockeyChanged?: number | undefined;        // 乗り替わりフラグ (0/1)
+  earlyPositionRatio?: number | undefined;   // 一角確保率 (0-1, 低い=前方)
 }
 
 /**
@@ -220,6 +223,9 @@ export function buildMLFeatures(
     drawBiasZScore: ctx.drawBiasZScore ?? 0,
     // v15.0: 追い切り評価 (A=3, B=2, C=1, D=0, 不明=1.5)
     oikiriRank: ctx.oikiriRank ?? 1.5,
+    // v16.0: ドメイン知識復活
+    jockeyChanged: ctx.jockeyChanged ?? 0,
+    earlyPositionRatio: ctx.earlyPositionRatio ?? 0.5,
   };
 
   // NaN/Infinity ガード: 初出走馬やデータ欠損で特徴量が壊れるのを防止
