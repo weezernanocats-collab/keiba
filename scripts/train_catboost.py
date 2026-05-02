@@ -40,6 +40,22 @@ CATEGORY_ODDS_WEIGHTS = {
 }
 GLOBAL_ODDS_WEIGHT = 0.3  # グローバルモデルのオッズ重み（フォールバック用）
 
+# 実験で有効性が確認された35特徴量のみ使用（71→35: 冗長特徴量を除去してROI改善）
+DOMAIN_FEATURES = [
+    "oddsLogTransform", "jockeyAbility", "jockeyRecentWinRate",
+    "trainerDistCatWinRate", "trainerRecentWinRate", "sireTrackWinRate",
+    "grade_encoded", "fieldSize", "distance", "trackCondition_encoded", "straightLength",
+    "lastRacePosition", "recentForm", "last3WinRate", "winStreak",
+    "speedRating", "standardTimeDev", "lastThreeFurlongs",
+    "avgMarginWhenLosing",
+    "runningStyle", "cornerDelta", "escaperCount",
+    "distanceAptitude", "distanceChange", "daysSinceLastRace",
+    "weightTrendSlope", "handicapAdvantage",
+    "age", "sex_encoded", "postPosition", "consistency",
+    "trackConditionAptitude", "oikiriRank",
+    "jockeyChanged", "earlyPositionRatio",
+]
+
 
 # ==================== ユーティリティ (train_model.py と共通) ====================
 
@@ -464,15 +480,20 @@ def main():
     with open(LOCAL_DATA_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    feature_names = data["feature_names"]
+    all_feature_names = data["feature_names"]
     rows = data["rows"]
-    print(f"総サンプル数: {len(rows)}, 特徴量数: {len(feature_names)}")
+    print(f"総サンプル数: {len(rows)}, 元特徴量数: {len(all_feature_names)}")
 
     if len(rows) < MIN_SAMPLES:
         print(f"サンプル数不足 ({len(rows)} < {MIN_SAMPLES})")
         sys.exit(0)
 
-    X = np.array([r["features"] for r in rows], dtype=np.float32)
+    # DOMAIN特徴量のみ抽出（冗長特徴量を除去してROI改善）
+    domain_idx = [all_feature_names.index(f) for f in DOMAIN_FEATURES if f in all_feature_names]
+    feature_names = [all_feature_names[i] for i in domain_idx]
+    X_all = np.array([r["features"] for r in rows], dtype=np.float32)
+    X = X_all[:, domain_idx]
+    print(f"DOMAIN特徴量: {len(feature_names)}個 (元{len(all_feature_names)}個から抽出)")
     race_ids = [r["race_id"] for r in rows]
     positions = np.array([r["position"] for r in rows], dtype=np.int32)
     odds_data = np.array([r.get("odds") or 0 for r in rows], dtype=np.float32)
@@ -561,88 +582,39 @@ def main():
         json.dump(cal_data, f, ensure_ascii=False, indent=2)
     print(f"CatBoost較正保存: catboost_calibration.json")
 
-    # ==================== カテゴリ別モデル ====================
-    print("\n=== CatBoost カテゴリ別モデル ===")
+    # ==================== odds_weight別グローバルモデル ====================
+    # 実験で検証済みアーキテクチャ: 全データでグローバルモデルを学習し、
+    # 推論時にカテゴリからodds_weightを引いて対応モデルを選択 → ROI 89%
+    print("\n=== odds_weight別グローバルモデル学習 ===")
 
-    # カテゴリ判定: メタデータ優先
-    if 'track_type_encoded' in rows[0]:
-        sample_categories = np.array([
-            categorize_race(r['track_type_encoded'], r['distance_val'])
-            for r in rows
-        ], dtype=object)
-        print("カテゴリ判定: メタデータ使用")
-    elif 'trackType_encoded' in feature_names:
-        track_type_idx = feature_names.index('trackType_encoded')
-        distance_idx = feature_names.index('distance')
-        sample_categories = np.array([
-            categorize_race(X[i, track_type_idx], X[i, distance_idx])
-            for i in range(len(rows))
-        ], dtype=object)
-    else:
-        print("WARNING: トラックタイプ情報なし → カテゴリ別学習スキップ")
-        sample_categories = np.array([None] * len(rows), dtype=object)
+    needed_weights = sorted(set(CATEGORY_ODDS_WEIGHTS.values()))
+    print(f"必要なodds_weight: {needed_weights}")
 
     category_metrics = {}
 
-    for cat_name in CATEGORIES:
-        cat_mask = sample_categories == cat_name
-        cat_train_idx = [i for i in train_idx if cat_mask[i]]
-        cat_cal_idx = [i for i in cal_idx if cat_mask[i]]
+    for ow in needed_weights:
+        print(f"\n--- odds_weight={ow} (全データ: 学習{len(train_idx)}件) ---")
+        fw = {odds_feat_idx: ow} if odds_feat_idx is not None else None
 
-        print(f"\n--- {cat_name}: 学習{len(cat_train_idx)}件, 較正{len(cat_cal_idx)}件 ---")
-
-        if len(cat_train_idx) < MIN_CATEGORY_SAMPLES:
-            print(f"  サンプル不足 → スキップ")
-            continue
-
-        cat_train_ordered, cat_groups_train = build_race_groups(race_ids, cat_train_idx)
-        cat_cal_ordered, cat_groups_cal = build_race_groups(race_ids, cat_cal_idx)
-
-        if len(cat_groups_cal) < 10:
-            print(f"  較正レース数不足 → スキップ")
-            continue
-
-        cat_train_weights = None
-        if has_odds:
-            cat_train_weights = compute_race_weights(
-                positions, odds_data, cat_train_ordered, cat_groups_train
-            )
-            # カテゴリモデルにも近接性重みを適用
-            cat_recency_group_weights = []
-            offset = 0
-            for g in cat_groups_train:
-                g = int(g)
-                group_recency = recency_data[cat_train_ordered[offset:offset + g]]
-                cat_recency_group_weights.append(float(np.mean(group_recency)))
-                offset += g
-            cat_recency_group_weights = np.array(cat_recency_group_weights, dtype=np.float32)
-            cat_train_weights = cat_train_weights * cat_recency_group_weights
-
-        # カテゴリ別オッズ重み
-        cat_ow = CATEGORY_ODDS_WEIGHTS.get(cat_name, GLOBAL_ODDS_WEIGHT)
-        cat_fw = {odds_feat_idx: cat_ow} if odds_feat_idx is not None else None
-        if cat_fw:
-            print(f"  odds_weight={cat_ow}")
-
-        cat_model = train_catboost_ranker(
-            X[cat_train_ordered], y_standard[cat_train_ordered], cat_groups_train,
-            X[cat_cal_ordered], y_standard[cat_cal_ordered], cat_groups_cal,
-            sample_weight=cat_train_weights,
-            feature_weights=cat_fw,
+        ow_model = train_catboost_ranker(
+            X_train, y_train, groups_train,
+            X_cal, y_cal, groups_cal,
+            sample_weight=train_weights,
+            feature_weights=fw,
         )
 
-        cat_val = evaluate_catboost(
-            cat_model, X[cat_cal_ordered], y_standard[cat_cal_ordered],
-            cat_groups_cal, cat_name,
-        )
+        ow_val = evaluate_catboost(ow_model, X_cal, y_cal, groups_cal, f"ow={ow}")
 
-        cat_filename = f"catboost_ranker_{cat_name}.json"
-        export_catboost_for_ts(
-            cat_model, feature_names,
-            os.path.join(MODEL_DIR, cat_filename),
-        )
-
-        category_metrics[cat_name] = cat_val
+        # このodds_weightを使うカテゴリ名でファイル保存（推論時にカテゴリ→ファイル名で参照）
+        for cat_name, cat_ow in CATEGORY_ODDS_WEIGHTS.items():
+            if cat_ow == ow:
+                cat_filename = f"catboost_ranker_{cat_name}.json"
+                export_catboost_for_ts(
+                    ow_model, feature_names,
+                    os.path.join(MODEL_DIR, cat_filename),
+                )
+                category_metrics[cat_name] = ow_val
+                print(f"  → {cat_filename} (全データで学習, ow={ow})")
 
     # ==================== アンサンブル重み ====================
     xgb_model_path = os.path.join(MODEL_DIR, "xgb_ranker.json")
@@ -687,66 +659,12 @@ def main():
                 )
                 ensemble_weights = {'xgb': xgb_w, 'catboost': cb_w}
 
-            # カテゴリ別重みも学習（各カテゴリのXGBとCBグローバルモデルで重みを求める）
-            cat_ensemble_weights = {}
-            for cat_name in category_metrics:
-                cat_mask = sample_categories == cat_name
-                cat_cal_idx_list = [i for i in cal_idx if cat_mask[i]]
-                if len(cat_cal_idx_list) < 200:
-                    cat_ensemble_weights[cat_name] = {
-                        k: v for k, v in ensemble_weights.items() if k != 'per_category'
-                    }
-                    continue
-
-                cat_cal_ordered_e, cat_groups_cal_e = build_race_groups(race_ids, cat_cal_idx_list)
-
-                cat_xgb_model_path = os.path.join(MODEL_DIR, f"xgb_ranker_{cat_name}.json")
-                cat_lgb_model_path = os.path.join(MODEL_DIR, f"lgb_ranker_{cat_name}.json")
-
-                if os.path.exists(cat_xgb_model_path) and os.path.exists(lgb_model_path):
-                    # カテゴリ別スコアで3Way最適化
-                    try:
-                        cat_xgb_model = xgb_lib.XGBRanker()
-                        cat_xgb_model.load_model(cat_xgb_model_path)
-                        cat_xgb_scores = cat_xgb_model.predict(X[cat_cal_ordered_e])
-
-                        cat_query_ids = groups_to_query_ids(cat_groups_cal_e)
-                        cat_pool = Pool(data=X[cat_cal_ordered_e], group_id=cat_query_ids)
-                        cat_cb_scores = model.predict(cat_pool)
-
-                        cat_lgb = lgb_lib.Booster(model_file=lgb_model_path) if not os.path.exists(cat_lgb_model_path) else lgb_lib.Booster(model_file=cat_lgb_model_path)
-                        cat_lgb_scores = cat_lgb.predict(X[cat_cal_ordered_e])
-
-                        cat_positions = positions[cat_cal_ordered_e]
-                        w_x, w_c, w_l = learn_ensemble_weights_3way(
-                            cat_xgb_scores, cat_cb_scores, cat_lgb_scores,
-                            cat_positions, cat_groups_cal_e,
-                        )
-                        cat_ensemble_weights[cat_name] = {'xgb': w_x, 'catboost': w_c, 'lightgbm': w_l}
-                    except Exception as ce:
-                        print(f"  {cat_name} カテゴリ重み学習エラー: {ce} → グローバル重みを使用")
-                        cat_ensemble_weights[cat_name] = {
-                            k: v for k, v in ensemble_weights.items() if k != 'per_category'
-                        }
-                elif os.path.exists(cat_xgb_model_path):
-                    # 2Wayカテゴリ別重み学習（最低重みフロア付き）
-                    try:
-                        cat_xgb_w, cat_cb_w, cat_ndcg = learn_category_ensemble_weights(
-                            cat_xgb_model_path, model,
-                            X[cat_cal_ordered_e], positions[cat_cal_ordered_e], cat_groups_cal_e, feature_names,
-                        )
-                        cat_ensemble_weights[cat_name] = {'xgb': cat_xgb_w, 'catboost': cat_cb_w}
-                        print(f"  {cat_name}: XGB={cat_xgb_w}, CB={cat_cb_w} (NDCG@1={cat_ndcg:.4f})")
-                    except Exception as e:
-                        print(f"  {cat_name}: カテゴリ別重み学習エラー: {e}")
-                        cat_ensemble_weights[cat_name] = {
-                            k: v for k, v in ensemble_weights.items() if k != 'per_category'
-                        }
-                else:
-                    cat_ensemble_weights[cat_name] = {
-                        k: v for k, v in ensemble_weights.items() if k != 'per_category'
-                    }
-
+            # カテゴリ別重み: 新アーキテクチャでは全カテゴリ同じグローバル重みを使用
+            # （カテゴリ別モデルはodds_weight別グローバルモデルなのでデータは同じ）
+            cat_ensemble_weights = {
+                cat_name: {k: v for k, v in ensemble_weights.items() if k != 'per_category'}
+                for cat_name in category_metrics
+            }
             ensemble_weights['per_category'] = cat_ensemble_weights
 
         except Exception as e:

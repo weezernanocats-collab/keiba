@@ -41,6 +41,22 @@ CATEGORY_ODDS_WEIGHTS = {
 }
 GLOBAL_ODDS_WEIGHT = 0.3  # グローバルモデルのオッズ重み
 
+# 実験で有効性が確認された35特徴量のみ使用（71→35: 冗長特徴量を除去してROI改善）
+DOMAIN_FEATURES = [
+    "oddsLogTransform", "jockeyAbility", "jockeyRecentWinRate",
+    "trainerDistCatWinRate", "trainerRecentWinRate", "sireTrackWinRate",
+    "grade_encoded", "fieldSize", "distance", "trackCondition_encoded", "straightLength",
+    "lastRacePosition", "recentForm", "last3WinRate", "winStreak",
+    "speedRating", "standardTimeDev", "lastThreeFurlongs",
+    "avgMarginWhenLosing",
+    "runningStyle", "cornerDelta", "escaperCount",
+    "distanceAptitude", "distanceChange", "daysSinceLastRace",
+    "weightTrendSlope", "handicapAdvantage",
+    "age", "sex_encoded", "postPosition", "consistency",
+    "trackConditionAptitude", "oikiriRank",
+    "jockeyChanged", "earlyPositionRatio",
+]
+
 # カテゴリ定義: (trackType_encoded, distance_min, distance_max)
 CATEGORIES = {
     'turf_sprint': (0, 0, 1400),
@@ -444,11 +460,10 @@ def main():
         print("ERROR: ローカルデータ (model/training_data.json) も VERCEL_URL も見つかりません")
         sys.exit(1)
 
-    feature_names = data["feature_names"]
+    all_feature_names = data["feature_names"]
     rows = data["rows"]
 
-    print(f"総サンプル数: {len(rows)}")
-    print(f"特徴量数: {len(feature_names)}")
+    print(f"総サンプル数: {len(rows)}, 元特徴量数: {len(all_feature_names)}")
 
     if len(rows) < MIN_SAMPLES:
         print(f"サンプル数が{MIN_SAMPLES}件未満のため学習スキップ ({len(rows)}件)")
@@ -459,8 +474,12 @@ def main():
         print("ERROR: positionフィールドが必要です (v6.0)")
         sys.exit(1)
 
-    # NumPy配列に変換
-    X = np.array([r["features"] for r in rows], dtype=np.float32)
+    # DOMAIN特徴量のみ抽出（冗長特徴量を除去してROI改善）
+    domain_idx = [all_feature_names.index(f) for f in DOMAIN_FEATURES if f in all_feature_names]
+    feature_names = [all_feature_names[i] for i in domain_idx]
+    X_all = np.array([r["features"] for r in rows], dtype=np.float32)
+    X = X_all[:, domain_idx]
+    print(f"DOMAIN特徴量: {len(feature_names)}個 (元{len(all_feature_names)}個から抽出)")
     race_ids = [r["race_id"] for r in rows]
     positions = np.array([r["position"] for r in rows], dtype=np.int32)
     odds_data = np.array([r.get("odds") or 0 for r in rows], dtype=np.float32)
@@ -551,89 +570,35 @@ def main():
     with open(os.path.join(MODEL_DIR, "feature_names.json"), "w", encoding="utf-8") as f:
         json.dump(feature_names, f, ensure_ascii=False, indent=2)
 
-    # ==================== カテゴリ別モデル ====================
-    print("\n=== カテゴリ別モデル学習 ===")
+    # ==================== odds_weight別グローバルモデル ====================
+    # 全データでグローバルモデルを学習し、推論時にカテゴリ→odds_weightでモデル選択
+    print("\n=== odds_weight別グローバルモデル学習 ===")
 
-    # カテゴリ判定: メタデータ優先、なければ特徴量から
-    if 'track_type_encoded' in rows[0]:
-        sample_categories = np.array([
-            categorize_race(r['track_type_encoded'], r['distance_val'])
-            for r in rows
-        ], dtype=object)
-        print("カテゴリ判定: メタデータ使用")
-    elif 'trackType_encoded' in feature_names:
-        track_type_idx = feature_names.index('trackType_encoded')
-        distance_idx = feature_names.index('distance')
-        sample_categories = np.array([
-            categorize_race(X[i, track_type_idx], X[i, distance_idx])
-            for i in range(len(rows))
-        ], dtype=object)
-        print("カテゴリ判定: 特徴量使用")
-    else:
-        # trackType_encoded が特徴量にもメタデータにもない場合
-        # distance のみでカテゴリを推定（芝/ダート区別不可 → カテゴリ別学習スキップ）
-        print("WARNING: トラックタイプ情報なし → カテゴリ別学習スキップ")
-        sample_categories = np.array([None] * len(rows), dtype=object)
+    needed_weights = sorted(set(CATEGORY_ODDS_WEIGHTS.values()))
+    print(f"必要なodds_weight: {needed_weights}")
 
     category_metrics = {}
 
-    for cat_name in CATEGORIES:
-        cat_mask = sample_categories == cat_name
-        cat_train_idx = [i for i in train_idx if cat_mask[i]]
-        cat_cal_idx = [i for i in cal_idx if cat_mask[i]]
+    for ow in needed_weights:
+        print(f"\n--- odds_weight={ow} (全データ: 学習{len(train_idx)}件) ---")
 
-        print(f"\n--- {cat_name}: 学習{len(cat_train_idx)}件, 較正{len(cat_cal_idx)}件 ---")
-
-        if len(cat_train_idx) < MIN_CATEGORY_SAMPLES:
-            print(f"  サンプル不足 (< {MIN_CATEGORY_SAMPLES}) → スキップ")
-            continue
-
-        cat_train_ordered, cat_groups_train = build_race_groups(race_ids, cat_train_idx)
-        cat_cal_ordered, cat_groups_cal = build_race_groups(race_ids, cat_cal_idx)
-
-        if len(cat_groups_cal) < 10:
-            print(f"  較正レース数不足 → スキップ")
-            continue
-
-        cat_train_weights = None
-        if has_odds:
-            cat_train_weights = compute_race_weights(
-                positions, odds_data, cat_train_ordered, cat_groups_train
-            )
-            # カテゴリモデルにも近接性重みを適用
-            cat_recency_group_weights = []
-            offset = 0
-            for g in cat_groups_train:
-                g = int(g)
-                group_recency = recency_data[cat_train_ordered[offset:offset + g]]
-                cat_recency_group_weights.append(float(np.mean(group_recency)))
-                offset += g
-            cat_recency_group_weights = np.array(cat_recency_group_weights, dtype=np.float32)
-            cat_train_weights = cat_train_weights * cat_recency_group_weights
-
-        # カテゴリ別オッズ重み
-        cat_ow = CATEGORY_ODDS_WEIGHTS.get(cat_name, GLOBAL_ODDS_WEIGHT)
-        if odds_feat_idx is not None:
-            print(f"  odds_weight={cat_ow}")
-
-        cat_model = train_ranker_model(
-            X[cat_train_ordered], y_standard[cat_train_ordered], cat_groups_train,
-            X[cat_cal_ordered], y_standard[cat_cal_ordered], cat_groups_cal,
-            sample_weight=cat_train_weights,
+        ow_model = train_ranker_model(
+            X_train, y_train, groups_train,
+            X_cal, y_cal, groups_cal,
+            sample_weight=train_weights,
             odds_feat_idx=odds_feat_idx,
-            odds_weight=cat_ow,
+            odds_weight=ow,
         )
 
-        cat_val = evaluate_ranker(
-            cat_model, X[cat_cal_ordered], y_standard[cat_cal_ordered],
-            cat_groups_cal, cat_name
-        )
+        ow_val = evaluate_ranker(ow_model, X_cal, y_cal, groups_cal, f"ow={ow}")
 
-        cat_filename = f"xgb_ranker_{cat_name}.json"
-        cat_model.save_model(os.path.join(MODEL_DIR, cat_filename))
-        print(f"  保存: {cat_filename}")
-
-        category_metrics[cat_name] = cat_val
+        # このodds_weightを使うカテゴリ名でファイル保存
+        for cat_name, cat_ow in CATEGORY_ODDS_WEIGHTS.items():
+            if cat_ow == ow:
+                cat_filename = f"xgb_ranker_{cat_name}.json"
+                ow_model.save_model(os.path.join(MODEL_DIR, cat_filename))
+                category_metrics[cat_name] = ow_val
+                print(f"  → {cat_filename} (全データで学習, ow={ow})")
 
     # ==================== メタ情報保存 ====================
     meta = {
