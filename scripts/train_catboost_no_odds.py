@@ -349,14 +349,14 @@ def main():
         group_id=eval_query_ids,
     )
 
-    # v13.0: PairLogitPairwise → YetiRank に変更
+    # v14.1: YetiRank に変更
     # YetiRankはリストワイズに近い損失関数で、段階ラベル(0-3)を活用可能
-    # PairLogitPairwiseはsample_weightを無視する問題もあった
+    # PairLogitPairwiseはsample_weightを無視する問題があった
     model = CatBoostRanker(
         iterations=1500,
         learning_rate=0.02,
         depth=6,
-        loss_function='PairLogitPairwise',
+        loss_function='YetiRank',
         eval_metric='NDCG:top=1',
         random_seed=42,
         verbose=100,
@@ -460,6 +460,45 @@ def main():
         print(f"    AI wins: {disagree_ai_wins} ({disagree_ai_wins/disagree*100:.1f}%)")
         print(f"    Fav wins: {disagree_fav_wins} ({disagree_fav_wins/disagree*100:.1f}%)")
         print(f"    Neither: {disagree_neither_wins} ({disagree_neither_wins/disagree*100:.1f}%)")
+
+    # EV-filtered ROI simulation on test set
+    print("\n=== EV-Filtered ROI Simulation (Test Set) ===")
+    offset = 0
+    ev_results = {1.0: {"bets": 0, "inv": 0, "ret": 0}, 1.2: {"bets": 0, "inv": 0, "ret": 0}, 1.5: {"bets": 0, "inv": 0, "ret": 0}}
+
+    for g in groups_test:
+        g = int(g)
+        group_indices = test_ordered[offset:offset + g]
+        group_pred = test_pred[offset:offset + g]
+        group_pos = positions[group_indices]
+        group_odds = odds_data[group_indices]
+
+        # Softmax to get calibrated probabilities
+        probs = softmax_np(group_pred)
+        # Apply isotonic regression calibration
+        cal_probs = ir.predict(probs)
+
+        for i in range(g):
+            horse_odds = float(group_odds[i])
+            if horse_odds <= 0:
+                continue
+            horse_prob = float(cal_probs[i])
+            horse_pos = int(group_pos[i])
+            ev = horse_prob * horse_odds
+
+            for threshold in ev_results:
+                if ev >= threshold and horse_odds >= 3 and horse_odds <= 30:
+                    ev_results[threshold]["bets"] += 1
+                    ev_results[threshold]["inv"] += 100
+                    if horse_pos == 1:
+                        ev_results[threshold]["ret"] += int(100 * horse_odds)
+
+        offset += g
+
+    for threshold, r in sorted(ev_results.items()):
+        roi = r["ret"] / r["inv"] * 100 if r["inv"] > 0 else 0
+        hit = sum(1 for _ in range(r["bets"]) if False)  # placeholder
+        print(f"  EV>={threshold:.1f} (odds 3-30): {r['bets']} bets, ROI={roi:.1f}%, invest={r['inv']}, return={r['ret']}")
 
     print("\n=== Done ===")
 

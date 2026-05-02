@@ -64,6 +64,9 @@ jobs:
       - name: Train CatBoost models
         run: python scripts/train_catboost.py
 
+      - name: Train No-Odds CatBoost model
+        run: python scripts/train_catboost_no_odds.py
+
       # ---- コミット & プッシュ ----
       - name: Clean up .env.local
         run: rm -f .env.local
