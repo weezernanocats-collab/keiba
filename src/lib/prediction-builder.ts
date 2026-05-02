@@ -176,18 +176,43 @@ async function evaluateShosanForRace(
   }));
 
   // 過去成績マップをしょーさん形式に変換
+  // past_performances.corner_positions が壊れている場合、race_entries.result_corner_positions で補完
+  const horseIdsForCorner = entries.map(re => re.horseId).filter(Boolean);
+  const cornerFallbackMap = new Map<string, Map<string, string>>(); // horseId -> (date -> cornerPositions)
+  if (horseIdsForCorner.length > 0) {
+    const ph = horseIdsForCorner.map(() => '?').join(',');
+    const cornerRows = await dbAll<{ horse_id: string; race_date: string; result_corner_positions: string }>(
+      `SELECT re.horse_id, r.date as race_date, re.result_corner_positions
+       FROM race_entries re JOIN races r ON re.race_id = r.id
+       WHERE re.horse_id IN (${ph}) AND r.date < ? AND re.result_corner_positions IS NOT NULL AND re.result_corner_positions != ''`,
+      [...horseIdsForCorner, date],
+    );
+    for (const row of cornerRows) {
+      if (!cornerFallbackMap.has(row.horse_id)) cornerFallbackMap.set(row.horse_id, new Map());
+      cornerFallbackMap.get(row.horse_id)!.set(row.race_date, row.result_corner_positions);
+    }
+  }
+
   const ppForShosan = new Map<string, ShosanPastPerf[]>();
   for (const re of entries) {
     const perfs = (pastPerfsMap.get(re.horseId) || []) as Array<{
       date: string; position: number; cornerPositions?: string; entries?: number; racecourseName?: string;
     }>;
-    ppForShosan.set(re.horseId, perfs.map(p => ({
-      date: p.date,
-      position: p.position,
-      cornerPositions: p.cornerPositions || '',
-      entries: p.entries || 0,
-      racecourseName: p.racecourseName || '',
-    })));
+    const fallback = cornerFallbackMap.get(re.horseId);
+    ppForShosan.set(re.horseId, perfs.map(p => {
+      let cp = p.cornerPositions || '';
+      // 壊れている判定: 空、"**"、またはハイフンなしの数字（"62"等の連結バグ）
+      if (!cp || cp === '**' || (cp !== '' && !cp.includes('-') && /^\d+$/.test(cp))) {
+        cp = fallback?.get(p.date) || cp;
+      }
+      return {
+        date: p.date,
+        position: p.position,
+        cornerPositions: cp,
+        entries: p.entries || 0,
+        racecourseName: p.racecourseName || '',
+      };
+    }));
   }
 
   // 前走騎手を一括取得

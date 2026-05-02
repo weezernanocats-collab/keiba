@@ -268,7 +268,7 @@ export async function upsertRaceEntry(raceId: string, entry: Partial<RaceEntry>)
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(race_id, horse_number) DO UPDATE SET
       post_position = CASE WHEN excluded.post_position > 0 THEN excluded.post_position ELSE race_entries.post_position END,
-      horse_id = COALESCE(NULLIF(excluded.horse_id, ''), race_entries.horse_id),
+      horse_id = CASE WHEN excluded.horse_id IS NOT NULL AND excluded.horse_id != '' AND excluded.horse_id NOT LIKE 'unknown_%' THEN excluded.horse_id ELSE race_entries.horse_id END,
       horse_name = COALESCE(NULLIF(excluded.horse_name, ''), race_entries.horse_name),
       age = COALESCE(excluded.age, race_entries.age),
       sex = COALESCE(excluded.sex, race_entries.sex),
