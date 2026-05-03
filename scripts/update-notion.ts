@@ -2,7 +2,7 @@
  * Notion ページ自動更新スクリプト
  *
  * KEIBA MASTER プロジェクトの情報をNotionページに同期する。
- * - アーキテクチャ、仕様、変更履歴、しょーさん予想成績、今後の計画
+ * - アーキテクチャ、仕様、変更履歴、しょーさん予想成績、今後の計���
  * - デプロイ後やモデル更新後に実行して最新状態を反映
  *
  * 使い方:
@@ -127,7 +127,7 @@ function tableBlock(headers: string[], rows: string[][]) {
   };
 }
 
-function callout(text: string, emoji = '📌') {
+function callout(text: string, emoji = '\u{1F4CC}') {
   return {
     object: 'block', type: 'callout',
     callout: { rich_text: [{ type: 'text', text: { content: text } }], icon: { type: 'emoji', emoji } },
@@ -144,7 +144,6 @@ function getGitLog(n = 20): string[] {
 }
 
 async function getShoshanStats() {
-  // 全候補を抽出
   const rows = await db.execute({
     sql: "SELECT p.race_id, p.analysis_json, r.date, r.racecourse_name, r.race_number FROM predictions p JOIN races r ON p.race_id = r.id WHERE p.analysis_json LIKE ?",
     args: ["%shosanPrediction%"],
@@ -167,7 +166,6 @@ async function getShoshanStats() {
     } catch {}
   }
 
-  // 着順・オッズ紐付け
   let wins = 0, top3 = 0, totalOddsWin = 0, count = 0;
   let t1_count = 0, t1_wins = 0, t1_top3 = 0, t1_roi = 0;
   let t2_count = 0, t2_wins = 0, t2_top3 = 0, t2_roi = 0;
@@ -247,25 +245,51 @@ async function main() {
   const isoDate = jstNow.toISOString().replace('Z', '+09:00').replace(/\.\d{3}/, '');
   await notionRequest('PATCH', `/pages/${PAGE_ID}`, {
     properties: {
-      '日付': { date: { start: isoDate } },
+      '\u65E5\u4ED8': { date: { start: isoDate } },
     },
   });
 
   // 既存ブロック削除
   await clearPageBlocks();
 
-  // ブロック構築（Notion API は1回の append で最大100ブロック）
+  // ブロック構築
   const blocks: unknown[] = [];
 
-  blocks.push(callout(`最終更新: ${updatedAt}`, '🕐'));
+  blocks.push(callout(`最終更新: ${updatedAt}`, '\u{1F552}'));
   blocks.push(divider());
 
   // ============================================================
-  // 1. 成績（一番知りたい情報を最初に）
+  // 1. 全体像
   // ============================================================
-  blocks.push(heading1('成績サマリ'));
+  blocks.push(heading1('KEIBA MASTER \u2014 全体像'));
+  blocks.push(paragraph('競馬予想の自動化プロジェクト。AI予想 \u00D7 しょーさん理論の2軸で予想し、IPAT経由で自動購入まで完結。'));
+  blocks.push(codeBlock(
+`【毎週の流れ】
 
-  blocks.push(heading2('AI予想'));
+月曜  モデル自動再学習（最新レースデータで精度維持）
+金曜  出走馬データ自動取得 → 予想生成
+
+【レース当日】
+
+06:15  全レースの予想を自動���成
+09:00  パドック中継の文字起こし開始
+09:03  開催日判定 → 自動投票Bot起動
+       ���
+    各レース発走7分前に予想を最新情報で更新
+    オッズ急落検知 → Slack通知
+       ↓
+    Slackで「予算 5000」→ 自動投票実行 → 完了通知
+       ↓
+17:00  Bot自動停止
+17:30  結果取得 → 成績集計`, 'plain text'));
+  blocks.push(divider());
+
+  // ============================================================
+  // 2. 成績
+  // ============================================================
+  blocks.push(heading1('成績'));
+
+  blocks.push(heading2('AI予想の実績'));
   blocks.push(tableBlock(
     ['指標', '値'],
     [
@@ -275,9 +299,9 @@ async function main() {
       ['単勝ROI', `${aiStats.roi}%`],
     ],
   ));
-  blocks.push(paragraph('* 上記は本番運用全期間の実績。テストセット(997R)でのROIは89.0%。'));
+  blocks.push(paragraph('※ ROI 100%が損益分岐点。テストセット(997R)でのROIは89.0%。'));
 
-  blocks.push(heading2('しょーさん予想'));
+  blocks.push(heading2('しょーさん予想の実績'));
   blocks.push(tableBlock(
     ['指標', '理論1', '理論2', '全体'],
     [
@@ -304,11 +328,59 @@ async function main() {
   blocks.push(divider());
 
   // ============================================================
-  // 2. AIモデルの仕組み
+  // 3. 自動投票システム
+  // ============================================================
+  blocks.push(heading1('自動投票システム'));
+
+  blocks.push(callout('Slack → 買い目自動生成 → IPAT自動購入 → Slack通知。マルチユーザー対応。', '\u{1F3B0}'));
+
+  blocks.push(heading2('仕組み'));
+  blocks.push(codeBlock(
+`Slack「予算 5000」
+     ���
+しょーさん予想 + AI予想から買い目を自動生成
+（ユーザーごとの券種・戦略・予算設定に基づ���）
+     ↓
+CSV → Playwright → JRA IPAT で自動投票
+     ↓
+Slack「投票完了! 17点 2,900円」+ スクリーンショット`, 'plain text'));
+
+  blocks.push(heading2('買い目の戦略（3種類）'));
+  blocks.push(tableBlock(
+    ['戦略', '内容', '狙い'],
+    [
+      ['しょーさん予想', '先行力×休養×アゲ騎手理論', '穴馬の復活・好調継続'],
+      ['AI予想', 'XGBoost+CatBoostの上位馬', 'データに基づく確率予測'],
+      ['しょーさん×AI', '両方が一致した馬', '二つの根拠が揃った堅い軸'],
+    ],
+  ));
+
+  blocks.push(heading2('対応券種'));
+  blocks.push(bulletItem('単勝 / 馬連 / ワイド / 馬単 / 三連複 / 三連単'));
+  blocks.push(paragraph('ユーザーごとに好きな券種・戦略・配分をWebで設定可能。'));
+
+  blocks.push(heading2('マルチユーザー対応'));
+  blocks.push(tableBlock(
+    ['項目', '内容'],
+    [
+      ['ユーザー登録', 'スマホでURLを開いてIPAT情報を入力（1回のみ）'],
+      ['認証情報の保管', 'AES-256-GCM暗号化。平文はサーバーに残らない'],
+      ['買い方の設定', 'Webページで券種・戦略・予算・オッズフィルタを設定'],
+      ['投票の指示', 'Slack「予算 5000 ユーザー名」で個別投票'],
+      ['設定変��', 'いつでもWebから変更OK。次の開催日から反映'],
+    ],
+  ));
+
+  blocks.push(heading2('開催日の自動起動'));
+  blocks.push(bulletItem('毎朝9時にcronがDB確認 → その日にレースがあればBot自動起動'));
+  blocks.push(bulletItem('最終レース+30分後にBot自動停止'));
+  blocks.push(bulletItem('Slackで起動・停止を通知'));
+  blocks.push(divider());
+
+  // ============================================================
+  // 4. AIモデルの仕組み
   // ============================================================
   blocks.push(heading1('AIモデルの仕組み'));
-
-  blocks.push(callout('CatBoost + XGBoostのアンサンブル。35個の特徴量、カテゴリ別にオッズの影響度を最適化。', '🤖'));
 
   blocks.push(heading2('予測の流れ'));
   blocks.push(codeBlock(
@@ -316,66 +388,59 @@ async function main() {
      ↓
 35個の特徴量に変換
      ↓
-レースのカテゴリを判定（芝/ダート × 距離）
+レースのカ���ゴリを判定（芝/ダート × 距離）
      ↓
 カテゴリに合ったモデルで勝率を予測
      ↓
 Top-1を単勝ピック、Top-3を複勝ピック`, 'plain text'));
 
-  blocks.push(heading2('カテゴリ別オッズ重み（v16.0 の核心）'));
-  blocks.push(paragraph('問題: AIの1位予測が1番人気と96.9%一致していた = 市場のコピー = ROI 77.6%'));
-  blocks.push(paragraph('対策: カテゴリごとにオッズ（市場の予想）をどれだけ参考にするか最適化'));
+  blocks.push(heading2('カテゴリ別オッズ重み'));
+  blocks.push(paragraph('AIが市場オッズ（人気順）をどれだけ参考にするかをカ��ゴリごとに最適化。'));
   blocks.push(tableBlock(
     ['カテゴリ', 'オッズ重み', '何で勝負するか'],
     [
       ['芝スプリント', '0.0（無視）', '追い切り評価・血統・騎手力'],
-      ['芝マイル', '1.0（全力活用）', '市場が最も正確。オッズに素直に従う'],
+      ['芝マイル', '1.0（全力活��）', '市場が正確。オッズに従う'],
       ['芝長距離', '0.3（少し参考）', '展開予測・持続力・脚質'],
       ['ダート短距離', '0.0（無視）', '騎手力・仕上がり・前走成績'],
-      ['ダート長距離', '0.0（無視）', '前走・脚質・調教師'],
+      ['ダート長距離', '0.0（無視）', '前走・��質・調教師'],
     ],
   ));
   blocks.push(richParagraph([
     { text: '結果: ROI 77.6% → 89.0%', bold: true },
-    { text: '（+11.4pt）テストA: 84.2%, テストB: 93.4%' },
+    { text: '（+11.4pt）' },
   ]));
 
-  blocks.push(heading2('使用している35個の特徴量'));
+  blocks.push(heading2('主な特徴量（35個）'));
   blocks.push(tableBlock(
-    ['分類', '特徴量'],
+    ['分類', '内容'],
     [
-      ['オッズ', 'oddsLogTransform（対数変換したオッズ。カテゴリで重みを調整）'],
-      ['騎手', 'jockeyAbility, jockeyRecentWinRate, jockeyChanged（乗り替わり）'],
-      ['調教師', 'trainerDistCatWinRate, trainerRecentWinRate'],
-      ['血統', 'sireTrackWinRate（父の競馬場別勝率）'],
-      ['レース条件', 'grade, fieldSize, distance, trackCondition, straightLength'],
-      ['近走成績', 'lastRacePosition, recentForm, last3WinRate, winStreak'],
-      ['スピード', 'speedRating, standardTimeDev, lastThreeFurlongs'],
-      ['着差', 'avgMarginWhenLosing（負けたときの平均着差）'],
-      ['脚質・展開', 'runningStyle, cornerDelta, escaperCount, earlyPositionRatio（一角確保率）'],
-      ['距離適性', 'distanceAptitude, distanceChange'],
-      ['休養', 'daysSinceLastRace（前走からの日数）'],
-      ['馬体重', 'weightTrendSlope（体重変動トレンド）'],
-      ['斤量', 'handicapAdvantage（斤量アドバンテージ）'],
-      ['馬属性', 'age, sex, postPosition（枠順）, consistency（安定性）'],
-      ['馬場適性', 'trackConditionAptitude（重馬場適性）'],
-      ['追い切り', 'oikiriRank（A〜D評価を数値化）'],
+      ['オッズ', '対数変換オッズ（カテゴリで重み調整）'],
+      ['騎手', '騎手能力値・直近勝率・乗り替わり'],
+      ['調教師', '距離カテゴリ別勝率・直近勝率'],
+      ['血統', '父の競馬場別勝率'],
+      ['近走成績', '前走着順・直近3走勝率・連勝数'],
+      ['スピード', 'スピード指数・基準タイム偏差・上がり3F'],
+      ['脚質・展開', '脚質・コーナー通過順位変動・逃げ馬数'],
+      ['距離適性', '距離適性・前走からの距離変更'],
+      ['休養', '前走からの日数'],
+      ['その他', '年齢・性別・枠順・斤量・馬体重・追い切り評価'],
     ],
   ));
   blocks.push(divider());
 
   // ============================================================
-  // 3. しょーさん予想の仕様
+  // 5. しょーさん予想の仕組み
   // ============================================================
   blocks.push(heading1('しょーさん予想の仕組み'));
 
   blocks.push(heading2('理論1: 復調 + アゲ騎手'));
-  blocks.push(bulletItem('条件: 前走4着以下 + アゲ騎手への乗り替わり + 先行力(1角1-2番手)2回以上'));
-  blocks.push(bulletItem('考え方: 実力はあるが前走で凡走した馬が、上手い騎手に乗り替わって復活するパターン'));
+  blocks.push(bulletItem('前走4着以下の凡走 + アゲ騎手への乗り替わり + 先行力あり'));
+  blocks.push(bulletItem('→ 実力馬が上手い騎手で復活するパターン'));
 
   blocks.push(heading2('理論2: 好調継続 + アゲ騎手'));
-  blocks.push(bulletItem('条件: 前走3着以内 + 前走騎手がトップ級 + アゲ騎手への乗り替わり'));
-  blocks.push(bulletItem('考え方: 好調馬がさらに良い騎手で上積みを狙うパターン'));
+  blocks.push(bulletItem('前走3着以内の好走 + さらに良い騎手への乗り替わり'));
+  blocks.push(bulletItem('→ 好調馬の上積みを狙うパターン'));
 
   blocks.push(heading2('アゲ騎手ゾーン'));
   blocks.push(tableBlock(
@@ -397,46 +462,60 @@ Top-1を単勝ピック、Top-3を複勝ピック`, 'plain text'));
       ['91-120日（休み明け一発）', '184-321%', '狙って仕上げてくる'],
     ],
   ));
-  blocks.push(divider());
 
-  // ============================================================
-  // 4. パターン仮説
-  // ============================================================
-  blocks.push(heading1('パターン仮説（検証中）'));
-  blocks.push(callout('191頭分析。500頭到達時（2026年6月頃）に再検証予定。', '🔬'));
-  blocks.push(heading2('狙い目'));
-  blocks.push(bulletItem('理論1 × 3-5番人気: 44頭 ROI 142%（最も実用的）'));
-  blocks.push(bulletItem('先行4回+: 19頭 ROI 208%'));
-  blocks.push(bulletItem('理論1 × ダート: 87頭 ROI 119%'));
-  blocks.push(bulletItem('スコア65+ × Zone2: 26頭 ROI 135%'));
-  blocks.push(heading2('避けるべき'));
+  blocks.push(heading3('狙い目パターン（191頭分析）'));
+  blocks.push(tableBlock(
+    ['パターン', '頭数', 'ROI', '備考'],
+    [
+      ['理論1 × 3-5番人気', '44', '142%', '最も実用的'],
+      ['先行4回+', '19', '208%', '先行力の裏付けが強い'],
+      ['理論1 × ダート', '87', '119%', 'ダートとの相性良好'],
+      ['スコア65+ × Zone2', '26', '135%', '好調騎手×高スコ���'],
+    ],
+  ));
+  blocks.push(heading3('避けるべき'));
   blocks.push(bulletItem('10番人気以下: 32頭で1着ゼロ'));
   blocks.push(bulletItem('Zone4（丹内・佐々木）: 27頭 ROI 26%'));
-  blocks.push(bulletItem('matchScore 45-54: 15頭で1着ゼロ'));
+  blocks.push(paragraph('※ 500頭到達（2026年6月頃）で再検証予定。'));
   blocks.push(divider());
 
   // ============================================================
-  // 5. 今後の計画
+  // 6. パドック自動解説
+  // ============================================================
+  blocks.push(heading1('パドック自動解説'));
+  blocks.push(paragraph('レース当日、YouTube Liveのパドック中継をリアルタイムで文字起こし → AIが要約して予想ページに表示。'));
+  blocks.push(codeBlock(
+`YouTube Live パドック中継
+     ↓  60秒ごとに音声キャプチャ
+Whisper large-v3 で文字起こし
+     ↓
+Claude AI が各馬のコンディション要約
+     ↓
+予想ページに反映（馬体・歩様・気配の評価）
+     ↓
+発走7分前にパドック情報込みで予想を自動更新`, 'plain text'));
+  blocks.push(divider());
+
+  // ============================================================
+  // 7. 今後の計画
   // ============================================================
   blocks.push(heading1('今後の計画'));
 
   blocks.push(heading2('AI予想の改善'));
-  blocks.push(bulletItem('EVフィルタ戦略: AIの確率予測とオッズの乖離からバリューベットを検出'));
+  blocks.push(bulletItem('EVフィルタ戦略: AIの確率予測 × オッズの乖離からバリューベット（期待値>1の馬）を自動検出'));
   blocks.push(bulletItem('パターン仮説の500頭再検証（2026年6月目標）'));
-  blocks.push(bulletItem('馬券種の最適化（複勝・ワイドでのROI検証）'));
+  blocks.push(bulletItem('no-oddsモデル強化: オッズに依存しない独自予測の精度向上'));
 
-  blocks.push(heading2('馬券セットシステム'));
-  blocks.push(bulletItem('Phase 1（完了）: Slack/メール通知 → 手動IPAT購入'));
-  blocks.push(bulletItem('Phase 2（完了）: Playwright でIPAT自動投票（単勝+馬連、17点2,900円の実績あり）'));
-  blocks.push(bulletItem('Phase 3（稼働中）: Slack「予算 5000」→ 自動CSV生成 → IPAT投票 → 結果通知'));
-  blocks.push(bulletItem('Phase 4: 開催日自動起動（cron毎朝9時→DB確認→Bot起動→最終レース後停止）'));
+  blocks.push(heading2('自動投票の拡張'));
+  blocks.push(bulletItem('友人向けマルチユーザー運用開始（Web登録→設定→自動投票）'));
+  blocks.push(bulletItem('全ユーザー一括自動投票モード（開催日に全active設定を順次実行）'));
+  blocks.push(bulletItem('投票結果のユーザー別レポート'));
   blocks.push(divider());
 
   // ============================================================
-  // 6. システム構成（技術者向け）
+  // 8. システム構成
   // ============================================================
   blocks.push(heading1('システム構成'));
-
   blocks.push(tableBlock(
     ['分類', '技術'],
     [
@@ -445,29 +524,17 @@ Top-1を単勝ピック、Top-3を複勝ピック`, 'plain text'));
       ['DB', 'Turso (libsql, HTTPS接続)'],
       ['ホスティング', 'Vercel'],
       ['MLモデル', 'CatBoost YetiRank + XGBoost LambdaMART (35特徴量, 週次再学習)'],
+      ['自動投票', 'Playwright (Chromium) → JRA IPAT'],
       ['スクレイピング', 'Cheerio (netkeiba) + yt-dlp + Whisper (パドック)'],
-      ['通知', 'Nodemailer (Gmail) + Slack Webhook'],
-      ['CI/CD', 'GitHub Actions (予想生成/結果取得/モデル再学習/Notion更新)'],
+      ['通知', 'Gmail + Slack Bot'],
+      ['認証情報暗号化', 'AES-256-GCM (鍵はローカルMacのみ)'],
+      ['CI/CD', 'GitHub Actions (予想生成/結果取得/モデル再学習)'],
     ],
   ));
-
-  blocks.push(heading2('レースデイ自動化'));
-  blocks.push(codeBlock(
-`06:15  予想生成                    [GitHub Actions]
-09:03  開催日判定→Bot自動起動        [cron → race-day-launcher.sh]
-       Slack「予算 5000」で投票開始   [slack-bet-runner.ts]
-09:00  paddock-watcher起動          [ローカルMac]
-       ├ 60秒ごと: YouTube音声→Whisper文字起こし
-       └ 10秒ごと: オッズ取得→急落検知→Slack通知
-T-7min 予想を最新オッズ+パドック情報で再生成
-Slack  「予算 5000」→ CSV生成 → IPAT自動投票 → 結果通知
-       戦略: しょーさん単勝(2x) + しょーさん×AI馬連(2x) + AI馬連(1x)
-17:00  Bot自動停止（最終レース+30分）
-17:30  結果取得→精度計算            [GitHub Actions]`, 'plain text'));
   blocks.push(divider());
 
   // ============================================================
-  // 7. 変更履歴
+  // 9. 変更履歴
   // ============================================================
   blocks.push(heading1('変更履歴'));
   for (const line of gitLog) {
@@ -480,7 +547,7 @@ Slack  「予算 5000」→ CSV生成 → IPAT自動投票 → 結果通知
     await notionRequest('PATCH', `/blocks/${PAGE_ID}/children`, { children: chunk });
   }
 
-  console.log(`[notion] 完了! ${blocks.length}ブロック書き込み`);
+  console.log(`[notion] 完了! ${blocks.length}ブロッ��書き込み`);
   db.close();
 }
 
