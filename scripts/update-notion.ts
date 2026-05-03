@@ -243,8 +243,8 @@ async function main() {
 
   console.log('[notion] ページ更新中...');
 
-  // 日付プロパティに最終更新日時を設定
-  const isoDate = jstNow.toISOString();
+  // 日付プロパティに最終更新日時を設定（JST = +09:00）
+  const isoDate = jstNow.toISOString().replace('Z', '+09:00').replace(/\.\d{3}/, '');
   await notionRequest('PATCH', `/pages/${PAGE_ID}`, {
     properties: {
       '日付': { date: { start: isoDate } },

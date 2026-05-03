@@ -271,10 +271,11 @@ async function generateBets(date: string, budget: number): Promise<{ bets: BetRo
 
 // ── IPAT投票実行 ──
 
-function runIpatBet(csvPath: string, dryRun = false): Promise<{ success: boolean; output: string }> {
+function runIpatBet(csvPath: string, dryRun = false, userId?: string): Promise<{ success: boolean; output: string }> {
   return new Promise((resolve) => {
     const ipatArgs = ['tsx', 'scripts/ipat-auto-bet.ts', '--csv', csvPath];
     if (dryRun) ipatArgs.push('--dry-run');
+    if (userId) ipatArgs.push('--user', userId);
     const proc = spawn('npx', ipatArgs, {
       cwd: process.cwd(),
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -305,14 +306,15 @@ function runIpatBet(csvPath: string, dryRun = false): Promise<{ success: boolean
 
 // ── メイン処理 ──
 
-async function executeBetting(budget: number, dryRun = false) {
+async function executeBetting(budget: number, dryRun = false, userId?: string) {
   const now = new Date();
   now.setHours(now.getHours() + 9);
   const date = now.toISOString().split('T')[0];
   const dateCompact = date.replace(/-/g, '');
 
-  console.log(`\n[runner] ${date} 予算${budget.toLocaleString()}円で投票開始`);
-  await slackPost(`🏇 投票開始: ${date} 予算 ${budget.toLocaleString()}円`);
+  const userLabel = userId ? ` [${userId}]` : '';
+  console.log(`\n[runner] ${date} 予算${budget.toLocaleString()}円で投票開始${userLabel}`);
+  await slackPost(`🏇 投票開始: ${date} 予算 ${budget.toLocaleString()}円${userLabel}`);
 
   // 1. 買い目生成
   console.log('[runner] 買い目生成中...');
@@ -339,7 +341,7 @@ async function executeBetting(budget: number, dryRun = false) {
 
   // 2. IPAT投票
   console.log(`[runner] IPAT投票実行中...${dryRun ? ' (dry-run)' : ''}`);
-  const { success, output } = await runIpatBet(csvPath, dryRun);
+  const { success, output } = await runIpatBet(csvPath, dryRun, userId);
 
   // 3. 結果通知
   if (success) {
@@ -386,7 +388,7 @@ async function main() {
 
   console.log('[runner] Slack監視モード開始');
   console.log(`[runner] チャンネル ${SLACK_CHANNEL} で「予算 XXXX」を待機中...`);
-  await slackPost('🤖 自動投票Bot起動しました。「予算 5000」で投票開始します。');
+  await slackPost('🤖 自動投票Bot起動しました。\n「予算 5000」→ デフォルトユーザー\n「予算 5000 naoto」→ 指定ユーザー');
 
   let lastTs = String(Date.now() / 1000); // 起動時点以降のメッセージのみ
   let processing = false;
@@ -397,10 +399,11 @@ async function main() {
     try {
       const messages = await getRecentMessages(lastTs);
       for (const msg of messages) {
-        // 「予算 5000」「予算5000」「budget 5000」パターン
-        const match = msg.text.match(/(?:予算|budget)\s*(\d+)/i);
+        // 「予算 5000」「予算 5000 naoto」「budget 5000」パターン
+        const match = msg.text.match(/(?:予算|budget)\s*(\d+)(?:\s+([a-zA-Z0-9_-]+))?/i);
         if (match) {
           const budget = parseInt(match[1]);
+          const targetUser = match[2] || undefined; // ユーザー指定（省略時はデフォルト）
           if (budget < 100) {
             await slackPost('⚠ 予算は100円以上で指定してください');
             lastTs = msg.ts;
@@ -416,7 +419,7 @@ async function main() {
           lastTs = msg.ts;
 
           try {
-            await executeBetting(budget);
+            await executeBetting(budget, false, targetUser);
           } catch (e) {
             const errMsg = e instanceof Error ? e.message : String(e);
             console.error(`[runner] 実行エラー: ${errMsg}`);

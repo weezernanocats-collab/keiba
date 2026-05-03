@@ -35,14 +35,49 @@ const getArg = (name: string) => {
 };
 const dryRun = args.includes('--dry-run');
 const csvPath = getArg('--csv');
+const userName = getArg('--user'); // DBからユーザー認証情報を読む場合
 
 const today = new Date();
 today.setHours(today.getHours() + 9);
 const date = getArg('--date') || today.toISOString().split('T')[0];
 const amount = parseInt(getArg('--amount') || '100');
 
-// ── IPAT認証情報 ──
-const IPAT = {
+// ── IPAT認証情報（--user指定時はDBから暗号化済みを復号） ──
+async function loadIpatCredentials() {
+  if (userName) {
+    const { createClient } = await import('@libsql/client');
+    const { decrypt } = await import('../src/lib/credential-store');
+    const db = createClient({
+      url: process.env.TURSO_DATABASE_URL!,
+      authToken: process.env.TURSO_AUTH_TOKEN!,
+    });
+    const rows = await db.execute({
+      sql: 'SELECT encrypted_credentials, iv, auth_tag, display_name FROM ipat_users WHERE id = ?',
+      args: [userName],
+    });
+    db.close();
+    if (rows.rows.length === 0) {
+      throw new Error(`ユーザー "${userName}" が見つかりません。register-ipat-user.ts で登録してください。`);
+    }
+    const row = rows.rows[0];
+    const creds = decrypt(
+      String(row.encrypted_credentials),
+      String(row.iv),
+      String(row.auth_tag),
+    );
+    console.log(`[ipat] ユーザー: ${row.display_name} (${userName})`);
+    return creds;
+  }
+  return {
+    inetId: process.env.IPAT_INET_ID || '',
+    memberNo: process.env.IPAT_MEMBER_NO || '',
+    password: process.env.IPAT_PASSWORD || '',
+    parsNo: process.env.IPAT_PARS_NO || '',
+  };
+}
+
+// デフォルト値（main内で上書き）
+let IPAT = {
   inetId: process.env.IPAT_INET_ID || '',
   memberNo: process.env.IPAT_MEMBER_NO || '',
   password: process.env.IPAT_PASSWORD || '',
@@ -210,6 +245,9 @@ async function clickHorseLabel(page: import('playwright').Page, horseNum: number
 
 // ── メイン処理 ──
 async function main() {
+  // 0. 認証情報ロード（--user指定時はDBから復号）
+  IPAT = await loadIpatCredentials();
+
   // 1. 買い目読み込み
   const bets = await loadBets();
   if (bets.length === 0) {
