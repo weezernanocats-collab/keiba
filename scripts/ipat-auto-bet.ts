@@ -178,6 +178,36 @@ function groupBets(bets: Bet[]) {
   return [...map.values()];
 }
 
+// ── 馬番ラベルクリック ──
+async function clickHorseLabel(page: import('playwright').Page, horseNum: number) {
+  const padded = String(horseNum).padStart(2, '0');
+  // 1. for属性で直接検索（例: label[for='no01'], label[for='no1']）
+  for (const forVal of [`no${padded}`, `no${horseNum}`]) {
+    const label = page.locator(`label[for='${forVal}']`);
+    if (await label.isVisible({ timeout: 500 }).catch(() => false)) {
+      await label.click();
+      return;
+    }
+  }
+  // 2. for属性がno始まりのlabelからテキストマッチ
+  const labels = page.locator("label[for^='no']");
+  const count = await labels.count();
+  for (let i = 0; i < count; i++) {
+    const text = (await labels.nth(i).textContent().catch(() => ''))?.trim();
+    if (text === String(horseNum) || text === padded) {
+      await labels.nth(i).click();
+      return;
+    }
+  }
+  // 3. チェックボックス直接（フォールバック）
+  const checkbox = page.locator(`input[type='checkbox'][value='${padded}'], input[type='checkbox'][value='${horseNum}']`).first();
+  if (await checkbox.isVisible({ timeout: 500 }).catch(() => false)) {
+    await checkbox.click();
+    return;
+  }
+  throw new Error(`馬番 ${horseNum} のラベルが見つかりません`);
+}
+
 // ── メイン処理 ──
 async function main() {
   // 1. 買い目読み込み
@@ -265,155 +295,131 @@ async function main() {
     for (const group of groups) {
       console.log(`\n[ipat] ${group.venueName}${group.raceNumber}R に移動...`);
 
-      // 会場選択
-      const venueButtons = page.locator("button[ng-click*='selectCourse']");
-      await venueButtons.first().waitFor({ timeout: 10000 });
-      const venueCount = await venueButtons.count();
-      let venueFound = false;
-      for (let i = 0; i < venueCount; i++) {
-        const text = await venueButtons.nth(i).textContent();
-        if (text?.includes(group.venueName)) {
-          await venueButtons.nth(i).click();
-          venueFound = true;
-          break;
-        }
-      }
-      if (!venueFound) {
-        console.warn(`  ⚠ ${group.venueName} が見つかりません、スキップ`);
-        continue;
-      }
-      await wait(1500);
+      // 会場・レース選択: ボタンモード（初回）またはプルダウンモード（セット後）
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await wait(500);
 
-      // レース選択
-      const raceButtons = page.locator("button[ng-click*='selectRace']");
-      await wait(1000);
-      const raceCount = await raceButtons.count();
-      let raceFound = false;
-      for (let i = 0; i < raceCount; i++) {
-        const text = await raceButtons.nth(i).textContent();
-        if (text?.trim() === String(group.raceNumber)) {
-          await raceButtons.nth(i).click();
-          raceFound = true;
-          break;
+      const courseBtnVisible = await page.locator("button[ng-click*='selectCourse']").first()
+        .isVisible({ timeout: 1000 }).catch(() => false);
+
+      if (courseBtnVisible) {
+        // ボタンモード（初回表示時）
+        const venueButtons = page.locator("button[ng-click*='selectCourse']");
+        const venueCount = await venueButtons.count();
+        let venueFound = false;
+        for (let i = 0; i < venueCount; i++) {
+          const text = await venueButtons.nth(i).textContent().catch(() => '');
+          if (text?.includes(group.venueName)) {
+            await venueButtons.nth(i).click();
+            venueFound = true;
+            break;
+          }
+        }
+        if (!venueFound) {
+          console.warn(`  ⚠ ${group.venueName} が見つかりません、スキップ`);
+          continue;
+        }
+        await wait(1500);
+
+        // レースボタン選択
+        const raceButtons = page.locator("button[ng-click*='selectRace']");
+        await wait(1000);
+        const raceCount = await raceButtons.count().catch(() => 0);
+        let raceFound = false;
+        const racePattern = `${group.raceNumber}R`;
+        for (let i = 0; i < raceCount; i++) {
+          const text = (await raceButtons.nth(i).textContent().catch(() => ''))?.trim();
+          if (text?.startsWith(racePattern)) {
+            await raceButtons.nth(i).click();
+            raceFound = true;
+            break;
+          }
+        }
+        if (!raceFound) {
+          console.warn(`  ⚠ ${group.raceNumber}R が見つかりません、スキップ`);
+          await page.screenshot({ path: `/tmp/ipat_debug_race_notfound_${group.venueName}${group.raceNumber}.png` });
+          continue;
+        }
+      } else {
+        // プルダウンモード（セット後）
+        const courseSelect = page.locator("select[ng-model='vm.cSelectedCourseId']");
+        await courseSelect.waitFor({ timeout: 5000 });
+        // テキストラベルで選択（例: "東京(日)" → "東京"を含むオプション）
+        const courseOptions = await courseSelect.locator('option').all();
+        let courseSelected = false;
+        for (const opt of courseOptions) {
+          const text = await opt.textContent().catch(() => '');
+          if (text?.includes(group.venueName)) {
+            const val = await opt.getAttribute('value');
+            if (val) {
+              await courseSelect.selectOption(val);
+              courseSelected = true;
+              break;
+            }
+          }
+        }
+        if (!courseSelected) {
+          console.warn(`  ⚠ ${group.venueName} が見つかりません、スキップ`);
+          continue;
+        }
+        await wait(1000);
+
+        // レースプルダウン選択
+        const raceSelect = page.locator("select[ng-model='vm.oSelectedJgRn']");
+        await raceSelect.waitFor({ timeout: 5000 });
+        const raceOptions = await raceSelect.locator('option').all();
+        let raceSelected = false;
+        const racePattern = `${group.raceNumber}R`;
+        for (const opt of raceOptions) {
+          const text = (await opt.textContent().catch(() => ''))?.trim();
+          if (text?.startsWith(racePattern)) {
+            const val = await opt.getAttribute('value');
+            if (val) {
+              await raceSelect.selectOption(val);
+              raceSelected = true;
+              break;
+            }
+          }
+        }
+        if (!raceSelected) {
+          console.warn(`  ⚠ ${group.raceNumber}R が見つかりません、スキップ`);
+          await page.screenshot({ path: `/tmp/ipat_debug_race_notfound_${group.venueName}${group.raceNumber}.png` });
+          continue;
         }
       }
-      if (!raceFound) {
-        console.warn(`  ⚠ ${group.raceNumber}R が見つかりません、スキップ`);
-        continue;
-      }
+      console.log(`  会場 ${group.venueName} / レース ${group.raceNumber}R 選択`);
       await wait(1500);
 
       // 各買い目を投票
       for (const bet of group.bets) {
-        console.log(`  馬連 ${bet.combo} ${bet.amount}円 をセット中...`);
+        console.log(`  ${bet.betTypeName} ${bet.combo} ${bet.amount}円 をセット中...`);
 
-        // 券種選択（馬連）
+        // 券種選択
         const typeSelect = page.locator("select[ng-model*='oSelectType']").first();
         await typeSelect.waitFor({ timeout: 5000 });
         await typeSelect.selectOption({ label: bet.betTypeName });
         await wait(800);
 
-        // 方式選択（ながし）
-        const methodSelect = page.locator("select[ng-model*='oSelectMethod']").first();
-        await methodSelect.waitFor({ timeout: 5000 });
-        await methodSelect.selectOption({ label: 'ながし' });
-        await wait(800);
+        const isTansho = bet.betType === 'TANSYO' || bet.betType === 'FUKUSYO';
 
-        // 軸馬選択（小さい方の馬番 = しょーさん候補）
-        // ながしモード: 軸馬のチェックボックスをクリック
-        // 軸のセクションは最初のhorse number area
-        const axisHorse = bet.horses[0];
-        const partnerHorse = bet.horses[1];
-
-        // 軸馬: 'ax' prefix のlabel、または最初のセクションの馬番label
-        // IPATのながしUIは軸と相手が分かれている
-        // セレクタはIPATのバージョンで変わる可能性があるため、複数パターンを試行
-        const axisSelectors = [
-          `label[for='ax_no${axisHorse}']`,
-          `label[for='axno${axisHorse}']`,
-          `label[for='ax${axisHorse}']`,
-        ];
-
-        let axisClicked = false;
-        for (const sel of axisSelectors) {
-          const el = page.locator(sel).first();
-          if (await el.isVisible({ timeout: 1000 }).catch(() => false)) {
-            await el.click();
-            axisClicked = true;
-            break;
-          }
-        }
-
-        if (!axisClicked) {
-          // フォールバック: ながしの軸エリアの馬番ボタンをテキストで探す
-          // 多くのIPAT実装では「軸」セクション内の馬番ラベルをクリック
-          const allLabels = page.locator('.axis-area label, .jiku label, [class*="axis"] label, [class*="jiku"] label');
-          const labelCount = await allLabels.count();
-          for (let i = 0; i < labelCount; i++) {
-            const text = await allLabels.nth(i).textContent();
-            if (text?.trim() === String(axisHorse)) {
-              await allLabels.nth(i).click();
-              axisClicked = true;
-              break;
-            }
-          }
-        }
-
-        if (!axisClicked) {
-          // 最終フォールバック: ボックスに切り替えて2頭選択
-          console.log('    ながしの軸セレクタが見つからない → ボックスに切替');
+        if (isTansho) {
+          // 単勝・複勝: 方式選択なし、1頭クリックするだけ
+          const horseNum = bet.horses[0];
+          await clickHorseLabel(page, horseNum);
+          await wait(500);
+        } else {
+          // 馬連等: ボックスで2頭選択
+          const methodSelect = page.locator("select[ng-model*='oSelectMethod']").first();
+          await methodSelect.waitFor({ timeout: 5000 });
           await methodSelect.selectOption({ label: 'ボックス' });
           await wait(800);
 
-          // ボックスの場合: 2頭をクリック
           for (const h of bet.horses) {
-            const label = page.locator(`label[for^='no${h}']`).first();
-            if (await label.isVisible({ timeout: 2000 }).catch(() => false)) {
-              await label.click();
-            } else {
-              // テキスト一致で探す
-              const numLabels = page.locator("label[for^='no']");
-              const cnt = await numLabels.count();
-              for (let i = 0; i < cnt; i++) {
-                const t = await numLabels.nth(i).textContent();
-                if (t?.trim() === String(h)) {
-                  await numLabels.nth(i).click();
-                  break;
-                }
-              }
-            }
+            await clickHorseLabel(page, h);
             await wait(300);
           }
-        } else {
-          // 相手馬選択
           await wait(500);
-          const partnerSelectors = [
-            `label[for='no${partnerHorse}']`,
-            `label[for^='no${partnerHorse}']`,
-          ];
-          let partnerClicked = false;
-          for (const sel of partnerSelectors) {
-            const el = page.locator(sel).first();
-            if (await el.isVisible({ timeout: 1000 }).catch(() => false)) {
-              await el.click();
-              partnerClicked = true;
-              break;
-            }
-          }
-          if (!partnerClicked) {
-            // テキスト一致で相手馬を探す
-            const partnerLabels = page.locator("label[for^='no']");
-            const cnt = await partnerLabels.count();
-            for (let i = 0; i < cnt; i++) {
-              const t = await partnerLabels.nth(i).textContent();
-              if (t?.trim() === String(partnerHorse)) {
-                await partnerLabels.nth(i).click();
-                break;
-              }
-            }
-          }
         }
-        await wait(500);
 
         // 金額入力（100円単位 → IPAT入力は100円を1として入力）
         const amountInput = page.locator("input[ng-model*='nUnit']").first();
@@ -428,6 +434,26 @@ async function main() {
         await wait(1500);
         betCount++;
         console.log(`    ✓ セット完了 (${betCount}/${bets.length})`);
+
+        // セット後のスクリーンショットとUI要素ダンプ（デバッグ用、初回のみ）
+        if (betCount === 1) {
+          await page.screenshot({ path: '/tmp/ipat_debug_after_set.png' });
+          const headerEls = await page.evaluate(() => {
+            const els: string[] = [];
+            document.querySelectorAll('select, [class*="course"], [class*="race"], [class*="jou"], [class*="sel"]').forEach(el => {
+              const tag = el.tagName;
+              const cls = el.className;
+              const text = (el.textContent || '').trim().slice(0, 80);
+              const ngModel = el.getAttribute('ng-model') || '';
+              const ngClick = el.getAttribute('ng-click') || '';
+              const ngChange = el.getAttribute('ng-change') || '';
+              els.push(`${tag} class="${cls}" ngModel="${ngModel}" ngClick="${ngClick}" ngChange="${ngChange}" text="${text}"`);
+            });
+            return els;
+          });
+          console.log('[debug] セット後のUI要素:');
+          for (const e of headerEls) console.log('  ' + e);
+        }
       }
     }
 
