@@ -418,9 +418,10 @@ Top-1を単勝ピック、Top-3を複勝ピック`, 'plain text'));
   blocks.push(bulletItem('馬券種の最適化（複勝・ワイドでのROI検証）'));
 
   blocks.push(heading2('馬券セットシステム'));
-  blocks.push(bulletItem('Phase 1（進行中）: Slack/メール通知 → 手動IPAT購入'));
-  blocks.push(bulletItem('Phase 2: Playwright でIPAT自動操作'));
-  blocks.push(bulletItem('Phase 3: アプリで3人同時自動購入'));
+  blocks.push(bulletItem('Phase 1（完了）: Slack/メール通知 → 手動IPAT購入'));
+  blocks.push(bulletItem('Phase 2（完了）: Playwright でIPAT自動投票（単勝+馬連、17点2,900円の実績あり）'));
+  blocks.push(bulletItem('Phase 3（稼働中）: Slack「予算 5000」→ 自動CSV生成 → IPAT投票 → 結果通知'));
+  blocks.push(bulletItem('Phase 4: 開催日自動起動（cron毎朝9時→DB確認→Bot起動→最終レース後停止）'));
   blocks.push(divider());
 
   // ============================================================
@@ -445,11 +446,15 @@ Top-1を単勝ピック、Top-3を複勝ピック`, 'plain text'));
   blocks.push(heading2('レースデイ自動化'));
   blocks.push(codeBlock(
 `06:15  予想生成                    [GitHub Actions]
+09:03  開催日判定→Bot自動起動        [cron → race-day-launcher.sh]
+       Slack「予算 5000」で投票開始   [slack-bet-runner.ts]
 09:00  paddock-watcher起動          [ローカルMac]
        ├ 60秒ごと: YouTube音声→Whisper文字起こし
        └ 10秒ごと: オッズ取得→急落検知→Slack通知
 T-7min 予想を最新オッズ+パドック情報で再生成
-T-3min 馬券条件判定→Slack+メール通知→IPAT購入
+Slack  「予算 5000」→ CSV生成 → IPAT自動投票 → 結果通知
+       戦略: しょーさん単勝(2x) + しょーさん×AI馬連(2x) + AI馬連(1x)
+17:00  Bot自動停止（最終レース+30分）
 17:30  結果取得→精度計算            [GitHub Actions]`, 'plain text'));
   blocks.push(divider());
 
