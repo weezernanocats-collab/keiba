@@ -106,7 +106,77 @@ async function getRecentMessages(oldest: string): Promise<Array<{ text: string; 
     .map(m => ({ text: m.text || '', ts: m.ts, user: m.user || '' }));
 }
 
-// ── 買い目生成（マルチ戦略） ──
+// ── ユーザー設定型 ──
+
+interface UserBetConfig {
+  userId: string;
+  dailyBudget: number;
+  betTypes: { tansho: boolean; umaren: boolean; wide: boolean; umatan: boolean; sanrenpuku: boolean; sanrentan: boolean };
+  strategies: { shoshan: boolean; ai: boolean; shoshan_ai: boolean };
+  strategyWeights: Record<string, number>;
+  minOdds: number | null;
+  maxOdds: number | null;
+  active: boolean;
+}
+
+// デフォルト設定（木村用 = 従来ロジック互換）
+const DEFAULT_CONFIG: UserBetConfig = {
+  userId: 'default',
+  dailyBudget: 5000,
+  betTypes: { tansho: true, umaren: true, wide: false, umatan: false, sanrenpuku: false, sanrentan: false },
+  strategies: { shoshan: true, ai: true, shoshan_ai: true },
+  strategyWeights: { shoshan: 40, ai: 20, shoshan_ai: 40 },
+  minOdds: null,
+  maxOdds: null,
+  active: true,
+};
+
+async function loadUserConfig(userId: string): Promise<UserBetConfig | null> {
+  const { createClient } = await import('@libsql/client');
+  const db = createClient({ url: process.env.TURSO_DATABASE_URL!, authToken: process.env.TURSO_AUTH_TOKEN! });
+  try {
+    const rows = await db.execute({
+      sql: 'SELECT * FROM user_bet_configs WHERE user_id = ? AND active = 1',
+      args: [userId],
+    });
+    if (rows.rows.length === 0) return null;
+    const row = rows.rows[0];
+    return {
+      userId: String(row.user_id),
+      dailyBudget: Number(row.daily_budget),
+      betTypes: JSON.parse(String(row.bet_types)),
+      strategies: JSON.parse(String(row.strategies)),
+      strategyWeights: JSON.parse(String(row.strategy_weights)),
+      minOdds: row.min_odds != null ? Number(row.min_odds) : null,
+      maxOdds: row.max_odds != null ? Number(row.max_odds) : null,
+      active: true,
+    };
+  } finally {
+    db.close();
+  }
+}
+
+async function loadAllActiveConfigs(): Promise<UserBetConfig[]> {
+  const { createClient } = await import('@libsql/client');
+  const db = createClient({ url: process.env.TURSO_DATABASE_URL!, authToken: process.env.TURSO_AUTH_TOKEN! });
+  try {
+    const rows = await db.execute({ sql: 'SELECT * FROM user_bet_configs WHERE active = 1', args: [] });
+    return rows.rows.map(row => ({
+      userId: String(row.user_id),
+      dailyBudget: Number(row.daily_budget),
+      betTypes: JSON.parse(String(row.bet_types)),
+      strategies: JSON.parse(String(row.strategies)),
+      strategyWeights: JSON.parse(String(row.strategy_weights)),
+      minOdds: row.min_odds != null ? Number(row.min_odds) : null,
+      maxOdds: row.max_odds != null ? Number(row.max_odds) : null,
+      active: true,
+    }));
+  } finally {
+    db.close();
+  }
+}
+
+// ── 買い目生成（ユーザー設定対応） ──
 
 interface BetRow {
   venue: string;
@@ -114,7 +184,7 @@ interface BetRow {
   betType: string;
   combo: string;
   amount: number;
-  priority: number; // 1=shoshan, 2=AI-only
+  strategy: string; // 'shoshan' | 'ai' | 'shoshan_ai'
   label: string;
 }
 
@@ -127,16 +197,31 @@ const VENUE_DISPLAY: Record<string, string> = Object.fromEntries(
   Object.entries(VENUE_MAP).map(([k, v]) => [v, k])
 );
 
-async function generateBets(date: string, budget: number): Promise<{ bets: BetRow[]; csvPath: string }> {
-  const { createClient } = await import('@libsql/client');
-  const db = createClient({
-    url: process.env.TURSO_DATABASE_URL!,
-    authToken: process.env.TURSO_AUTH_TOKEN!,
-  });
+const IPAT_BET_TYPES: Record<string, string> = {
+  tansho: 'TANSYO', umaren: 'UMAREN', wide: 'WIDE',
+  umatan: 'UMATAN', sanrenpuku: 'SANRENPUKU', sanrentan: 'SANRENTAN',
+};
 
-  // 全レースの予想を取得
+function pad(n: number) { return String(n).padStart(2, '0'); }
+
+function makeCombo2(a: number, b: number, ordered: boolean) {
+  if (ordered) return `${pad(a)}-${pad(b)}`;
+  const [s, l] = a < b ? [a, b] : [b, a];
+  return `${pad(s)}-${pad(l)}`;
+}
+
+function makeCombo3(a: number, b: number, c: number, ordered: boolean) {
+  if (ordered) return `${pad(a)}-${pad(b)}-${pad(c)}`;
+  const sorted = [a, b, c].sort((x, y) => x - y);
+  return sorted.map(pad).join('-');
+}
+
+async function generateBets(date: string, budget: number, config: UserBetConfig): Promise<{ bets: BetRow[]; csvPath: string }> {
+  const { createClient } = await import('@libsql/client');
+  const db = createClient({ url: process.env.TURSO_DATABASE_URL!, authToken: process.env.TURSO_AUTH_TOKEN! });
+
   const rows = await db.execute({
-    sql: `SELECT p.race_id, p.analysis_json, r.racecourse_name, r.race_number, r.name, r.time
+    sql: `SELECT p.race_id, p.analysis_json, p.picks_json, r.racecourse_name, r.race_number, r.name, r.time
           FROM predictions p
           JOIN races r ON p.race_id = r.id
           WHERE r.date = ? AND p.analysis_json IS NOT NULL
@@ -159,108 +244,182 @@ async function generateBets(date: string, budget: number): Promise<{ bets: BetRo
     // しょーさん候補
     const candidates = analysis?.shosanPrediction?.candidates || [];
     const shosanQualified = candidates.filter((c: any) => (c.matchScore || 0) >= 50);
+    const shosanNums = shosanQualified.map((c: any) => Number(c.horseNumber));
 
-    // AI予想Top2 (aiOnlyRanking は { entries: [...] } 形式)
+    // AI予想Top3
     const aiEntries = analysis?.aiOnlyRanking?.entries || [];
-    let aiTop1 = aiEntries[0]?.horseNumber ? Number(aiEntries[0].horseNumber) : null;
-    let aiTop2 = aiEntries[1]?.horseNumber ? Number(aiEntries[1].horseNumber) : null;
+    let aiTop: number[] = aiEntries.slice(0, 3).filter((e: any) => e?.horseNumber).map((e: any) => Number(e.horseNumber));
 
-    // フォールバック: picks_jsonからAI Top2
-    if (!aiTop1) {
-      const picksRow = await db.execute({
-        sql: `SELECT picks_json FROM predictions WHERE race_id = ?`,
-        args: [raceId],
-      });
-      if (picksRow.rows.length > 0 && picksRow.rows[0].picks_json) {
-        try {
-          const picks = JSON.parse(String(picksRow.rows[0].picks_json));
-          if (Array.isArray(picks) && picks.length >= 2) {
-            aiTop1 = Number(picks[0].horseNumber);
-            aiTop2 = Number(picks[1].horseNumber);
+    // フォールバック: picks_json
+    if (aiTop.length < 2 && row.picks_json) {
+      try {
+        const picks = JSON.parse(String(row.picks_json));
+        if (Array.isArray(picks)) {
+          aiTop = picks.slice(0, 3).map((p: any) => Number(p.horseNumber)).filter(Boolean);
+        }
+      } catch {}
+    }
+
+    // オッズ情報（フィルタ用）
+    const oddsRows = await db.execute({
+      sql: `SELECT horse_number, odds FROM race_entries WHERE race_id = ? AND odds > 0`,
+      args: [raceId],
+    });
+    const oddsMap: Record<number, number> = {};
+    for (const o of oddsRows.rows) oddsMap[Number(o.horse_number)] = Number(o.odds);
+
+    const passOddsFilter = (horseNum: number) => {
+      const odds = oddsMap[horseNum];
+      if (!odds) return true; // オッズ不明なら通す
+      if (config.minOdds && odds < config.minOdds) return false;
+      if (config.maxOdds && odds > config.maxOdds) return false;
+      return true;
+    };
+
+    // しょーさん×AI一致馬
+    const shosanAiOverlap = shosanNums.filter((n: number) => aiTop.includes(n));
+
+    const lbl = `${venue}${raceNumber}R`;
+
+    // ── 各戦略で買い目生成 ──
+
+    // しょーさん戦略
+    if (config.strategies.shoshan && shosanQualified.length > 0) {
+      for (const c of shosanQualified) {
+        const num = Number(c.horseNumber);
+        if (!passOddsFilter(num)) continue;
+        const theory = c.theory || '?';
+
+        if (config.betTypes.tansho) {
+          bets.push({ venue: venueCode, raceNumber, betType: 'TANSYO', combo: pad(num), amount: 0, strategy: 'shoshan', label: `${lbl} 単勝 ${num}番 (しょーさんT${theory})` });
+        }
+        // 2頭券種: しょーさん馬 × AI1位 (同馬ならAI2位)
+        let partner = aiTop[0];
+        if (partner === num) partner = aiTop[1];
+        if (partner && partner !== num && passOddsFilter(partner)) {
+          if (config.betTypes.umaren) {
+            bets.push({ venue: venueCode, raceNumber, betType: 'UMAREN', combo: makeCombo2(num, partner, false), amount: 0, strategy: 'shoshan', label: `${lbl} 馬連 ${num}-${partner} (しょーさん×AI)` });
           }
-        } catch {}
+          if (config.betTypes.wide) {
+            bets.push({ venue: venueCode, raceNumber, betType: 'WIDE', combo: makeCombo2(num, partner, false), amount: 0, strategy: 'shoshan', label: `${lbl} ワイド ${num}-${partner} (しょーさん)` });
+          }
+          if (config.betTypes.umatan) {
+            bets.push({ venue: venueCode, raceNumber, betType: 'UMATAN', combo: makeCombo2(num, partner, true), amount: 0, strategy: 'shoshan', label: `${lbl} 馬単 ${num}→${partner} (しょーさん)` });
+          }
+        }
+        // 3頭券種: しょーさん馬 × AI1位 × AI2位
+        const third = aiTop.find(a => a !== num && a !== partner);
+        if (partner && third && partner !== num && passOddsFilter(third)) {
+          if (config.betTypes.sanrenpuku) {
+            bets.push({ venue: venueCode, raceNumber, betType: 'SANRENPUKU', combo: makeCombo3(num, partner, third, false), amount: 0, strategy: 'shoshan', label: `${lbl} 三連複 ${num}-${partner}-${third} (しょーさん)` });
+          }
+          if (config.betTypes.sanrentan) {
+            bets.push({ venue: venueCode, raceNumber, betType: 'SANRENTAN', combo: makeCombo3(num, partner, third, true), amount: 0, strategy: 'shoshan', label: `${lbl} 三連単 ${num}→${partner}→${third} (しょーさん)` });
+          }
+        }
       }
     }
 
-    // 1番人気（市場）
-    const entries = await db.execute({
-      sql: `SELECT horse_number, odds FROM race_entries
-            WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT 1`,
-      args: [raceId],
-    });
-    const favNumber = entries.rows.length > 0 ? Number(entries.rows[0].horse_number) : null;
-
-    if (shosanQualified.length > 0) {
-      // ── しょーさんレース: 単勝 + 馬連(しょーさん×AI1位) ──
-      for (const c of shosanQualified) {
-        const shosanNum = Number(c.horseNumber);
-
-        // 単勝
-        bets.push({
-          venue: venueCode, raceNumber, betType: 'TANSYO',
-          combo: String(shosanNum).padStart(2, '0'),
-          amount: 0, priority: 1,
-          label: `${venue}${raceNumber}R 単勝 ${shosanNum}番 (しょーさんT${c.theory})`,
-        });
-
-        // 馬連: しょーさん × AI1位（同馬ならAI2位）
-        let partner = aiTop1;
-        if (partner === shosanNum) partner = aiTop2;
-        if (partner && partner !== shosanNum) {
-          const [s, l] = shosanNum < partner ? [shosanNum, partner] : [partner, shosanNum];
-          bets.push({
-            venue: venueCode, raceNumber, betType: 'UMAREN',
-            combo: `${String(s).padStart(2, '0')}-${String(l).padStart(2, '0')}`,
-            amount: 0, priority: 1,
-            label: `${venue}${raceNumber}R 馬連 ${s}-${l} (しょーさん×AI)`,
-          });
+    // AI戦略
+    if (config.strategies.ai && aiTop.length >= 2) {
+      const [a1, a2, a3] = aiTop;
+      if (passOddsFilter(a1)) {
+        if (config.betTypes.tansho) {
+          bets.push({ venue: venueCode, raceNumber, betType: 'TANSYO', combo: pad(a1), amount: 0, strategy: 'ai', label: `${lbl} 単勝 ${a1}番 (AI)` });
+        }
+        if (a2 && passOddsFilter(a2)) {
+          if (config.betTypes.umaren) {
+            bets.push({ venue: venueCode, raceNumber, betType: 'UMAREN', combo: makeCombo2(a1, a2, false), amount: 0, strategy: 'ai', label: `${lbl} 馬連 ${a1}-${a2} (AI)` });
+          }
+          if (config.betTypes.wide) {
+            bets.push({ venue: venueCode, raceNumber, betType: 'WIDE', combo: makeCombo2(a1, a2, false), amount: 0, strategy: 'ai', label: `${lbl} ワイド ${a1}-${a2} (AI)` });
+          }
+          if (config.betTypes.umatan) {
+            bets.push({ venue: venueCode, raceNumber, betType: 'UMATAN', combo: makeCombo2(a1, a2, true), amount: 0, strategy: 'ai', label: `${lbl} 馬単 ${a1}→${a2} (AI)` });
+          }
+          if (a3 && passOddsFilter(a3)) {
+            if (config.betTypes.sanrenpuku) {
+              bets.push({ venue: venueCode, raceNumber, betType: 'SANRENPUKU', combo: makeCombo3(a1, a2, a3, false), amount: 0, strategy: 'ai', label: `${lbl} 三連複 ${a1}-${a2}-${a3} (AI)` });
+            }
+            if (config.betTypes.sanrentan) {
+              bets.push({ venue: venueCode, raceNumber, betType: 'SANRENTAN', combo: makeCombo3(a1, a2, a3, true), amount: 0, strategy: 'ai', label: `${lbl} 三連単 ${a1}→${a2}→${a3} (AI)` });
+            }
+          }
         }
       }
-    } else if (aiTop1 && aiTop2 && aiTop1 !== favNumber) {
-      // ── AI onlyレース: AI1位×2位 馬連（AI1位≠1番人気のとき） ──
-      const [s, l] = aiTop1 < aiTop2 ? [aiTop1, aiTop2] : [aiTop2, aiTop1];
-      bets.push({
-        venue: venueCode, raceNumber, betType: 'UMAREN',
-        combo: `${String(s).padStart(2, '0')}-${String(l).padStart(2, '0')}`,
-        amount: 0, priority: 2,
-        label: `${venue}${raceNumber}R 馬連 ${s}-${l} (AI)`,
-      });
+    }
+
+    // しょーさん×AI掛け合わせ戦略
+    if (config.strategies.shoshan_ai && shosanAiOverlap.length > 0) {
+      for (const num of shosanAiOverlap) {
+        if (!passOddsFilter(num)) continue;
+        if (config.betTypes.tansho) {
+          bets.push({ venue: venueCode, raceNumber, betType: 'TANSYO', combo: pad(num), amount: 0, strategy: 'shoshan_ai', label: `${lbl} 単勝 ${num}番 (しょーさん×AI一致)` });
+        }
+        let partner = aiTop.find(a => a !== num);
+        if (partner && passOddsFilter(partner)) {
+          if (config.betTypes.umaren) {
+            bets.push({ venue: venueCode, raceNumber, betType: 'UMAREN', combo: makeCombo2(num, partner, false), amount: 0, strategy: 'shoshan_ai', label: `${lbl} 馬連 ${num}-${partner} (しょーさん×AI一致)` });
+          }
+          if (config.betTypes.wide) {
+            bets.push({ venue: venueCode, raceNumber, betType: 'WIDE', combo: makeCombo2(num, partner, false), amount: 0, strategy: 'shoshan_ai', label: `${lbl} ワイド ${num}-${partner} (しょーさん×AI一致)` });
+          }
+          if (config.betTypes.umatan) {
+            bets.push({ venue: venueCode, raceNumber, betType: 'UMATAN', combo: makeCombo2(num, partner, true), amount: 0, strategy: 'shoshan_ai', label: `${lbl} 馬単 ${num}→${partner} (しょーさん×AI一致)` });
+          }
+          const third = aiTop.find(a => a !== num && a !== partner);
+          if (third && passOddsFilter(third)) {
+            if (config.betTypes.sanrenpuku) {
+              bets.push({ venue: venueCode, raceNumber, betType: 'SANRENPUKU', combo: makeCombo3(num, partner, third, false), amount: 0, strategy: 'shoshan_ai', label: `${lbl} 三連複 ${num}-${partner}-${third} (しょーさん×AI一致)` });
+            }
+            if (config.betTypes.sanrentan) {
+              bets.push({ venue: venueCode, raceNumber, betType: 'SANRENTAN', combo: makeCombo3(num, partner, third, true), amount: 0, strategy: 'shoshan_ai', label: `${lbl} 三連単 ${num}→${partner}→${third} (しょーさん×AI一致)` });
+            }
+          }
+        }
+      }
     }
   }
   db.close();
 
   if (bets.length === 0) return { bets: [], csvPath: '' };
 
-  // ── 予算配分 ──
-  // priority 1 (shoshan) = 2x base, priority 2 (AI) = 1x base
-  const totalWeight = bets.reduce((s, b) => s + (b.priority === 1 ? 2 : 1), 0);
-  const baseAmount = Math.floor(budget / totalWeight / 100) * 100; // 100円単位
-  const minBet = 100;
-
+  // ── 予算配分（戦略ウェイトに基づく） ──
+  const strategyBets: Record<string, BetRow[]> = {};
   for (const b of bets) {
-    b.amount = Math.max(minBet, baseAmount * (b.priority === 1 ? 2 : 1));
+    if (!strategyBets[b.strategy]) strategyBets[b.strategy] = [];
+    strategyBets[b.strategy].push(b);
   }
 
-  // 実合計が予算をオーバーしたら調整
-  const total = bets.reduce((s, b) => s + b.amount, 0);
-  if (total > budget) {
-    // priority 2 から100円ずつ減らす
-    const p2Bets = bets.filter(b => b.priority === 2);
-    let excess = total - budget;
-    for (const b of p2Bets) {
-      if (excess <= 0) break;
-      const reduce = Math.min(b.amount - minBet, excess);
-      b.amount -= reduce;
-      excess -= reduce;
+  const totalWeight = Object.entries(strategyBets).reduce(
+    (s, [strat, bs]) => s + (config.strategyWeights[strat] || 0) * bs.length, 0
+  );
+
+  if (totalWeight > 0) {
+    for (const [strat, bs] of Object.entries(strategyBets)) {
+      const weight = config.strategyWeights[strat] || 0;
+      const stratBudget = Math.floor(budget * weight / 100);
+      const perBet = Math.max(100, Math.floor(stratBudget / bs.length / 100) * 100);
+      for (const b of bs) b.amount = perBet;
     }
   }
 
-  // 金額0のベットを除外
-  const validBets = bets.filter(b => b.amount >= minBet);
+  // 合計が予算を超えたら末尾から削る
+  let validBets = bets.filter(b => b.amount >= 100);
+  const total = validBets.reduce((s, b) => s + b.amount, 0);
+  if (total > budget) {
+    let excess = total - budget;
+    for (let i = validBets.length - 1; i >= 0 && excess > 0; i--) {
+      const reduce = Math.min(validBets[i].amount - 100, excess);
+      validBets[i].amount -= reduce;
+      excess -= reduce;
+    }
+    validBets = validBets.filter(b => b.amount >= 100);
+  }
 
   // CSV出力
   const dateCompact = date.replace(/-/g, '');
-  const csvPath = `/tmp/ipatgo_${dateCompact}_auto.csv`;
+  const csvPath = `/tmp/ipatgo_${dateCompact}_${config.userId}.csv`;
   const csvLines = validBets.map(b =>
     `${dateCompact},${b.venue},${b.raceNumber},${b.betType},NORMAL,,${b.combo},${b.amount}`
   );
@@ -312,13 +471,25 @@ async function executeBetting(budget: number, dryRun = false, userId?: string) {
   const date = now.toISOString().split('T')[0];
   const dateCompact = date.replace(/-/g, '');
 
+  // ユーザー設定ロード
+  let config: UserBetConfig = { ...DEFAULT_CONFIG };
+  if (userId) {
+    const userConfig = await loadUserConfig(userId);
+    if (userConfig) {
+      config = userConfig;
+    }
+    config.userId = userId;
+  }
+  // Slack指定の予算で上書き
+  config.dailyBudget = budget;
+
   const userLabel = userId ? ` [${userId}]` : '';
   console.log(`\n[runner] ${date} 予算${budget.toLocaleString()}円で投票開始${userLabel}`);
   await slackPost(`🏇 投票開始: ${date} 予算 ${budget.toLocaleString()}円${userLabel}`);
 
-  // 1. 買い目生成
+  // 1. 買い目生成（ユーザー設定に基づく）
   console.log('[runner] 買い目生成中...');
-  const { bets, csvPath } = await generateBets(date, budget);
+  const { bets, csvPath } = await generateBets(date, budget, config);
 
   if (bets.length === 0) {
     const msg = '対象の買い目がありません（しょーさん候補・AI予想なし）';
@@ -328,13 +499,14 @@ async function executeBetting(budget: number, dryRun = false, userId?: string) {
   }
 
   const totalAmount = bets.reduce((s, b) => s + b.amount, 0);
-  const shosanCount = bets.filter(b => b.priority === 1).length;
-  const aiCount = bets.filter(b => b.priority === 2).length;
+  const stratCounts: Record<string, number> = {};
+  for (const b of bets) stratCounts[b.strategy] = (stratCounts[b.strategy] || 0) + 1;
 
+  const BET_TYPE_JP: Record<string, string> = { TANSYO: '単勝', UMAREN: '馬連', WIDE: 'ワイド', UMATAN: '馬単', SANRENPUKU: '三連複', SANRENTAN: '三連単' };
   let betSummary = `📋 ${bets.length}点 (合計 ${totalAmount.toLocaleString()}円)\n`;
-  betSummary += `  しょーさん: ${shosanCount}点 / AI: ${aiCount}点\n`;
+  betSummary += `  ${Object.entries(stratCounts).map(([s, c]) => `${s}: ${c}点`).join(' / ')}\n`;
   for (const b of bets) {
-    betSummary += `  ${VENUE_DISPLAY[b.venue] || b.venue}${b.raceNumber}R ${b.betType === 'TANSYO' ? '単勝' : '馬連'} ${b.combo} ${b.amount}円\n`;
+    betSummary += `  ${VENUE_DISPLAY[b.venue] || b.venue}${b.raceNumber}R ${BET_TYPE_JP[b.betType] || b.betType} ${b.combo} ${b.amount}円\n`;
   }
   console.log(betSummary);
   await slackPost(betSummary);

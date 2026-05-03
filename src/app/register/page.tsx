@@ -9,6 +9,7 @@ function RegisterForm() {
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'submitting' | 'done' | 'error'>('loading');
   const [displayName, setDisplayName] = useState('');
+  const [userId, setUserId] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
   const [inetId, setInetId] = useState('');
@@ -30,6 +31,7 @@ function RegisterForm() {
           setErrorMsg(data.error);
         } else {
           setDisplayName(data.displayName);
+          setUserId(data.userId);
           setStatus('ready');
         }
       })
@@ -90,8 +92,20 @@ function RegisterForm() {
       <div className="max-w-md mx-auto mt-16 p-6 bg-green-50 border border-green-200 rounded-lg text-center">
         <h2 className="text-xl font-bold text-green-700 mb-2">登録完了</h2>
         <p className="text-green-600">{displayName}さんのIPAT情報が安全に保存されました。</p>
-        <p className="text-sm text-gray-500 mt-4">このページを閉じてください。</p>
         <p className="text-xs text-gray-400 mt-2">認証情報はAES-256-GCMで暗号化されています。</p>
+        <div className="mt-6 p-4 bg-white border border-green-200 rounded-lg">
+          <p className="text-sm text-gray-700 mb-3">次に、買い方の設定をしてください：</p>
+          <a
+            href={`/betting-config?user=${userId}`}
+            className="inline-block w-full py-2.5 px-4 bg-blue-600 text-white font-medium rounded-md hover:bg-blue-700 text-center"
+          >
+            買い目設定へ進む
+          </a>
+        </div>
+        <p className="text-xs text-gray-400 mt-4">
+          買い目設定は後からいつでも変更できます。<br />
+          ブックマーク: <span className="font-mono text-gray-500">/betting-config?user={userId}</span>
+        </p>
       </div>
     );
   }
