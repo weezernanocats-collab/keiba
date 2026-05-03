@@ -243,6 +243,14 @@ async function main() {
 
   console.log('[notion] ページ更新中...');
 
+  // 日付プロパティに最終更新日時を設定
+  const isoDate = jstNow.toISOString();
+  await notionRequest('PATCH', `/pages/${PAGE_ID}`, {
+    properties: {
+      '日付': { date: { start: isoDate } },
+    },
+  });
+
   // 既存ブロック削除
   await clearPageBlocks();
 
