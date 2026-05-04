@@ -92,9 +92,6 @@ jobs:
           git commit -m "chore: 週次モデル再学習 XGBoost+CatBoost ($(date -u +%Y-%m-%d))"
           git push
 
-  # モデル更新後にNotion更新（Notion API 5xxで学習成功扱いを巻き込まないよう独立化）
-  update-notion:
-    needs: retrain
-    continue-on-error: true
-    uses: ./.github/workflows/update-notion.yml
-    secrets: inherit
+  # Notion更新は update-notion.yml の daily schedule (cron '0 9 * * *' = 18:00 JST) が
+  # retrain (月曜 12:00 JST) の6時間後に拾うので chained call は不要。
+  # 旧chainedジョブはNotion API 5xxでretrain成功なのにworkflow全体が赤くなる問題があったため削除。
