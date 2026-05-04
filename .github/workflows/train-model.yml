@@ -92,8 +92,9 @@ jobs:
           git commit -m "chore: 週次モデル再学習 XGBoost+CatBoost ($(date -u +%Y-%m-%d))"
           git push
 
-  # モデル更新後にNotion更新
+  # モデル更新後にNotion更新（Notion API 5xxで学習成功扱いを巻き込まないよう独立化）
   update-notion:
     needs: retrain
+    continue-on-error: true
     uses: ./.github/workflows/update-notion.yml
     secrets: inherit
