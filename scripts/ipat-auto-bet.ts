@@ -34,6 +34,7 @@ const getArg = (name: string) => {
   return idx >= 0 ? args[idx + 1] : undefined;
 };
 const dryRun = args.includes('--dry-run');
+const headless = args.includes('--headless');
 const csvPath = getArg('--csv');
 const userName = getArg('--user'); // DBからユーザー認証情報を読む場合
 
@@ -41,6 +42,7 @@ const today = new Date();
 today.setHours(today.getHours() + 9);
 const date = getArg('--date') || today.toISOString().split('T')[0];
 const amount = parseInt(getArg('--amount') || '100');
+const budget = parseInt(getArg('--budget') || '0'); // 0なら--amount固定、>0ならbudgetを買い目数で等分
 
 // ── IPAT認証情報（--user指定時はDBから暗号化済みを復号） ──
 async function loadIpatCredentials() {
@@ -249,10 +251,25 @@ async function main() {
   IPAT = await loadIpatCredentials();
 
   // 1. 買い目読み込み
-  const bets = await loadBets();
+  let bets = await loadBets();
   if (bets.length === 0) {
     console.log('対象の買い目がありません');
     return;
+  }
+
+  // 1.5 予算配分: --budget指定時は等分（100円単位、端数は切り捨て）
+  if (budget > 0) {
+    const perBet = Math.floor(budget / bets.length / 100) * 100;
+    if (perBet < 100) {
+      const maxBets = Math.floor(budget / 100);
+      bets = bets.slice(0, maxBets);
+      for (const b of bets) b.amount = 100;
+      console.log(`[budget] ${budget}円 / ${bets.length}点上限 (1点100円, 余り${budget - bets.length * 100}円)`);
+    } else {
+      for (const b of bets) b.amount = perBet;
+      const total = perBet * bets.length;
+      console.log(`[budget] ${budget}円 / ${bets.length}点 = 1点${perBet}円 (合計${total}円, 余り${budget - total}円)`);
+    }
   }
 
   const totalAmount = bets.reduce((s, b) => s + b.amount, 0);
@@ -276,9 +293,9 @@ async function main() {
     process.exit(1);
   }
 
-  // 3. ブラウザ起動（画面表示あり）
-  console.log('[ipat] ブラウザ起動...');
-  const browser = await chromium.launch({ headless: false, slowMo: 300 });
+  // 3. ブラウザ起動（--headlessでバックグラウンド実行）
+  console.log(`[ipat] ブラウザ起動${headless ? ' (headless)' : ''}...`);
+  const browser = await chromium.launch({ headless, slowMo: headless ? 0 : 300 });
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
   const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
