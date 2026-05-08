@@ -107,9 +107,24 @@ interface Bet {
   raceNumber: number;
   betType: string;     // UMAREN等
   betTypeName: string; // 馬連等
-  combo: string;       // "03-07"
-  horses: number[];    // [3, 7]
-  amount: number;
+  combo: string;       // "03-07" or "01-02-04-07" (box)
+  horses: number[];    // [3, 7] or [1,2,4,7] (box)
+  amount: number;      // 1点(1ペア)あたりの金額
+  weight?: number;     // レース重み（予算配分用）
+}
+
+// 3歳限定 & グレードからレース重みを計算
+function computeRaceWeight(raceNumber: number, name: string, grade: string): number {
+  const is3yoOnly = name.startsWith('3歳') && !name.includes('以上');
+  const ageMult = is3yoOnly ? 0.5 : 1.0;
+  let gradeMult = 1.0;
+  if (grade === 'G1') gradeMult = 2.0;
+  else if (grade === 'G2') gradeMult = 1.7;
+  else if (grade === 'G3') gradeMult = 1.5;
+  else if (grade === 'リステッド' || grade === 'OP' || grade === 'オープン') gradeMult = 1.3;
+  else if (grade === '3勝クラス') gradeMult = 1.2;
+  else if (grade === '2勝クラス') gradeMult = 1.1;
+  return raceNumber * ageMult * gradeMult;
 }
 
 // ── CSV読み込み or DB生成 ──
@@ -153,7 +168,7 @@ async function loadBetsFromDb(): Promise<Bet[]> {
   };
 
   const rows = await db.execute({
-    sql: `SELECT p.race_id, p.analysis_json, r.racecourse_name, r.race_number
+    sql: `SELECT p.race_id, p.analysis_json, r.racecourse_name, r.race_number, r.name, r.grade
           FROM predictions p
           JOIN races r ON p.race_id = r.id
           WHERE r.date = ? AND p.analysis_json LIKE '%shosanPrediction%'
@@ -171,32 +186,42 @@ async function loadBetsFromDb(): Promise<Bet[]> {
     let analysis: { shosanPrediction?: { candidates?: Array<{ horseNumber: number; matchScore: number }> } };
     try { analysis = JSON.parse(String(row.analysis_json)); } catch { continue; }
     const candidates = analysis?.shosanPrediction?.candidates || [];
-    const qualified = candidates.filter(c => (c.matchScore || 0) >= 65);
+    const qualified = candidates.filter(c => (c.matchScore || 0) >= 55);
     if (qualified.length === 0) continue;
 
-    const entries = await db.execute({
-      sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT 1`,
+    // 上位3人気を取得
+    const top3Rows = await db.execute({
+      sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT 3`,
       args: [raceId],
     });
-    if (entries.rows.length === 0) continue;
-    const favNumber = Number(entries.rows[0].horse_number);
+    if (top3Rows.rows.length < 3) continue;
+    const popular = top3Rows.rows.map(r => Number(r.horse_number));
 
-    for (const c of qualified) {
-      const axisNumber = Number(c.horseNumber);
-      if (axisNumber === favNumber) continue;
-      const [small, large] = axisNumber < favNumber ? [axisNumber, favNumber] : [favNumber, axisNumber];
-      bets.push({
-        date,
-        venue: venueCode,
-        venueName: venue,
-        raceNumber: Number(row.race_number),
-        betType: 'UMAREN',
-        betTypeName: '馬連',
-        combo: `${String(small).padStart(2, '0')}-${String(large).padStart(2, '0')}`,
-        horses: [small, large],
-        amount,
-      });
-    }
+    // しょーさん候補が1〜3人気と被ったらスキップ（ROIが下がるため）
+    const candidateNums = qualified.map(c => Number(c.horseNumber));
+    if (candidateNums.some(n => popular.includes(n))) continue;
+
+    // ワイドボックス: しょーさん候補(全員) + 1〜3人気 → 重複除外
+    const horsesSet = new Set([...candidateNums, ...popular]);
+    const horses = [...horsesSet].sort((a, b) => a - b);
+    if (horses.length < 2) continue;
+
+    const raceName = String(row.name || '');
+    const grade = String(row.grade || '');
+    const weight = computeRaceWeight(Number(row.race_number), raceName, grade);
+
+    bets.push({
+      date,
+      venue: venueCode,
+      venueName: venue,
+      raceNumber: Number(row.race_number),
+      betType: 'WIDE',
+      betTypeName: 'ワイド',
+      combo: horses.map(n => String(n).padStart(2, '0')).join('-'),
+      horses,
+      amount, // 後でbudget配分時に上書き
+      weight,
+    });
   }
   db.close();
   return bets;
@@ -257,29 +282,38 @@ async function main() {
     return;
   }
 
-  // 1.5 予算配分: --budget指定時は等分（100円単位、端数は切り捨て）
+  // 1.5 予算配分: --budget指定時はレース重み×ペア数で配分（100円単位）
   if (budget > 0) {
-    const perBet = Math.floor(budget / bets.length / 100) * 100;
-    if (perBet < 100) {
-      const maxBets = Math.floor(budget / 100);
-      bets = bets.slice(0, maxBets);
-      for (const b of bets) b.amount = 100;
-      console.log(`[budget] ${budget}円 / ${bets.length}点上限 (1点100円, 余り${budget - bets.length * 100}円)`);
-    } else {
-      for (const b of bets) b.amount = perBet;
-      const total = perBet * bets.length;
-      console.log(`[budget] ${budget}円 / ${bets.length}点 = 1点${perBet}円 (合計${total}円, 余り${budget - total}円)`);
+    const totalWeight = bets.reduce((s, b) => s + (b.weight || 1), 0);
+    let allocated = 0;
+    for (const b of bets) {
+      const w = b.weight || 1;
+      const raceBudget = budget * w / totalWeight;
+      const n = b.horses.length;
+      const pairs = Math.max(1, n * (n - 1) / 2);
+      const perPair = Math.max(100, Math.floor(raceBudget / pairs / 100) * 100);
+      b.amount = perPair;
+      allocated += perPair * pairs;
     }
+    console.log(`[budget] ${budget}円目標 / 実配分 ${allocated}円 (${bets.length}レース, 重み配分)`);
   }
 
-  const totalAmount = bets.reduce((s, b) => s + b.amount, 0);
+  // 各レースの合計金額(=amount × ペア数)
+  const totalAmount = bets.reduce((s, b) => {
+    const n = b.horses.length;
+    const pairs = Math.max(1, n * (n - 1) / 2);
+    return s + b.amount * pairs;
+  }, 0);
   console.log(`\n[ipat] ${date} 自動投票`);
-  console.log(`  対象: ${bets.length}点 (合計 ${totalAmount.toLocaleString()}円)`);
+  console.log(`  対象: ${bets.length}レース (合計 ${totalAmount.toLocaleString()}円)`);
   if (dryRun) console.log('  ⚠ dry-runモード: 投票確定せずに停止します');
   console.log('');
 
   for (const b of bets) {
-    console.log(`  ${b.venueName}${b.raceNumber}R ${b.betTypeName} ${b.combo} ${b.amount}円`);
+    const n = b.horses.length;
+    const pairs = Math.max(1, n * (n - 1) / 2);
+    const raceTotal = b.amount * pairs;
+    console.log(`  ${b.venueName}${b.raceNumber}R ${b.betTypeName}ボックス ${b.combo} (${pairs}点 × ${b.amount}円 = ${raceTotal}円, w=${(b.weight || 0).toFixed(1)})`);
   }
   console.log('');
 
