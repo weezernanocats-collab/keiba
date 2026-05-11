@@ -232,9 +232,12 @@ async function loadBetsFromDb(): Promise<Bet[]> {
     }
 
     // ── 単勝: 休養フィルター済み × 理論1（バックテストROI ~148%） ──
+    // matchScore別重み: >=65 は 200円、<65 は 100円
     const restCandidates = (sp.restFilteredCandidates || []) as Array<{ horseNumber: number; matchScore: number; theory?: number }>;
     const tanshoTargets = restCandidates.filter(c => c.theory === 1);
     for (const c of tanshoTargets) {
+      const score = c.matchScore || 0;
+      const tanshoAmount = score >= 65 ? 200 : 100;
       bets.push({
         date,
         venue: venueCode,
@@ -244,7 +247,7 @@ async function loadBetsFromDb(): Promise<Bet[]> {
         betTypeName: '単勝',
         combo: String(c.horseNumber).padStart(2, '0'),
         horses: [c.horseNumber],
-        amount, // 後でbudget配分時に上書き(基本100円)
+        amount: tanshoAmount,
         weight,
       });
     }
@@ -316,16 +319,24 @@ async function main() {
     const tanshoBets = bets.filter(b => b.betType === 'TANSYO');
     const wideBets = bets.filter(b => b.betType === 'WIDE');
 
-    // 単勝確定（100円/点、上限内まで）
-    const maxTansho = Math.floor(tanshoCap / 100);
-    const remainingTansho = tanshoBets.slice(0, maxTansho);
-    const dropped = tanshoBets.length - remainingTansho.length;
-    if (dropped > 0) {
-      const keepSet = new Set(remainingTansho);
-      bets = bets.filter(b => b.betType !== 'TANSYO' || keepSet.has(b));
+    // 単勝確定 (score別: 200円or100円。amount は既に設定済み。cap内まで採用)
+    let accumTansho = 0;
+    const remainingTansho: typeof tanshoBets = [];
+    const dropTansho: typeof tanshoBets = [];
+    for (const b of tanshoBets) {
+      if (accumTansho + b.amount <= tanshoCap) {
+        remainingTansho.push(b);
+        accumTansho += b.amount;
+      } else {
+        dropTansho.push(b);
+      }
     }
-    for (const b of remainingTansho) b.amount = 100;
-    const tanshoAllocated = remainingTansho.length * 100;
+    if (dropTansho.length > 0) {
+      const dropSet = new Set(dropTansho);
+      bets = bets.filter(b => b.betType !== 'TANSYO' || !dropSet.has(b));
+    }
+    const tanshoAllocated = accumTansho;
+    const dropped = dropTansho.length;
 
     // ワイドは残予算で按分
     const wideBudget = budget - tanshoAllocated;

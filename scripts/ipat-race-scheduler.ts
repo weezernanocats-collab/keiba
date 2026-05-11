@@ -157,10 +157,12 @@ async function buildDayPlans(): Promise<RacePlan[]> {
       }
     }
 
-    // ── 単勝(休養F+理論1) ──
+    // ── 単勝(休養F+理論1) — score別: >=65は200円, <65は100円 ──
     const restT1 = (sp.restFilteredCandidates || []).filter((c: any) => c.theory === 1);
     for (const c of restT1) {
-      initialBets.push({ type: 'TANSYO', horses: [Number(c.horseNumber)], amount: 100, tag: 'tansho:休養F理論1' });
+      const score = (c.matchScore || 0);
+      const tAmount = score >= 65 ? 200 : 100;
+      initialBets.push({ type: 'TANSYO', horses: [Number(c.horseNumber)], amount: tAmount, tag: `tansho:休養F理論1(score=${score})` });
     }
 
     if (initialBets.length === 0) continue;
@@ -179,16 +181,18 @@ async function buildDayPlans(): Promise<RacePlan[]> {
 }
 
 function allocateBudget(plans: RacePlan[]) {
-  // 単勝: 100円固定 × 件数。上限 budget*0.5
+  // 単勝: score別(100/200円) × 件数。上限 budget*0.5
   const allTansho = plans.flatMap(p => p.initialBets.filter(b => b.type === 'TANSYO'));
   const tanshoCap = Math.floor(budget * 0.5);
-  const maxT = Math.floor(tanshoCap / 100);
-  // 先頭から最大件数まで採用
-  const keepSet = new Set(allTansho.slice(0, maxT));
+  let accum = 0;
+  const keepSet = new Set();
+  for (const t of allTansho) {
+    if (accum + t.amount <= tanshoCap) { keepSet.add(t); accum += t.amount; }
+  }
   for (const p of plans) {
     p.initialBets = p.initialBets.filter(b => b.type !== 'TANSYO' || keepSet.has(b));
   }
-  const tanshoSpent = [...keepSet].length * 100;
+  const tanshoSpent = accum;
 
   // ワイド: 残予算をレース重みで按分
   const wideRaces = plans.filter(p => p.initialBets.some(b => b.type === 'WIDE'));
