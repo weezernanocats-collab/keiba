@@ -88,15 +88,17 @@ interface RacePlan {
 }
 
 function computeRaceWeight(rn: number, name: string, grade: string): number {
+  // (2026-05-11更新) 中堅クラス(1勝/2勝)を厚く、オープン以上を薄く調整
   const is3yo = name.startsWith('3歳') && !name.includes('以上');
   const ageMult = is3yo ? 0.5 : 1.0;
   let g = 1.0;
-  if (grade === 'G1') g = 2.0;
-  else if (grade === 'G2') g = 1.7;
-  else if (grade === 'G3') g = 1.5;
-  else if (grade === 'リステッド' || grade === 'OP' || grade === 'オープン') g = 1.3;
-  else if (grade === '3勝クラス') g = 1.2;
-  else if (grade === '2勝クラス') g = 1.1;
+  if (grade === 'G1') g = 0.7;
+  else if (grade === 'G2') g = 0.8;
+  else if (grade === 'G3') g = 0.9;
+  else if (grade === 'リステッド' || grade === 'OP' || grade === 'オープン') g = 1.0;
+  else if (grade === '3勝クラス') g = 1.3;
+  else if (grade === '2勝クラス') g = 1.5;
+  else if (grade === '1勝クラス') g = 1.4;
   return rn * ageMult * g;
 }
 

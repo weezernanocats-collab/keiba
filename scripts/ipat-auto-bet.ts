@@ -114,16 +114,18 @@ interface Bet {
 }
 
 // 3歳限定 & グレードからレース重みを計算
+// (2026-05-11更新) 中堅クラス(1勝/2勝)を厚く、オープン以上を薄く調整
 function computeRaceWeight(raceNumber: number, name: string, grade: string): number {
   const is3yoOnly = name.startsWith('3歳') && !name.includes('以上');
   const ageMult = is3yoOnly ? 0.5 : 1.0;
   let gradeMult = 1.0;
-  if (grade === 'G1') gradeMult = 2.0;
-  else if (grade === 'G2') gradeMult = 1.7;
-  else if (grade === 'G3') gradeMult = 1.5;
-  else if (grade === 'リステッド' || grade === 'OP' || grade === 'オープン') gradeMult = 1.3;
-  else if (grade === '3勝クラス') gradeMult = 1.2;
-  else if (grade === '2勝クラス') gradeMult = 1.1;
+  if (grade === 'G1') gradeMult = 0.7;
+  else if (grade === 'G2') gradeMult = 0.8;
+  else if (grade === 'G3') gradeMult = 0.9;
+  else if (grade === 'リステッド' || grade === 'OP' || grade === 'オープン') gradeMult = 1.0;
+  else if (grade === '3勝クラス') gradeMult = 1.3;
+  else if (grade === '2勝クラス') gradeMult = 1.5;
+  else if (grade === '1勝クラス') gradeMult = 1.4;
   return raceNumber * ageMult * gradeMult;
 }
 
