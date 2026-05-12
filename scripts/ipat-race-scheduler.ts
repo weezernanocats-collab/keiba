@@ -513,15 +513,16 @@ async function processBet(plan: RacePlan) {
 }
 
 async function processBaseline(plan: RacePlan) {
+  // 中間スナップショット (時系列観察、フィルタには使わない)
   try {
     const odds = await fetchCurrentOdds(plan.raceId);
     if (odds.size > 0) {
       await saveOddsSnapshot(plan.raceId, odds);
       plan.status = 'baselined';
-      log(`  📷 ${plan.venueName}${plan.raceNumber}R baseline記録 (${odds.size}頭)`);
+      log(`  📷 ${plan.venueName}${plan.raceNumber}R 中間snapshot (${odds.size}頭)`);
     }
   } catch (e) {
-    log(`  ⚠ ${plan.venueName}${plan.raceNumber}R baseline失敗: ${(e as Error).message}`);
+    log(`  ⚠ ${plan.venueName}${plan.raceNumber}R snapshot失敗: ${(e as Error).message}`);
   }
 }
 
@@ -552,6 +553,19 @@ async function main() {
     log(`  ${tStr} ${p.venueName}${p.raceNumber}R w=${p.weight.toFixed(1)} ${wideStr} ${tansStr}`);
   }
 
+  // ── 起動時: 全レースの morning baseline odds を取得 ──
+  log(`\n=== Morning baseline 取得 (全${plans.length}レース) ===`);
+  let baselineSuccess = 0;
+  for (const p of plans) {
+    const odds = await fetchCurrentOdds(p.raceId);
+    if (odds.size > 0) {
+      await saveOddsSnapshot(p.raceId, odds);
+      baselineSuccess++;
+    }
+    await new Promise(r => setTimeout(r, 800)); // netkeiba負荷分散
+  }
+  log(`[baseline] ${baselineSuccess}/${plans.length} 取得成功 (これがフィルタの基準値)`);
+
   // ポーリングループ
   log('\n=== ポーリング開始 ===');
   while (true) {
@@ -571,7 +585,7 @@ async function main() {
       if (p.status !== 'pending' && p.status !== 'baselined') continue;
       const minsTo = (p.raceTime.getTime() - now.getTime()) / 60000;
 
-      // -20分: baseline取得 (まだ取ってなければ)
+      // -20分: 中間スナップショット (時系列観察用、フィルタは朝baseline使用)
       if (p.status === 'pending' && minsTo <= minutesBeforeBaseline && minsTo > minutesBeforeBet + 1) {
         await processBaseline(p);
       }
