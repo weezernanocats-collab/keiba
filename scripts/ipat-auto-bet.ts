@@ -113,19 +113,42 @@ interface Bet {
   weight?: number;     // レース重み（予算配分用）
 }
 
-// 3歳限定 & グレードからレース重みを計算
-// (2026-05-11更新) 中堅クラス(1勝/2勝)を厚く、オープン以上を薄く調整
+// 戦略設定ファイル読み込み (config/strategy-config.json)
+interface StrategyConfig {
+  dailyBudget: number;
+  tanshoCap: number;
+  matchScoreThreshold: number;
+  scoreWeight: { highThreshold: number; highAmount: number; lowAmount: number };
+  oddsRiseExcludeThreshold: number;
+  raceWeight: {
+    ageMult_3yoOnly: number;
+    ageMult_default: number;
+    gradeMult: Record<string, number>;
+  };
+}
+function loadStrategyConfig(): StrategyConfig {
+  const path = 'config/strategy-config.json';
+  if (existsSync(path)) {
+    return JSON.parse(readFileSync(path, 'utf-8'));
+  }
+  return {
+    dailyBudget: 10000,
+    tanshoCap: 0.5,
+    matchScoreThreshold: 55,
+    scoreWeight: { highThreshold: 65, highAmount: 200, lowAmount: 100 },
+    oddsRiseExcludeThreshold: 0.3,
+    raceWeight: {
+      ageMult_3yoOnly: 0.5, ageMult_default: 1.0,
+      gradeMult: { G1: 0.7, G2: 0.8, G3: 0.9, 'リステッド': 1.0, OP: 1.0, 'オープン': 1.0, '3勝クラス': 1.3, '2勝クラス': 1.5, '1勝クラス': 1.4, default: 1.0 },
+    },
+  };
+}
+const strategyConfig = loadStrategyConfig();
+
 function computeRaceWeight(raceNumber: number, name: string, grade: string): number {
   const is3yoOnly = name.startsWith('3歳') && !name.includes('以上');
-  const ageMult = is3yoOnly ? 0.5 : 1.0;
-  let gradeMult = 1.0;
-  if (grade === 'G1') gradeMult = 0.7;
-  else if (grade === 'G2') gradeMult = 0.8;
-  else if (grade === 'G3') gradeMult = 0.9;
-  else if (grade === 'リステッド' || grade === 'OP' || grade === 'オープン') gradeMult = 1.0;
-  else if (grade === '3勝クラス') gradeMult = 1.3;
-  else if (grade === '2勝クラス') gradeMult = 1.5;
-  else if (grade === '1勝クラス') gradeMult = 1.4;
+  const ageMult = is3yoOnly ? strategyConfig.raceWeight.ageMult_3yoOnly : strategyConfig.raceWeight.ageMult_default;
+  const gradeMult = strategyConfig.raceWeight.gradeMult[grade] ?? strategyConfig.raceWeight.gradeMult.default;
   return raceNumber * ageMult * gradeMult;
 }
 
@@ -200,7 +223,7 @@ async function loadBetsFromDb(): Promise<Bet[]> {
 
     // ── ワイドボックス: しょーさん候補(matchScore>=55) + 1〜3人気 ──
     const allCandidates = (sp.candidates || []) as Array<{ horseNumber: number; matchScore: number; theory?: number }>;
-    const qualified = allCandidates.filter(c => (c.matchScore || 0) >= 55);
+    const qualified = allCandidates.filter(c => (c.matchScore || 0) >= strategyConfig.matchScoreThreshold);
     if (qualified.length > 0) {
       const top3Rows = await db.execute({
         sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT 3`,
@@ -237,7 +260,7 @@ async function loadBetsFromDb(): Promise<Bet[]> {
     const tanshoTargets = restCandidates.filter(c => c.theory === 1);
     for (const c of tanshoTargets) {
       const score = c.matchScore || 0;
-      const tanshoAmount = score >= 65 ? 200 : 100;
+      const tanshoAmount = score >= strategyConfig.scoreWeight.highThreshold ? strategyConfig.scoreWeight.highAmount : strategyConfig.scoreWeight.lowAmount;
       bets.push({
         date,
         venue: venueCode,
@@ -315,7 +338,7 @@ async function main() {
   //   - 単勝: 休養F+理論1候補に100円ずつ。予算上限は budget*0.5
   //   - ワイド: 残予算をレース重み×ペア数で按分(100円単位)
   if (budget > 0) {
-    const tanshoCap = Math.floor(budget * 0.5); // 単勝に最大50%まで
+    const tanshoCap = Math.floor(budget * strategyConfig.tanshoCap); // 単勝最大配分(config)
     const tanshoBets = bets.filter(b => b.betType === 'TANSYO');
     const wideBets = bets.filter(b => b.betType === 'WIDE');
 

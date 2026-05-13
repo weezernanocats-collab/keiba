@@ -67,29 +67,43 @@ jobs:
       - name: Train No-Odds CatBoost model
         run: python scripts/train_catboost_no_odds.py
 
+      # ---- 戦略パラメータ週次チューニング ----
+      - name: Weekly strategy tune
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+        run: |
+          echo "TURSO_DATABASE_URL=${TURSO_DATABASE_URL}" > .env.local
+          echo "TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN}" >> .env.local
+          echo "SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}" >> .env.local
+          echo "SLACK_CHANNEL_ID=${SLACK_CHANNEL_ID}" >> .env.local
+          npx tsx scripts/weekly-strategy-tune.ts
+
       # ---- コミット & プッシュ ----
       - name: Clean up .env.local
         run: rm -f .env.local
 
-      - name: Check for model changes
+      - name: Check for changes
         id: check
         run: |
-          if git diff --quiet model/; then
+          if git diff --quiet model/ config/; then
             echo "changed=false" >> $GITHUB_OUTPUT
-            echo "No model changes detected"
+            echo "No changes detected"
           else
             echo "changed=true" >> $GITHUB_OUTPUT
-            echo "Model files updated:"
-            git diff --stat model/
+            echo "Files updated:"
+            git diff --stat model/ config/
           fi
 
-      - name: Commit and push models
+      - name: Commit and push
         if: steps.check.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add model/
-          git commit -m "chore: 週次モデル再学習 XGBoost+CatBoost ($(date -u +%Y-%m-%d))"
+          git add model/ config/
+          git commit -m "chore: 週次モデル再学習 + 戦略チューニング ($(date -u +%Y-%m-%d))"
           git push
 
   # Notion更新は update-notion.yml の daily schedule (cron '0 9 * * *' = 18:00 JST) が

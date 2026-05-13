@@ -30,11 +30,44 @@ const args = process.argv.slice(2);
 const getArg = (n: string) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
 const dryRun = args.includes('--dry-run');
 const headless = !args.includes('--headed');
-const budget = parseInt(getArg('--budget') || '10000');
-const riseThreshold = parseFloat(getArg('--filter-odds-rise') || '0.3');
 const minutesBeforeBet = parseInt(getArg('--minutes-before') || '7');
 const minutesBeforeBaseline = parseInt(getArg('--baseline-before') || '20');
-const SCORE_THRESHOLD = 55;
+
+// 設定ファイル読み込み (config/strategy-config.json)
+interface StrategyConfig {
+  dailyBudget: number;
+  tanshoCap: number;
+  matchScoreThreshold: number;
+  scoreWeight: { highThreshold: number; highAmount: number; lowAmount: number };
+  oddsRiseExcludeThreshold: number;
+  raceWeight: {
+    ageMult_3yoOnly: number;
+    ageMult_default: number;
+    gradeMult: Record<string, number>;
+  };
+}
+function loadConfig(): StrategyConfig {
+  const path = 'config/strategy-config.json';
+  if (existsSync(path)) {
+    return JSON.parse(readFileSync(path, 'utf-8'));
+  }
+  // フォールバック (config無しでも動く)
+  return {
+    dailyBudget: 10000,
+    tanshoCap: 0.5,
+    matchScoreThreshold: 55,
+    scoreWeight: { highThreshold: 65, highAmount: 200, lowAmount: 100 },
+    oddsRiseExcludeThreshold: 0.3,
+    raceWeight: {
+      ageMult_3yoOnly: 0.5, ageMult_default: 1.0,
+      gradeMult: { G1: 0.7, G2: 0.8, G3: 0.9, 'リステッド': 1.0, OP: 1.0, 'オープン': 1.0, '3勝クラス': 1.3, '2勝クラス': 1.5, '1勝クラス': 1.4, default: 1.0 },
+    },
+  };
+}
+const config = loadConfig();
+const budget = parseInt(getArg('--budget') || String(config.dailyBudget));
+const riseThreshold = parseFloat(getArg('--filter-odds-rise') || String(config.oddsRiseExcludeThreshold));
+const SCORE_THRESHOLD = config.matchScoreThreshold;
 
 const NETKEIBA_BASE = 'https://race.netkeiba.com';
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36';
@@ -88,17 +121,9 @@ interface RacePlan {
 }
 
 function computeRaceWeight(rn: number, name: string, grade: string): number {
-  // (2026-05-11更新) 中堅クラス(1勝/2勝)を厚く、オープン以上を薄く調整
   const is3yo = name.startsWith('3歳') && !name.includes('以上');
-  const ageMult = is3yo ? 0.5 : 1.0;
-  let g = 1.0;
-  if (grade === 'G1') g = 0.7;
-  else if (grade === 'G2') g = 0.8;
-  else if (grade === 'G3') g = 0.9;
-  else if (grade === 'リステッド' || grade === 'OP' || grade === 'オープン') g = 1.0;
-  else if (grade === '3勝クラス') g = 1.3;
-  else if (grade === '2勝クラス') g = 1.5;
-  else if (grade === '1勝クラス') g = 1.4;
+  const ageMult = is3yo ? config.raceWeight.ageMult_3yoOnly : config.raceWeight.ageMult_default;
+  const g = config.raceWeight.gradeMult[grade] ?? config.raceWeight.gradeMult.default;
   return rn * ageMult * g;
 }
 
@@ -157,11 +182,11 @@ async function buildDayPlans(): Promise<RacePlan[]> {
       }
     }
 
-    // ── 単勝(休養F+理論1) — score別: >=65は200円, <65は100円 ──
+    // ── 単勝(休養F+理論1) — score別 (config) ──
     const restT1 = (sp.restFilteredCandidates || []).filter((c: any) => c.theory === 1);
     for (const c of restT1) {
       const score = (c.matchScore || 0);
-      const tAmount = score >= 65 ? 200 : 100;
+      const tAmount = score >= config.scoreWeight.highThreshold ? config.scoreWeight.highAmount : config.scoreWeight.lowAmount;
       initialBets.push({ type: 'TANSYO', horses: [Number(c.horseNumber)], amount: tAmount, tag: `tansho:休養F理論1(score=${score})` });
     }
 
@@ -181,9 +206,9 @@ async function buildDayPlans(): Promise<RacePlan[]> {
 }
 
 function allocateBudget(plans: RacePlan[]) {
-  // 単勝: score別(100/200円) × 件数。上限 budget*0.5
+  // 単勝: score別 × 件数。上限 budget*tanshoCap
   const allTansho = plans.flatMap(p => p.initialBets.filter(b => b.type === 'TANSYO'));
-  const tanshoCap = Math.floor(budget * 0.5);
+  const tanshoCap = Math.floor(budget * config.tanshoCap);
   let accum = 0;
   const keepSet = new Set();
   for (const t of allTansho) {
