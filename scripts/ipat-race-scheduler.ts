@@ -386,16 +386,40 @@ async function ensureIpatLogin(): Promise<Page> {
 
 async function clickHorseLabel(page: Page, horseNum: number) {
   const padded = String(horseNum).padStart(2, '0');
-  const label = page.locator(`label[for$='_${padded}']`).first();
-  if (await label.isVisible({ timeout: 500 }).catch(() => false)) {
-    await label.click();
-    return;
+  // DOM render を待つ
+  await page.waitForLoadState('domcontentloaded').catch(() => {});
+  await new Promise(r => setTimeout(r, 400));
+
+  // 1. for属性で直接検索 (例: label[for='no01'], label[for='no1']) — ipat-auto-bet.tsと同じ実装
+  for (const forVal of [`no${padded}`, `no${horseNum}`]) {
+    const label = page.locator(`label[for='${forVal}']`);
+    if (await label.isVisible({ timeout: 800 }).catch(() => false)) {
+      try { await label.click({ timeout: 3000 }); return; } catch {}
+    }
   }
-  const checkbox = page.locator(`input[id$='_${padded}']`).first();
-  if (await checkbox.isVisible({ timeout: 500 }).catch(() => false)) {
-    await checkbox.click();
-    return;
+  // 2. label[for^='no'] テキストマッチ
+  const labels = page.locator("label[for^='no']");
+  const count = await labels.count().catch(() => 0);
+  for (let i = 0; i < count; i++) {
+    const text = (await labels.nth(i).textContent().catch(() => ''))?.trim();
+    if (text === String(horseNum) || text === padded) {
+      try { await labels.nth(i).click({ timeout: 3000 }); return; } catch {}
+    }
   }
+  // 3. checkbox value 検索 (フォールバック)
+  const checkbox = page.locator(`input[type='checkbox'][value='${padded}'], input[type='checkbox'][value='${horseNum}']`).first();
+  if (await checkbox.isVisible({ timeout: 800 }).catch(() => false)) {
+    try { await checkbox.click({ timeout: 3000 }); return; } catch {}
+  }
+  // 失敗時: スクショ保存
+  try {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const path = `/tmp/ipat_click_fail_${horseNum}_${ts}.png`;
+    await page.screenshot({ path, fullPage: false });
+    log(`  📸 失敗スクショ: ${path}`);
+    const labelFors = await page.locator('label[for]').evaluateAll(els => (els as HTMLLabelElement[]).map(e => e.htmlFor)).catch(() => []);
+    log(`  DOM labels(for): ${labelFors.slice(0, 30).join(', ')}`);
+  } catch {}
   throw new Error(`馬番 ${horseNum} のラベルが見つかりません`);
 }
 
@@ -459,7 +483,7 @@ async function submitBetsForRace(plan: RacePlan, finalBets: BetItem[]) {
     const typeSelect = page.locator("select[ng-model*='oSelectType']").first();
     await typeSelect.waitFor({ timeout: 5000 });
     await typeSelect.selectOption({ label });
-    await wait(800);
+    await wait(1200);  // 券種切替後のDOM再描画を待つ
 
     if (b.type === 'TANSYO') {
       await clickHorseLabel(page, b.horses[0]);
@@ -468,8 +492,22 @@ async function submitBetsForRace(plan: RacePlan, finalBets: BetItem[]) {
       const methodSelect = page.locator("select[ng-model*='oSelectMethod']").first();
       await methodSelect.waitFor({ timeout: 5000 });
       await methodSelect.selectOption({ label: 'ボックス' });
-      await wait(800);
-      for (const h of b.horses) { await clickHorseLabel(page, h); await wait(300); }
+      await wait(1500);  // ボックスモード切替後のDOM再描画を待つ
+      // 最初の馬checkboxが表示されるまで明示的に待機 (label[for='no...'] パターン)
+      const firstPadded = String(b.horses[0]).padStart(2, '0');
+      const firstHorseSelector = [
+        `label[for='no${firstPadded}']`,
+        `label[for='no${b.horses[0]}']`,
+        `input[type='checkbox'][value='${firstPadded}']`,
+      ];
+      let waited = false;
+      for (const s of firstHorseSelector) {
+        if (await page.locator(s).first().isVisible({ timeout: 2500 }).catch(() => false)) {
+          waited = true; break;
+        }
+      }
+      if (!waited) log(`  ⚠ 最初の馬checkbox表示せず、続行 (馬番${b.horses[0]})`);
+      for (const h of b.horses) { await clickHorseLabel(page, h); await wait(400); }
       await wait(500);
     }
 
