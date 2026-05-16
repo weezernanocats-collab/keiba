@@ -17,6 +17,16 @@
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { chromium, type Browser, type Page } from 'playwright';
 import { createClient, type Client } from '@libsql/client';
+import {
+  loginToIpat,
+  navigateToBetBasic,
+  selectVenueAndRace,
+  placeBet as placeBetIpat,
+  confirmPurchase,
+  calcTotalAmount,
+  type IpatBet,
+  type IpatCredentials,
+} from '../src/lib/ipat-client';
 
 // .env.local 読み込み
 if (existsSync('.env.local')) {
@@ -340,7 +350,6 @@ async function ensureIpatLogin(): Promise<Page> {
   if (ipatPage && !ipatPage.isClosed()) return ipatPage;
 
   if (dryRun) {
-    // dry-run時はブラウザ起動しない
     throw new Error('dry-run mode: not opening browser');
   }
 
@@ -348,79 +357,18 @@ async function ensureIpatLogin(): Promise<Page> {
   ipatBrowser = await chromium.launch({ headless, slowMo: headless ? 0 : 200 });
   const context = await ipatBrowser.newContext({ viewport: { width: 1280, height: 900 } });
   ipatPage = await context.newPage();
-  const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-  await ipatPage.goto('https://www.ipat.jra.go.jp/index.cgi');
-  await ipatPage.waitForLoadState('domcontentloaded');
-  await wait(2000);
-
-  const inetInput = ipatPage.locator("input[name^='inetid']").first();
-  await inetInput.waitFor({ timeout: 10000 });
-  await inetInput.fill(process.env.IPAT_INET_ID || '');
-  await wait(500);
-  await ipatPage.locator("a[onclick^='javascript'], a[onclick^='JavaScript']").first().click();
-  await wait(3000);
-
-  const pwInputs = ipatPage.locator("input[name^='p']");
-  await pwInputs.first().waitFor({ timeout: 10000 });
-  await pwInputs.first().fill(process.env.IPAT_PASSWORD || '');
-  await wait(300);
-  const iInputs = ipatPage.locator("input[name^='i']");
-  await iInputs.nth(2).fill(process.env.IPAT_MEMBER_NO || '');
-  await wait(300);
-  const rInputs = ipatPage.locator("input[name^='r']");
-  await rInputs.nth(1).fill(process.env.IPAT_PARS_NO || '');
-  await wait(300);
-  await ipatPage.locator("a[onclick^='JavaScript'], a[onclick^='javascript']").first().click();
-  await wait(3000);
+  const creds: IpatCredentials = {
+    inetId: process.env.IPAT_INET_ID || '',
+    memberNo: process.env.IPAT_MEMBER_NO || '',
+    password: process.env.IPAT_PASSWORD || '',
+    parsNo: process.env.IPAT_PARS_NO || '',
+  };
+  await loginToIpat(ipatPage, creds);
   log('[ipat] ログイン完了');
-
-  // 通常投票画面
-  const betBasicBtn = ipatPage.locator("button[href^='#!/bet/basic'], a[href^='#!/bet/basic']").first();
-  await betBasicBtn.waitFor({ timeout: 10000 });
-  await betBasicBtn.click();
-  await wait(2000);
+  await navigateToBetBasic(ipatPage);
 
   return ipatPage;
-}
-
-async function clickHorseLabel(page: Page, horseNum: number) {
-  const padded = String(horseNum).padStart(2, '0');
-  // DOM render を待つ
-  await page.waitForLoadState('domcontentloaded').catch(() => {});
-  await new Promise(r => setTimeout(r, 400));
-
-  // 1. for属性で直接検索 (例: label[for='no01'], label[for='no1']) — ipat-auto-bet.tsと同じ実装
-  for (const forVal of [`no${padded}`, `no${horseNum}`]) {
-    const label = page.locator(`label[for='${forVal}']`);
-    if (await label.isVisible({ timeout: 800 }).catch(() => false)) {
-      try { await label.click({ timeout: 3000 }); return; } catch {}
-    }
-  }
-  // 2. label[for^='no'] テキストマッチ
-  const labels = page.locator("label[for^='no']");
-  const count = await labels.count().catch(() => 0);
-  for (let i = 0; i < count; i++) {
-    const text = (await labels.nth(i).textContent().catch(() => ''))?.trim();
-    if (text === String(horseNum) || text === padded) {
-      try { await labels.nth(i).click({ timeout: 3000 }); return; } catch {}
-    }
-  }
-  // 3. checkbox value 検索 (フォールバック)
-  const checkbox = page.locator(`input[type='checkbox'][value='${padded}'], input[type='checkbox'][value='${horseNum}']`).first();
-  if (await checkbox.isVisible({ timeout: 800 }).catch(() => false)) {
-    try { await checkbox.click({ timeout: 3000 }); return; } catch {}
-  }
-  // 失敗時: スクショ保存
-  try {
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const path = `/tmp/ipat_click_fail_${horseNum}_${ts}.png`;
-    await page.screenshot({ path, fullPage: false });
-    log(`  📸 失敗スクショ: ${path}`);
-    const labelFors = await page.locator('label[for]').evaluateAll(els => (els as HTMLLabelElement[]).map(e => e.htmlFor)).catch(() => []);
-    log(`  DOM labels(for): ${labelFors.slice(0, 30).join(', ')}`);
-  } catch {}
-  throw new Error(`馬番 ${horseNum} のラベルが見つかりません`);
 }
 
 async function submitBetsForRace(plan: RacePlan, finalBets: BetItem[]) {
@@ -433,170 +381,30 @@ async function submitBetsForRace(plan: RacePlan, finalBets: BetItem[]) {
     return;
   }
   const page = await ensureIpatLogin();
-  const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
 
   log(`[ipat] ${plan.venueName}${plan.raceNumber}R に移動...`);
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await wait(500);
+  // 会場・レース選択
+  await selectVenueAndRace(page, plan.venueName, plan.raceNumber, log);
 
-  // ── 会場・レース選択 (ipat-auto-bet.ts と同じロジック) ──
-  const courseBtnVisible = await page.locator("button[ng-click*='selectCourse']").first()
-    .isVisible({ timeout: 1000 }).catch(() => false);
+  // IpatBet 形式に変換 (scheduler の BetItem と ipat-client の IpatBet は型互換)
+  const ipatBets: IpatBet[] = finalBets.map(b => ({
+    type: b.type as IpatBet['type'],
+    horses: b.horses,
+    amount: b.amount,
+  }));
 
-  if (courseBtnVisible) {
-    // ボタンモード (初回表示時)
-    const venueButtons = page.locator("button[ng-click*='selectCourse']");
-    const venueCount = await venueButtons.count();
-    let venueFound = false;
-    for (let i = 0; i < venueCount; i++) {
-      const t = await venueButtons.nth(i).textContent().catch(() => '');
-      if (t?.includes(plan.venueName)) {
-        await venueButtons.nth(i).click();
-        venueFound = true;
-        break;
-      }
-    }
-    if (!venueFound) {
-      throw new Error(`${plan.venueName} ボタンが見つかりません`);
-    }
-    await wait(1500);
-
-    const raceButtons = page.locator("button[ng-click*='selectRace']");
-    await wait(1000);
-    const raceCount = await raceButtons.count().catch(() => 0);
-    let raceFound = false;
-    const racePattern = `${plan.raceNumber}R`;
-    for (let i = 0; i < raceCount; i++) {
-      const t = (await raceButtons.nth(i).textContent().catch(() => ''))?.trim();
-      if (t?.startsWith(racePattern)) {
-        await raceButtons.nth(i).click();
-        raceFound = true;
-        break;
-      }
-    }
-    if (!raceFound) {
-      await page.screenshot({ path: `/tmp/ipat_race_notfound_${plan.venueName}${plan.raceNumber}.png` }).catch(() => {});
-      throw new Error(`${plan.raceNumber}R ボタンが見つかりません`);
-    }
-  } else {
-    // プルダウンモード (セット後)
-    const courseSelect = page.locator("select[ng-model='vm.cSelectedCourseId']");
-    await courseSelect.waitFor({ timeout: 5000 });
-    const courseOptions = await courseSelect.locator('option').all();
-    let courseSelected = false;
-    for (const opt of courseOptions) {
-      const t = await opt.textContent().catch(() => '');
-      if (t?.includes(plan.venueName)) {
-        const v = await opt.getAttribute('value');
-        if (v) {
-          await courseSelect.selectOption(v);
-          courseSelected = true;
-          break;
-        }
-      }
-    }
-    if (!courseSelected) throw new Error(`${plan.venueName} プルダウン option なし`);
-    await wait(1000);
-
-    const raceSelect = page.locator("select[ng-model='vm.oSelectedJgRn']");
-    await raceSelect.waitFor({ timeout: 5000 });
-    const raceOptions = await raceSelect.locator('option').all();
-    let raceSelected = false;
-    const racePattern = `${plan.raceNumber}R`;
-    for (const opt of raceOptions) {
-      const t = (await opt.textContent().catch(() => ''))?.trim();
-      if (t?.startsWith(racePattern)) {
-        const v = await opt.getAttribute('value');
-        if (v) {
-          await raceSelect.selectOption(v);
-          raceSelected = true;
-          break;
-        }
-      }
-    }
-    if (!raceSelected) {
-      await page.screenshot({ path: `/tmp/ipat_race_notfound_${plan.venueName}${plan.raceNumber}.png` }).catch(() => {});
-      throw new Error(`${plan.raceNumber}R プルダウン option なし`);
-    }
-  }
-  log(`  会場 ${plan.venueName} / レース ${plan.raceNumber}R 選択`);
-  await wait(1500);
-
-  // ── 各買い目を投入 (ipat-auto-bet.ts と同じロジック) ──
+  // 各買い目をセット
   let setCount = 0;
-  for (const b of finalBets) {
-    const label = b.type === 'WIDE' ? 'ワイド' : '単勝';
-    log(`  ${label} [${b.horses.join(',')}] ${b.amount}円 をセット中...`);
-
-    const typeSelect = page.locator("select[ng-model*='oSelectType']").first();
-    await typeSelect.waitFor({ timeout: 5000 });
-    await typeSelect.selectOption({ label });
-    await wait(800);
-
-    if (b.type === 'TANSYO') {
-      await clickHorseLabel(page, b.horses[0]);
-      await wait(500);
-    } else {
-      const methodSelect = page.locator("select[ng-model*='oSelectMethod']").first();
-      await methodSelect.waitFor({ timeout: 5000 });
-      await methodSelect.selectOption({ label: 'ボックス' });
-      await wait(800);
-      for (const h of b.horses) { await clickHorseLabel(page, h); await wait(300); }
-      await wait(500);
-    }
-
-    const amountInput = page.locator("input[ng-model*='nUnit']").first();
-    await amountInput.waitFor({ timeout: 5000 });
-    await amountInput.fill(String(b.amount / 100));
-    await wait(300);
-
-    const setBtn = page.locator("button[ng-click*='onSet()']").first();
-    await setBtn.waitFor({ timeout: 5000 });
-    await setBtn.click();
-    await wait(1500);
+  for (const b of ipatBets) {
+    await placeBetIpat(page, b, log);
     setCount++;
-    log(`    ✓ セット完了 (${setCount}/${finalBets.length})`);
+    log(`    ✓ セット完了 (${setCount}/${ipatBets.length})`);
   }
 
-  // ── 投票一覧 → 合計入力 → 購入確定 (ipat-auto-bet.ts と同じ) ──
-  log(`  全${setCount}点セット完了 → 投票一覧へ`);
-  const showListBtn = page.locator("button[ng-click*='onShowBetList()']").first();
-  await showListBtn.waitFor({ timeout: 5000 });
-  await showListBtn.click();
-  await wait(2000);
-
-  // 合計金額計算
-  let totalAmount = 0;
-  for (const b of finalBets) {
-    if (b.type === 'WIDE') {
-      const n = b.horses.length;
-      const pairs = Math.max(1, n * (n - 1) / 2);
-      totalAmount += b.amount * pairs;
-    } else {
-      totalAmount += b.amount;
-    }
-  }
-
-  log(`  投票一覧: 合計 ${totalAmount.toLocaleString()}円`);
-
-  // 合計金額入力 → 購入確定
-  log(`  投票確定処理...`);
-  const totalInput = page.locator("input[ng-model*='cAmountTotal']").first();
-  await totalInput.waitFor({ timeout: 5000 });
-  await totalInput.fill(String(totalAmount));
-  await wait(500);
-
-  const purchaseBtn = page.locator("button[ng-click*='clickPurchase()']").first();
-  await purchaseBtn.click();
-  await wait(2000);
-
-  // 最終確認ダイアログ
-  const confirmBtn = page.locator("button[ng-click*='dismiss()']").nth(1);
-  if (await confirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await confirmBtn.click();
-    await wait(2000);
-  }
-
+  // 投票一覧 → 合計入力 → 購入確定
+  const totalAmount = calcTotalAmount(ipatBets);
+  log(`  全${setCount}点セット完了 → 投票一覧へ (合計${totalAmount.toLocaleString()}円)`);
+  await confirmPurchase(page, totalAmount, log);
   log(`  ✓ ${plan.venueName}${plan.raceNumber}R 投票完了 (${setCount}点 ${totalAmount.toLocaleString()}円)`);
 }
 
