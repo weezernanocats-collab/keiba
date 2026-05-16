@@ -439,43 +439,91 @@ async function submitBetsForRace(plan: RacePlan, finalBets: BetItem[]) {
   await page.evaluate(() => window.scrollTo(0, 0));
   await wait(500);
 
-  // 会場・レース選択 (簡略版: 既にbasicモードに居る前提)
-  const courseSelectVisible = await page.locator("select[ng-model='vm.cSelectedCourseId']").isVisible({ timeout: 1000 }).catch(() => false);
-  if (courseSelectVisible) {
-    // プルダウンモード
+  // ── 会場・レース選択 (ipat-auto-bet.ts と同じロジック) ──
+  const courseBtnVisible = await page.locator("button[ng-click*='selectCourse']").first()
+    .isVisible({ timeout: 1000 }).catch(() => false);
+
+  if (courseBtnVisible) {
+    // ボタンモード (初回表示時)
+    const venueButtons = page.locator("button[ng-click*='selectCourse']");
+    const venueCount = await venueButtons.count();
+    let venueFound = false;
+    for (let i = 0; i < venueCount; i++) {
+      const t = await venueButtons.nth(i).textContent().catch(() => '');
+      if (t?.includes(plan.venueName)) {
+        await venueButtons.nth(i).click();
+        venueFound = true;
+        break;
+      }
+    }
+    if (!venueFound) {
+      throw new Error(`${plan.venueName} ボタンが見つかりません`);
+    }
+    await wait(1500);
+
+    const raceButtons = page.locator("button[ng-click*='selectRace']");
+    await wait(1000);
+    const raceCount = await raceButtons.count().catch(() => 0);
+    let raceFound = false;
+    const racePattern = `${plan.raceNumber}R`;
+    for (let i = 0; i < raceCount; i++) {
+      const t = (await raceButtons.nth(i).textContent().catch(() => ''))?.trim();
+      if (t?.startsWith(racePattern)) {
+        await raceButtons.nth(i).click();
+        raceFound = true;
+        break;
+      }
+    }
+    if (!raceFound) {
+      await page.screenshot({ path: `/tmp/ipat_race_notfound_${plan.venueName}${plan.raceNumber}.png` }).catch(() => {});
+      throw new Error(`${plan.raceNumber}R ボタンが見つかりません`);
+    }
+  } else {
+    // プルダウンモード (セット後)
     const courseSelect = page.locator("select[ng-model='vm.cSelectedCourseId']");
-    const options = await courseSelect.locator('option').all();
-    for (const opt of options) {
+    await courseSelect.waitFor({ timeout: 5000 });
+    const courseOptions = await courseSelect.locator('option').all();
+    let courseSelected = false;
+    for (const opt of courseOptions) {
       const t = await opt.textContent().catch(() => '');
       if (t?.includes(plan.venueName)) {
         const v = await opt.getAttribute('value');
-        if (v) { await courseSelect.selectOption(v); break; }
+        if (v) {
+          await courseSelect.selectOption(v);
+          courseSelected = true;
+          break;
+        }
       }
     }
+    if (!courseSelected) throw new Error(`${plan.venueName} プルダウン option なし`);
     await wait(1000);
-    const raceSelect = page.locator("select[ng-model='vm.cSelectedRaceNumber']");
-    await raceSelect.selectOption(String(plan.raceNumber));
-    await wait(1500);
-  } else {
-    // ボタンモード (初回)
-    const venueBtns = page.locator("button[ng-click*='selectCourse']");
-    const vc = await venueBtns.count();
-    for (let i = 0; i < vc; i++) {
-      const t = await venueBtns.nth(i).textContent().catch(() => '');
-      if (t?.includes(plan.venueName)) { await venueBtns.nth(i).click(); break; }
-    }
-    await wait(1500);
-    const raceBtns = page.locator("button[ng-click*='selectRace']");
-    const rc = await raceBtns.count().catch(() => 0);
-    const pattern = `${plan.raceNumber}R`;
-    for (let i = 0; i < rc; i++) {
-      const t = (await raceBtns.nth(i).textContent().catch(() => ''))?.trim();
-      if (t?.startsWith(pattern)) { await raceBtns.nth(i).click(); break; }
-    }
-    await wait(1500);
-  }
 
-  // 各買い目を投入
+    const raceSelect = page.locator("select[ng-model='vm.oSelectedJgRn']");
+    await raceSelect.waitFor({ timeout: 5000 });
+    const raceOptions = await raceSelect.locator('option').all();
+    let raceSelected = false;
+    const racePattern = `${plan.raceNumber}R`;
+    for (const opt of raceOptions) {
+      const t = (await opt.textContent().catch(() => ''))?.trim();
+      if (t?.startsWith(racePattern)) {
+        const v = await opt.getAttribute('value');
+        if (v) {
+          await raceSelect.selectOption(v);
+          raceSelected = true;
+          break;
+        }
+      }
+    }
+    if (!raceSelected) {
+      await page.screenshot({ path: `/tmp/ipat_race_notfound_${plan.venueName}${plan.raceNumber}.png` }).catch(() => {});
+      throw new Error(`${plan.raceNumber}R プルダウン option なし`);
+    }
+  }
+  log(`  会場 ${plan.venueName} / レース ${plan.raceNumber}R 選択`);
+  await wait(1500);
+
+  // ── 各買い目を投入 (ipat-auto-bet.ts と同じロジック) ──
+  let setCount = 0;
   for (const b of finalBets) {
     const label = b.type === 'WIDE' ? 'ワイド' : '単勝';
     log(`  ${label} [${b.horses.join(',')}] ${b.amount}円 をセット中...`);
@@ -483,7 +531,7 @@ async function submitBetsForRace(plan: RacePlan, finalBets: BetItem[]) {
     const typeSelect = page.locator("select[ng-model*='oSelectType']").first();
     await typeSelect.waitFor({ timeout: 5000 });
     await typeSelect.selectOption({ label });
-    await wait(1200);  // 券種切替後のDOM再描画を待つ
+    await wait(800);
 
     if (b.type === 'TANSYO') {
       await clickHorseLabel(page, b.horses[0]);
@@ -492,22 +540,8 @@ async function submitBetsForRace(plan: RacePlan, finalBets: BetItem[]) {
       const methodSelect = page.locator("select[ng-model*='oSelectMethod']").first();
       await methodSelect.waitFor({ timeout: 5000 });
       await methodSelect.selectOption({ label: 'ボックス' });
-      await wait(1500);  // ボックスモード切替後のDOM再描画を待つ
-      // 最初の馬checkboxが表示されるまで明示的に待機 (label[for='no...'] パターン)
-      const firstPadded = String(b.horses[0]).padStart(2, '0');
-      const firstHorseSelector = [
-        `label[for='no${firstPadded}']`,
-        `label[for='no${b.horses[0]}']`,
-        `input[type='checkbox'][value='${firstPadded}']`,
-      ];
-      let waited = false;
-      for (const s of firstHorseSelector) {
-        if (await page.locator(s).first().isVisible({ timeout: 2500 }).catch(() => false)) {
-          waited = true; break;
-        }
-      }
-      if (!waited) log(`  ⚠ 最初の馬checkbox表示せず、続行 (馬番${b.horses[0]})`);
-      for (const h of b.horses) { await clickHorseLabel(page, h); await wait(400); }
+      await wait(800);
+      for (const h of b.horses) { await clickHorseLabel(page, h); await wait(300); }
       await wait(500);
     }
 
@@ -520,31 +554,50 @@ async function submitBetsForRace(plan: RacePlan, finalBets: BetItem[]) {
     await setBtn.waitFor({ timeout: 5000 });
     await setBtn.click();
     await wait(1500);
+    setCount++;
+    log(`    ✓ セット完了 (${setCount}/${finalBets.length})`);
   }
 
-  // 投票一覧 → 確定
-  log('  投票確定処理...');
-  // 投票一覧ボタン (画面下部)
-  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-  await wait(500);
-  const summaryBtn = page.locator("button[ng-click*='showList'], button[ng-click*='showBetList']").first();
-  if (await summaryBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await summaryBtn.click();
-    await wait(2000);
-  }
-  // 投票確定
-  const confirmBtn = page.locator("button[ng-click*='onVoteConfirm'], button[ng-click*='confirmVote']").first();
-  if (await confirmBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-    await confirmBtn.click();
-    await wait(2000);
-    // 確認ダイアログのOK
-    const okBtn = page.locator("button[ng-click*='ok'], button:has-text('OK')").first();
-    if (await okBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await okBtn.click();
-      await wait(2000);
+  // ── 投票一覧 → 合計入力 → 購入確定 (ipat-auto-bet.ts と同じ) ──
+  log(`  全${setCount}点セット完了 → 投票一覧へ`);
+  const showListBtn = page.locator("button[ng-click*='onShowBetList()']").first();
+  await showListBtn.waitFor({ timeout: 5000 });
+  await showListBtn.click();
+  await wait(2000);
+
+  // 合計金額計算
+  let totalAmount = 0;
+  for (const b of finalBets) {
+    if (b.type === 'WIDE') {
+      const n = b.horses.length;
+      const pairs = Math.max(1, n * (n - 1) / 2);
+      totalAmount += b.amount * pairs;
+    } else {
+      totalAmount += b.amount;
     }
   }
-  log(`  ✓ ${plan.venueName}${plan.raceNumber}R 投票完了`);
+
+  log(`  投票一覧: 合計 ${totalAmount.toLocaleString()}円`);
+
+  // 合計金額入力 → 購入確定
+  log(`  投票確定処理...`);
+  const totalInput = page.locator("input[ng-model*='cAmountTotal']").first();
+  await totalInput.waitFor({ timeout: 5000 });
+  await totalInput.fill(String(totalAmount));
+  await wait(500);
+
+  const purchaseBtn = page.locator("button[ng-click*='clickPurchase()']").first();
+  await purchaseBtn.click();
+  await wait(2000);
+
+  // 最終確認ダイアログ
+  const confirmBtn = page.locator("button[ng-click*='dismiss()']").nth(1);
+  if (await confirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await confirmBtn.click();
+    await wait(2000);
+  }
+
+  log(`  ✓ ${plan.venueName}${plan.raceNumber}R 投票完了 (${setCount}点 ${totalAmount.toLocaleString()}円)`);
 }
 
 // ── メイン処理 ──
