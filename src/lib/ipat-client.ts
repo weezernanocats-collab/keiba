@@ -196,6 +196,17 @@ export async function selectVenueAndRace(page: Page, venueName: string, raceNumb
   await wait(1500);
 }
 
+// 馬番ラベルが visible になるまで待機 (最大5秒)
+async function waitForHorseLabel(page: Page, horseNum: number): Promise<void> {
+  const padded = String(horseNum).padStart(2, '0');
+  for (const forVal of [`no${padded}`, `no${horseNum}`]) {
+    const label = page.locator(`label[for='${forVal}']`);
+    if (await label.isVisible({ timeout: 5000 }).catch(() => false)) return;
+  }
+  // フォールバック: もう少し待ってから諦める (clickHorseLabel側でリトライ&診断)
+  await wait(1000);
+}
+
 // ── 単一の買い目をセット ──
 export async function placeBet(page: Page, bet: IpatBet, logFn: (s: string) => void = () => {}): Promise<void> {
   const label = BET_TYPE_LABEL[bet.type] || bet.type;
@@ -209,6 +220,7 @@ export async function placeBet(page: Page, bet: IpatBet, logFn: (s: string) => v
 
   const isTansho = bet.type === 'TANSYO' || bet.type === 'FUKUSYO';
   if (isTansho) {
+    await waitForHorseLabel(page, bet.horses[0]);
     await clickHorseLabel(page, bet.horses[0], logFn);
     await wait(500);
   } else {
@@ -216,10 +228,11 @@ export async function placeBet(page: Page, bet: IpatBet, logFn: (s: string) => v
     const methodSelect = page.locator("select[ng-model*='oSelectMethod']").first();
     await methodSelect.waitFor({ timeout: 5000 });
     await methodSelect.selectOption({ label: 'ボックス' });
-    await wait(800);
+    await wait(1500);  // ボックスモード切替後の DOM 再描画を確実に待つ (5/16・5/17のbox失敗対策)
+    await waitForHorseLabel(page, bet.horses[0]);
     for (const h of bet.horses) {
       await clickHorseLabel(page, h, logFn);
-      await wait(300);
+      await wait(400);
     }
     await wait(500);
   }
