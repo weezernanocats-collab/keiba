@@ -410,6 +410,7 @@ async function submitBetsForRace(plan: RacePlan, finalBets: BetItem[]) {
 
 // ── メイン処理 ──
 async function processBet(plan: RacePlan) {
+  const label = `${plan.venueName}${plan.raceNumber}R`;
   try {
     // 1. 直前オッズ fetch
     plan.currentOdds = await fetchCurrentOdds(plan.raceId);
@@ -421,18 +422,44 @@ async function processBet(plan: RacePlan) {
     // 3. フィルタ適用
     plan.finalBets = applyOddsFilter(plan);
     if (plan.finalBets.length === 0) {
-      log(`  ${plan.venueName}${plan.raceNumber}R: フィルタ後ベットなし → skip`);
+      log(`  ${label}: フィルタ後ベットなし → skip`);
       plan.status = 'skipped';
+      await slackNotify(`🚫 *${label}*: 全候補が+30%オッズ上昇のため skip`);
       return;
     }
 
     // 4. IPAT投票
+    const planSummary = plan.finalBets.map(b => {
+      if (b.type === 'WIDE') {
+        const pairs = b.horses.length * (b.horses.length - 1) / 2;
+        return `ワイド[${b.horses.join(',')}] ${pairs}点×${b.amount}円`;
+      }
+      return `単勝${b.horses[0]} ${b.amount}円`;
+    }).join(' / ');
     await submitBetsForRace(plan, plan.finalBets);
     plan.status = 'bet';
+
+    // 成功通知
+    const totalAmount = plan.finalBets.reduce((s, b) => {
+      if (b.type === 'WIDE') {
+        const pairs = Math.max(1, b.horses.length * (b.horses.length - 1) / 2);
+        return s + b.amount * pairs;
+      }
+      return s + b.amount;
+    }, 0);
+    consecutiveFailures = 0;
+    await slackNotify(`✅ *${label}* 投票完了 ${totalAmount.toLocaleString()}円\n${planSummary}`);
   } catch (e) {
     plan.status = 'error';
     plan.errorMsg = (e as Error).message;
-    log(`  ✗ ${plan.venueName}${plan.raceNumber}R: ${plan.errorMsg}`);
+    log(`  ✗ ${label}: ${plan.errorMsg}`);
+    consecutiveFailures++;
+    const baseMsg = `❌ *${label}* 投票失敗\nエラー: ${plan.errorMsg}\n手動投票推奨 (締切: 発走1分前まで)`;
+    if (consecutiveFailures >= 3) {
+      await slackNotify(`🚨 <!here> *${consecutiveFailures}レース連続失敗* — scheduler 異常の可能性\n${baseMsg}`);
+    } else {
+      await slackNotify(baseMsg);
+    }
   }
 }
 
@@ -451,8 +478,26 @@ async function processBaseline(plan: RacePlan) {
 }
 
 function nowJst(): Date {
-  // Node の new Date() はシステムTZに依存。launchdで起動するMacはJST想定。
   return new Date();
+}
+
+// ── Slack 通知 ──
+let consecutiveFailures = 0;
+async function slackNotify(msg: string) {
+  const token = process.env.SLACK_BOT_TOKEN;
+  const ch = process.env.SLACK_CHANNEL_ID;
+  if (!token || !ch) { log('Slack設定なし、通知skip'); return; }
+  try {
+    const res = await fetch('https://slack.com/api/chat.postMessage', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ channel: ch, text: msg }),
+    });
+    const data = await res.json() as { ok: boolean; error?: string };
+    if (!data.ok) log(`Slack送信失敗: ${data.error}`);
+  } catch (e) {
+    log(`Slack送信エラー: ${(e as Error).message}`);
+  }
 }
 
 async function main() {
@@ -468,14 +513,20 @@ async function main() {
   allocateBudget(plans);
 
   log(`\n=== 計画 (${plans.length}レース) ===`);
+  const planLines: string[] = [];
   for (const p of plans) {
     const tStr = p.raceTime.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
     const wide = p.initialBets.find(b => b.type === 'WIDE');
     const tans = p.initialBets.filter(b => b.type === 'TANSYO');
     const wideStr = wide ? `ワイド[${wide.horses.join(',')}]×${wide.amount}円` : '';
     const tansStr = tans.length > 0 ? `単勝[${tans.map(t => t.horses[0]).join(',')}]×100円` : '';
-    log(`  ${tStr} ${p.venueName}${p.raceNumber}R w=${p.weight.toFixed(1)} ${wideStr} ${tansStr}`);
+    const line = `  ${tStr} ${p.venueName}${p.raceNumber}R w=${p.weight.toFixed(1)} ${wideStr} ${tansStr}`;
+    log(line);
+    planLines.push(line);
   }
+
+  // 起動時の Slack 通知 (計画一覧)
+  await slackNotify(`📋 *本日 (${date}) の投票計画* — ${plans.length}レース、予算${budget.toLocaleString()}円\n\`\`\`${planLines.join('\n')}\`\`\``);
 
   // ── 起動時: 全レースの morning baseline odds を取得 ──
   log(`\n=== Morning baseline 取得 (全${plans.length}レース) ===`);
@@ -538,6 +589,12 @@ async function main() {
   for (const p of plans.filter(p => p.status === 'error')) {
     log(`    ✗ ${p.venueName}${p.raceNumber}R: ${p.errorMsg}`);
   }
+
+  // 終了時 Slack 通知
+  const errorLines = plans.filter(p => p.status === 'error').map(p => `  ✗ ${p.venueName}${p.raceNumber}R: ${p.errorMsg}`);
+  const errorBlock = errorLines.length > 0 ? `\n*失敗レース:*\n\`\`\`${errorLines.join('\n')}\`\`\`` : '';
+  const indicator = counts.error > 0 ? '⚠️' : '🎯';
+  await slackNotify(`${indicator} *本日 (${date}) のscheduler終了*\n投票: ${counts.bet} / skip: ${counts.skipped} / error: ${counts.error}${errorBlock}`);
 
   // 状態ファイル保存
   const stateFile = `${logDir}/scheduler-${date}.json`;
