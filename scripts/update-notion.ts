@@ -37,7 +37,8 @@ const db = createClient({
 
 // ---- Notion API helpers ----
 
-async function notionRequest(method: string, path: string, body?: unknown) {
+async function notionRequest(method: string, path: string, body?: unknown, attempt = 0): Promise<any> {
+  const MAX_RETRIES = 3;
   const res = await fetch(`https://api.notion.com/v1${path}`, {
     method,
     headers: {
@@ -47,11 +48,16 @@ async function notionRequest(method: string, path: string, body?: unknown) {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Notion API ${res.status}: ${text}`);
+  if (res.ok) return res.json();
+  // 5xx/429 はリトライ (指数バックオフ: 1秒 → 2秒 → 4秒)
+  if ((res.status >= 500 || res.status === 429) && attempt < MAX_RETRIES) {
+    const delayMs = 1000 * Math.pow(2, attempt);
+    console.error(`[notion] ${res.status} エラー、${delayMs}ms 待機後 retry (${attempt + 1}/${MAX_RETRIES})`);
+    await new Promise(r => setTimeout(r, delayMs));
+    return notionRequest(method, path, body, attempt + 1);
   }
-  return res.json();
+  const text = await res.text();
+  throw new Error(`Notion API ${res.status}: ${text}`);
 }
 
 async function clearPageBlocks() {
