@@ -1,6 +1,6 @@
 {
-  "version": "2026-05-13",
-  "lastUpdated": "2026-05-15T00:00:00Z",
+  "version": "2026-05-22",
+  "lastUpdated": "2026-05-22T00:00:00Z",
   "dailyBudget": 5000,
   "tanshoCap": 0.5,
   "matchScoreThreshold": 55,
@@ -9,6 +9,12 @@
     "highAmount": 200,
     "lowAmount": 100
   },
+  "umaren": {
+    "enabled": true,
+    "perPoint": 100,
+    "_note": "候補(matchScore>=55) × 1番人気の馬連。候補と1番人気が被ったらスキップ"
+  },
+  "wideEnabled": false,
   "oddsRiseExcludeThreshold": 0.3,
   "raceWeight": {
     "ageMult_3yoOnly": 0.5,
@@ -49,6 +55,23 @@
       "date": "2026-05-15",
       "change": "dailyBudget 10000 → 5000 (ユーザー指示)",
       "params": { "dailyBudget": 5000 }
+    },
+    {
+      "date": "2026-05-22",
+      "change": "ワイドボックス廃止 + 馬連 候補×1番人気 採用 (2024-2026バックテスト合算ROI 112.8%、現状85.6%から+27pt改善)",
+      "params": {
+        "wideEnabled": false,
+        "umaren.enabled": true,
+        "umaren.perPoint": 100
+      },
+      "backtest": {
+        "period": "2024-01-01〜2026-05-21",
+        "races": 1234,
+        "tanshoROI": 123.5,
+        "umarenROI": 102.2,
+        "combinedROI": 112.8,
+        "top3ExcludedROI": 93.8
+      }
     }
   ]
 }

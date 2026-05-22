@@ -119,6 +119,8 @@ interface StrategyConfig {
   tanshoCap: number;
   matchScoreThreshold: number;
   scoreWeight: { highThreshold: number; highAmount: number; lowAmount: number };
+  umaren?: { enabled: boolean; perPoint: number };
+  wideEnabled?: boolean;
   oddsRiseExcludeThreshold: number;
   raceWeight: {
     ageMult_3yoOnly: number;
@@ -136,6 +138,8 @@ function loadStrategyConfig(): StrategyConfig {
     tanshoCap: 0.5,
     matchScoreThreshold: 55,
     scoreWeight: { highThreshold: 65, highAmount: 200, lowAmount: 100 },
+    umaren: { enabled: true, perPoint: 100 },
+    wideEnabled: false,
     oddsRiseExcludeThreshold: 0.3,
     raceWeight: {
       ageMult_3yoOnly: 0.5, ageMult_default: 1.0,
@@ -144,6 +148,9 @@ function loadStrategyConfig(): StrategyConfig {
   };
 }
 const strategyConfig = loadStrategyConfig();
+const umarenEnabled = strategyConfig.umaren?.enabled ?? true;
+const umarenPerPoint = strategyConfig.umaren?.perPoint ?? 100;
+const wideEnabled = strategyConfig.wideEnabled ?? false;
 
 function computeRaceWeight(raceNumber: number, name: string, grade: string): number {
   const is3yoOnly = name.startsWith('3歳') && !name.includes('以上');
@@ -221,32 +228,32 @@ async function loadBetsFromDb(): Promise<Bet[]> {
     const grade = String(row.grade || '');
     const weight = computeRaceWeight(Number(row.race_number), raceName, grade);
 
-    // ── ワイドボックス: しょーさん候補(matchScore>=55) + 1〜3人気 ──
+    // ── 馬連 候補×1番人気 (2024-2026バックテストROI 102.2%、Top3除外74.4%) ──
+    // しょーさん候補(matchScore>=55) と 1番人気 のペアを馬連で買う
+    // 候補が1番人気と被ったら丸ごとスキップ (ノイズ排除)
     const allCandidates = (sp.candidates || []) as Array<{ horseNumber: number; matchScore: number; theory?: number }>;
     const qualified = allCandidates.filter(c => (c.matchScore || 0) >= strategyConfig.matchScoreThreshold);
-    if (qualified.length > 0) {
-      const top3Rows = await db.execute({
-        sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT 3`,
+    if (umarenEnabled && qualified.length > 0) {
+      const top1Row = await db.execute({
+        sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT 1`,
         args: [raceId],
       });
-      if (top3Rows.rows.length >= 3) {
-        const popular = top3Rows.rows.map(r => Number(r.horse_number));
+      if (top1Row.rows.length === 1) {
+        const top1 = Number(top1Row.rows[0].horse_number);
         const candidateNums = qualified.map(c => Number(c.horseNumber));
-        // しょーさん候補が1〜3人気と被ったらワイドはスキップ（ROI悪化回避）
-        if (!candidateNums.some(n => popular.includes(n))) {
-          const horsesSet = new Set([...candidateNums, ...popular]);
-          const horses = [...horsesSet].sort((a, b) => a - b);
-          if (horses.length >= 2) {
+        if (!candidateNums.includes(top1)) {
+          for (const cn of candidateNums) {
+            const pair = [Math.min(cn, top1), Math.max(cn, top1)];
             bets.push({
               date,
               venue: venueCode,
               venueName: venue,
               raceNumber: Number(row.race_number),
-              betType: 'WIDE',
-              betTypeName: 'ワイド',
-              combo: horses.map(n => String(n).padStart(2, '0')).join('-'),
-              horses,
-              amount,
+              betType: 'UMAREN',
+              betTypeName: '馬連',
+              combo: pair.map(n => String(n).padStart(2, '0')).join('-'),
+              horses: pair,
+              amount: umarenPerPoint,
               weight,
             });
           }
@@ -334,21 +341,19 @@ async function main() {
     return;
   }
 
-  // 1.5 予算配分: --budget指定時、単勝(100円/点固定)を先取り→残額をワイドに重み配分
-  //   - 単勝: 休養F+理論1候補に100円ずつ。予算上限は budget*0.5
-  //   - ワイド: 残予算をレース重み×ペア数で按分(100円単位)
+  // 1.5 予算配分: --budget指定時
+  //   - 単勝: 休養F+理論1候補に score別(200/100円)。上限 budget*tanshoCap
+  //   - 馬連: 候補×1番人気、各点 umaren.perPoint (= 100円)。残予算超過時は重み優先で切り捨て
   if (budget > 0) {
-    const tanshoCap = Math.floor(budget * strategyConfig.tanshoCap); // 単勝最大配分(config)
+    const tanshoCap = Math.floor(budget * strategyConfig.tanshoCap);
     const tanshoBets = bets.filter(b => b.betType === 'TANSYO');
-    const wideBets = bets.filter(b => b.betType === 'WIDE');
+    const umarenBets = bets.filter(b => b.betType === 'UMAREN');
 
-    // 単勝確定 (score別: 200円or100円。amount は既に設定済み。cap内まで採用)
+    // 単勝確定
     let accumTansho = 0;
-    const remainingTansho: typeof tanshoBets = [];
     const dropTansho: typeof tanshoBets = [];
     for (const b of tanshoBets) {
       if (accumTansho + b.amount <= tanshoCap) {
-        remainingTansho.push(b);
         accumTansho += b.amount;
       } else {
         dropTansho.push(b);
@@ -359,30 +364,34 @@ async function main() {
       bets = bets.filter(b => b.betType !== 'TANSYO' || !dropSet.has(b));
     }
     const tanshoAllocated = accumTansho;
-    const dropped = dropTansho.length;
 
-    // ワイドは残予算で按分
-    const wideBudget = budget - tanshoAllocated;
-    let wideAllocated = 0;
-    if (wideBets.length > 0 && wideBudget > 0) {
-      const totalWeight = wideBets.reduce((s, b) => s + (b.weight || 1), 0);
-      for (const b of wideBets) {
-        const w = b.weight || 1;
-        const raceBudget = wideBudget * w / totalWeight;
-        const n = b.horses.length;
-        const pairs = Math.max(1, n * (n - 1) / 2);
-        const perPair = Math.max(100, Math.floor(raceBudget / pairs / 100) * 100);
-        b.amount = perPair;
-        wideAllocated += perPair * pairs;
+    // 馬連: 各点 perPoint で固定。残予算超過時はレース重み降順で切り捨て
+    const umarenBudget = budget - tanshoAllocated;
+    let umarenAllocated = 0;
+    if (umarenBets.length > 0 && umarenBudget > 0) {
+      // レース重み降順でソート、予算枠内まで採用
+      const sortedUmaren = [...umarenBets].sort((a, b) => (b.weight || 0) - (a.weight || 0));
+      const keep = new Set<typeof umarenBets[0]>();
+      let accum = 0;
+      for (const b of sortedUmaren) {
+        if (accum + b.amount <= umarenBudget) {
+          keep.add(b); accum += b.amount;
+        }
       }
+      umarenAllocated = accum;
+      bets = bets.filter(b => b.betType !== 'UMAREN' || keep.has(b));
+    } else if (umarenBets.length > 0) {
+      // 予算ゼロなら全削除
+      bets = bets.filter(b => b.betType !== 'UMAREN');
     }
 
     console.log(`[budget] 予算${budget}円`);
-    console.log(`  単勝: ${tanshoAllocated}円 (${remainingTansho.length}点${dropped > 0 ? ` / ${dropped}点切り捨て` : ''}, 上限${tanshoCap}円)`);
-    console.log(`  ワイド: ${wideAllocated}円 (${wideBets.length}レース, 残予算${wideBudget}円から按分)`);
+    console.log(`  単勝: ${tanshoAllocated}円 (${tanshoBets.length - dropTansho.length}点${dropTansho.length > 0 ? ` / ${dropTansho.length}点切り捨て` : ''}, 上限${tanshoCap}円)`);
+    console.log(`  馬連: ${umarenAllocated}円 (${bets.filter(b => b.betType === 'UMAREN').length}点 / 候補${umarenBets.length}点 / 残予算${umarenBudget}円)`);
   }
 
   // 各買い目の合計金額計算
+  // 馬連は horses=[a,b] の2頭ペア=1点なので amount そのまま
   const totalAmount = bets.reduce((s, b) => {
     if (b.betType === 'WIDE') {
       const n = b.horses.length;
@@ -402,6 +411,8 @@ async function main() {
       const pairs = Math.max(1, n * (n - 1) / 2);
       const raceTotal = b.amount * pairs;
       console.log(`  ${b.venueName}${b.raceNumber}R ワイドボックス ${b.combo} (${pairs}点 × ${b.amount}円 = ${raceTotal}円, w=${(b.weight || 0).toFixed(1)})`);
+    } else if (b.betType === 'UMAREN') {
+      console.log(`  ${b.venueName}${b.raceNumber}R 馬連 ${b.combo} ${b.amount}円 (候補×1番人気, w=${(b.weight || 0).toFixed(1)})`);
     } else {
       console.log(`  ${b.venueName}${b.raceNumber}R 単勝 ${b.combo}番 ${b.amount}円 (休養F理論1)`);
     }

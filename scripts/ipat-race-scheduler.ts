@@ -49,6 +49,8 @@ interface StrategyConfig {
   tanshoCap: number;
   matchScoreThreshold: number;
   scoreWeight: { highThreshold: number; highAmount: number; lowAmount: number };
+  umaren?: { enabled: boolean; perPoint: number };
+  wideEnabled?: boolean;
   oddsRiseExcludeThreshold: number;
   raceWeight: {
     ageMult_3yoOnly: number;
@@ -67,6 +69,8 @@ function loadConfig(): StrategyConfig {
     tanshoCap: 0.5,
     matchScoreThreshold: 55,
     scoreWeight: { highThreshold: 65, highAmount: 200, lowAmount: 100 },
+    umaren: { enabled: true, perPoint: 100 },
+    wideEnabled: false,
     oddsRiseExcludeThreshold: 0.3,
     raceWeight: {
       ageMult_3yoOnly: 0.5, ageMult_default: 1.0,
@@ -78,6 +82,9 @@ const config = loadConfig();
 const budget = parseInt(getArg('--budget') || String(config.dailyBudget));
 const riseThreshold = parseFloat(getArg('--filter-odds-rise') || String(config.oddsRiseExcludeThreshold));
 const SCORE_THRESHOLD = config.matchScoreThreshold;
+const UMAREN_ENABLED = config.umaren?.enabled ?? true;
+const UMAREN_PER_POINT = config.umaren?.perPoint ?? 100;
+const WIDE_ENABLED = config.wideEnabled ?? false;
 
 const NETKEIBA_BASE = 'https://race.netkeiba.com';
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36';
@@ -104,10 +111,10 @@ function log(s: string) {
 
 // ── レース計画 ──
 interface BetItem {
-  type: 'WIDE' | 'TANSYO';
-  horses: number[];     // ワイドは複数、単勝は1頭
+  type: 'WIDE' | 'TANSYO' | 'UMAREN';
+  horses: number[];     // ワイドは複数、単勝1頭、馬連2頭
   amount: number;       // 1ペアor1点あたり
-  tag: string;          // 識別用 (e.g., "wide:基本", "tansho:休養F理論1")
+  tag: string;          // 識別用 (e.g., "wide:基本", "tansho:休養F理論1", "umaren:候補x1番人気")
 }
 
 interface RacePlan {
@@ -174,19 +181,20 @@ async function buildDayPlans(): Promise<RacePlan[]> {
 
     const initialBets: BetItem[] = [];
 
-    // ── ワイドボックス ──
+    // ── 馬連 候補×1番人気 (ROI 102.2%, Top3除外74.4%) ──
     const qualified = (sp.candidates || []).filter((c: any) => (c.matchScore || 0) >= SCORE_THRESHOLD);
     let candidateNums: number[] = [];
     let popularNums: number[] = [];
-    if (qualified.length > 0) {
-      const top3 = await db.execute({ sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT 3`, args: [raceId] });
-      if (top3.rows.length >= 3) {
-        popularNums = top3.rows.map(x => Number(x.horse_number));
+    if (UMAREN_ENABLED && qualified.length > 0) {
+      const top1 = await db.execute({ sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT 1`, args: [raceId] });
+      if (top1.rows.length === 1) {
+        const top1n = Number(top1.rows[0].horse_number);
+        popularNums = [top1n];
         candidateNums = qualified.map((c: any) => Number(c.horseNumber));
-        if (!candidateNums.some(n => popularNums.includes(n))) {
-          const horses = [...new Set([...candidateNums, ...popularNums])].sort((x, y) => x - y);
-          if (horses.length >= 2) {
-            initialBets.push({ type: 'WIDE', horses, amount: 0, tag: 'wide:候補+1-3人気' });
+        if (!candidateNums.includes(top1n)) {
+          for (const cn of candidateNums) {
+            const pair = [Math.min(cn, top1n), Math.max(cn, top1n)];
+            initialBets.push({ type: 'UMAREN', horses: pair, amount: UMAREN_PER_POINT, tag: `umaren:候補×1番人気` });
           }
         }
       }
@@ -220,32 +228,30 @@ function allocateBudget(plans: RacePlan[]) {
   const allTansho = plans.flatMap(p => p.initialBets.filter(b => b.type === 'TANSYO'));
   const tanshoCap = Math.floor(budget * config.tanshoCap);
   let accum = 0;
-  const keepSet = new Set();
+  const keepTansho = new Set<BetItem>();
   for (const t of allTansho) {
-    if (accum + t.amount <= tanshoCap) { keepSet.add(t); accum += t.amount; }
+    if (accum + t.amount <= tanshoCap) { keepTansho.add(t); accum += t.amount; }
   }
   for (const p of plans) {
-    p.initialBets = p.initialBets.filter(b => b.type !== 'TANSYO' || keepSet.has(b));
+    p.initialBets = p.initialBets.filter(b => b.type !== 'TANSYO' || keepTansho.has(b));
   }
   const tanshoSpent = accum;
 
-  // ワイド: 残予算をレース重みで按分
-  const wideRaces = plans.filter(p => p.initialBets.some(b => b.type === 'WIDE'));
-  const wideBudget = budget - tanshoSpent;
-  if (wideRaces.length > 0 && wideBudget > 0) {
-    const totalW = wideRaces.reduce((s, p) => s + p.weight, 0);
-    for (const p of wideRaces) {
-      const rb = wideBudget * p.weight / totalW;
-      for (const b of p.initialBets) {
-        if (b.type !== 'WIDE') continue;
-        const n = b.horses.length;
-        const pairs = (n * (n - 1)) / 2;
-        b.amount = Math.max(100, Math.floor(rb / pairs / 100) * 100);
-      }
-    }
+  // 馬連: 残予算枠内で、レース重み降順に採用 (各点 perPoint 固定)
+  const umarenBudget = budget - tanshoSpent;
+  const allUmaren: Array<{ plan: RacePlan; bet: BetItem }> = [];
+  for (const p of plans) for (const b of p.initialBets) if (b.type === 'UMAREN') allUmaren.push({ plan: p, bet: b });
+  allUmaren.sort((a, b) => b.plan.weight - a.plan.weight);
+  const keepUmaren = new Set<BetItem>();
+  let umarenAccum = 0;
+  for (const { bet: b } of allUmaren) {
+    if (umarenAccum + b.amount <= umarenBudget) { keepUmaren.add(b); umarenAccum += b.amount; }
+  }
+  for (const p of plans) {
+    p.initialBets = p.initialBets.filter(b => b.type !== 'UMAREN' || keepUmaren.has(b));
   }
 
-  log(`[budget] 予算${budget}円 → 単勝${tanshoSpent}円(${[...keepSet].length}点) + ワイド残予算${wideBudget}円(${wideRaces.length}レース)`);
+  log(`[budget] 予算${budget}円 → 単勝${tanshoSpent}円(${[...keepTansho].length}点) + 馬連${umarenAccum}円(${[...keepUmaren].length}点/候補${allUmaren.length}点)`);
 }
 
 // ── netkeiba オッズ取得 ──
@@ -321,8 +327,17 @@ function applyOddsFilter(plan: RacePlan): BetItem[] {
       } else {
         final.push(b);
       }
+    } else if (b.type === 'UMAREN') {
+      // 馬連: いずれかの馬がオッズ上昇していたらこのペア除外
+      const rises = b.horses.map(h => ({ h, r: riseByHorse.get(h) }));
+      const upHorse = rises.find(x => x.r != null && x.r >= riseThreshold);
+      if (upHorse) {
+        log(`  🚫 ${plan.venueName}${plan.raceNumber}R 馬連 ${b.horses.join('-')} 除外 (${upHorse.h}番 rise ${((upHorse.r || 0) * 100).toFixed(0)}%)`);
+      } else {
+        final.push(b);
+      }
     } else {
-      // WIDE: 該当馬を除外
+      // WIDE (廃止予定、残ってる場合): 該当馬を除外
       const keep = b.horses.filter(h => {
         const r = riseByHorse.get(h);
         return r == null || r < riseThreshold;
@@ -335,7 +350,6 @@ function applyOddsFilter(plan: RacePlan): BetItem[] {
         log(`  ⚠ ${plan.venueName}${plan.raceNumber}R ワイド: 残${keep.length}頭 → 全削除`);
         continue;
       }
-      // 元のamountを維持 (1ペアあたり); ペア数が減れば総額減
       final.push({ ...b, horses: keep });
     }
   }
@@ -376,6 +390,7 @@ async function submitBetsForRace(plan: RacePlan, finalBets: BetItem[]) {
     log(`[dry] ${plan.venueName}${plan.raceNumber}R 投票スキップ`);
     for (const b of finalBets) {
       if (b.type === 'WIDE') log(`  ワイド[${b.horses.join(',')}] ${b.amount}円/ペア`);
+      else if (b.type === 'UMAREN') log(`  馬連 ${b.horses.join('-')} ${b.amount}円`);
       else log(`  単勝 ${b.horses[0]}番 ${b.amount}円`);
     }
     return;
@@ -433,6 +448,9 @@ async function processBet(plan: RacePlan) {
       if (b.type === 'WIDE') {
         const pairs = b.horses.length * (b.horses.length - 1) / 2;
         return `ワイド[${b.horses.join(',')}] ${pairs}点×${b.amount}円`;
+      }
+      if (b.type === 'UMAREN') {
+        return `馬連${b.horses.join('-')} ${b.amount}円`;
       }
       return `単勝${b.horses[0]} ${b.amount}円`;
     }).join(' / ');
@@ -517,10 +535,12 @@ async function main() {
   for (const p of plans) {
     const tStr = p.raceTime.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
     const wide = p.initialBets.find(b => b.type === 'WIDE');
+    const umaren = p.initialBets.filter(b => b.type === 'UMAREN');
     const tans = p.initialBets.filter(b => b.type === 'TANSYO');
     const wideStr = wide ? `ワイド[${wide.horses.join(',')}]×${wide.amount}円` : '';
-    const tansStr = tans.length > 0 ? `単勝[${tans.map(t => t.horses[0]).join(',')}]×100円` : '';
-    const line = `  ${tStr} ${p.venueName}${p.raceNumber}R w=${p.weight.toFixed(1)} ${wideStr} ${tansStr}`;
+    const umarenStr = umaren.length > 0 ? `馬連[${umaren.map(u => u.horses.join('-')).join(',')}]×${umaren[0].amount}円` : '';
+    const tansStr = tans.length > 0 ? `単勝[${tans.map(t => t.horses[0]).join(',')}]` : '';
+    const line = `  ${tStr} ${p.venueName}${p.raceNumber}R w=${p.weight.toFixed(1)} ${tansStr} ${umarenStr}${wideStr}`;
     log(line);
     planLines.push(line);
   }
