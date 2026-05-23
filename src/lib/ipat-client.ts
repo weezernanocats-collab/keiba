@@ -304,6 +304,15 @@ export async function confirmPurchase(page: Page, totalAmount: number, logFn: (s
     await wait(2000);
   }
 
+  // 投票結果モーダル ("お客様の投票を受け付けました") を閉じる
+  // 右上の「続けて投票する」ボタンを押す。これがないと次レースの操作がモーダルでブロックされる
+  const continueBtn = page.locator('button').filter({ hasText: '続けて投票する' }).first();
+  if (await continueBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+    logFn('  投票結果モーダル → 「続けて投票する」をクリック');
+    await continueBtn.click();
+    await wait(1500);
+  }
+
   logFn(`  ✓ 投票完了 (合計${totalAmount.toLocaleString()}円)`);
 }
 
