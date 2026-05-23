@@ -109,12 +109,40 @@ export async function loginToIpat(page: Page, creds: IpatCredentials): Promise<v
   await wait(3000);
 }
 
+// ── 入金未済ダイアログを閉じる (出ていれば) ──
+//    "投票には『入金（チャージ）』を行ってください" + 「このまま投票」「戻る」ボタン
+async function closeDepositDialog(page: Page, logFn: (s: string) => void): Promise<boolean> {
+  const btn = page.locator('button').filter({ hasText: 'このまま投票' }).first();
+  if (await btn.isVisible({ timeout: 1500 }).catch(() => false)) {
+    logFn('  入金未済ダイアログ → 「このまま投票」をクリック');
+    await btn.click();
+    await wait(1500);
+    return true;
+  }
+  return false;
+}
+
 // ── 通常投票画面へ ──
-export async function navigateToBetBasic(page: Page): Promise<void> {
+export async function navigateToBetBasic(page: Page, logFn: (s: string) => void = () => {}): Promise<void> {
+  // 1. ログイン直後にダイアログがあれば閉じる
+  await closeDepositDialog(page, logFn);
+
+  // 2. 通常投票ボタンをクリック
   const betBasicBtn = page.locator("button[href^='#!/bet/basic'], a[href^='#!/bet/basic']").first();
   await betBasicBtn.waitFor({ timeout: 10000 });
   await betBasicBtn.click();
   await wait(2000);
+
+  // 3. クリック直後にダイアログが出る場合 (入金未済時の典型) → 閉じてもう一度クリック
+  if (await closeDepositDialog(page, logFn)) {
+    if (await betBasicBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+      logFn('  basic画面に未遷移 → 通常投票を再クリック');
+      await betBasicBtn.click();
+      await wait(2000);
+      // 念のため再ダイアログチェック
+      await closeDepositDialog(page, logFn);
+    }
+  }
 }
 
 // ── 会場・レース選択 ──
