@@ -224,34 +224,39 @@ async function buildDayPlans(): Promise<RacePlan[]> {
 }
 
 function allocateBudget(plans: RacePlan[]) {
-  // 単勝: score別 × 件数。上限 budget*tanshoCap
-  const allTansho = plans.flatMap(p => p.initialBets.filter(b => b.type === 'TANSYO'));
-  const tanshoCap = Math.floor(budget * config.tanshoCap);
-  let accum = 0;
-  const keepTansho = new Set<BetItem>();
-  for (const t of allTansho) {
-    if (accum + t.amount <= tanshoCap) { keepTansho.add(t); accum += t.amount; }
+  // 単勝・馬連ともレース重み比例で配分
+  //   rawShare = baseAmount × race_weight、合計で正規化
+  //   各bet.amount = budget × rawShare / rawTotal、100円単位丸め、最低100円
+  //   合計が予算超過 → 低weight順に削除
+  const items: Array<{ plan: RacePlan; bet: BetItem; base: number }> = [];
+  for (const p of plans) for (const b of p.initialBets) items.push({ plan: p, bet: b, base: b.amount });
+  if (items.length === 0) return;
+  const rawTotal = items.reduce((s, x) => s + x.base * x.plan.weight, 0);
+  if (rawTotal > 0) {
+    for (const x of items) {
+      const target = budget * (x.base * x.plan.weight) / rawTotal;
+      x.bet.amount = Math.max(100, Math.floor(target / 100) * 100);
+    }
   }
-  for (const p of plans) {
-    p.initialBets = p.initialBets.filter(b => b.type !== 'TANSYO' || keepTansho.has(b));
+  // コスト計算 (WIDEはペア数倍)
+  const cost = (b: BetItem) => b.type === 'WIDE' ? b.amount * Math.max(1, b.horses.length * (b.horses.length - 1) / 2) : b.amount;
+  let total = items.reduce((s, x) => s + cost(x.bet), 0);
+  if (total > budget) {
+    const sorted = [...items].sort((a, b) => a.plan.weight - b.plan.weight);
+    const drop = new Set<BetItem>();
+    for (const x of sorted) {
+      if (total <= budget) break;
+      drop.add(x.bet);
+      total -= cost(x.bet);
+    }
+    for (const p of plans) p.initialBets = p.initialBets.filter(b => !drop.has(b));
   }
-  const tanshoSpent = accum;
-
-  // 馬連: 残予算枠内で、レース重み降順に採用 (各点 perPoint 固定)
-  const umarenBudget = budget - tanshoSpent;
-  const allUmaren: Array<{ plan: RacePlan; bet: BetItem }> = [];
-  for (const p of plans) for (const b of p.initialBets) if (b.type === 'UMAREN') allUmaren.push({ plan: p, bet: b });
-  allUmaren.sort((a, b) => b.plan.weight - a.plan.weight);
-  const keepUmaren = new Set<BetItem>();
-  let umarenAccum = 0;
-  for (const { bet: b } of allUmaren) {
-    if (umarenAccum + b.amount <= umarenBudget) { keepUmaren.add(b); umarenAccum += b.amount; }
-  }
-  for (const p of plans) {
-    p.initialBets = p.initialBets.filter(b => b.type !== 'UMAREN' || keepUmaren.has(b));
-  }
-
-  log(`[budget] 予算${budget}円 → 単勝${tanshoSpent}円(${[...keepTansho].length}点) + 馬連${umarenAccum}円(${[...keepUmaren].length}点/候補${allUmaren.length}点)`);
+  const finalItems = plans.flatMap(p => p.initialBets);
+  const tCnt = finalItems.filter(b => b.type === 'TANSYO').length;
+  const tSum = finalItems.filter(b => b.type === 'TANSYO').reduce((s, b) => s + b.amount, 0);
+  const uCnt = finalItems.filter(b => b.type === 'UMAREN').length;
+  const uSum = finalItems.filter(b => b.type === 'UMAREN').reduce((s, b) => s + b.amount, 0);
+  log(`[budget] 予算${budget}円 → 単勝${tSum}円(${tCnt}点) + 馬連${uSum}円(${uCnt}点) = ${total}円 (重み配分)`);
 }
 
 // ── netkeiba オッズ取得 ──

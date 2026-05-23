@@ -341,53 +341,45 @@ async function main() {
     return;
   }
 
-  // 1.5 予算配分: --budget指定時
-  //   - 単勝: 休養F+理論1候補に score別(200/100円)。上限 budget*tanshoCap
-  //   - 馬連: 候補×1番人気、各点 umaren.perPoint (= 100円)。残予算超過時は重み優先で切り捨て
-  if (budget > 0) {
-    const tanshoCap = Math.floor(budget * strategyConfig.tanshoCap);
-    const tanshoBets = bets.filter(b => b.betType === 'TANSYO');
-    const umarenBets = bets.filter(b => b.betType === 'UMAREN');
-
-    // 単勝確定
-    let accumTansho = 0;
-    const dropTansho: typeof tanshoBets = [];
-    for (const b of tanshoBets) {
-      if (accumTansho + b.amount <= tanshoCap) {
-        accumTansho += b.amount;
-      } else {
-        dropTansho.push(b);
+  // 1.5 予算配分: --budget指定時 (単勝・馬連ともレース重みで比例配分)
+  //   - 各bet の rawShare = baseAmount(b.amount) × race_weight
+  //   - 合計 rawTotal で正規化 → 各bet amount = budget × rawShare / rawTotal
+  //   - 100円単位丸め、最低100円
+  //   - 合計が予算超過 → 低weight順に削除
+  if (budget > 0 && bets.length > 0) {
+    const items = bets.map(b => ({ bet: b, base: b.amount, weight: b.weight || 1 }));
+    const rawTotal = items.reduce((s, x) => s + x.base * x.weight, 0);
+    if (rawTotal > 0) {
+      for (const x of items) {
+        const target = budget * (x.base * x.weight) / rawTotal;
+        x.bet.amount = Math.max(100, Math.floor(target / 100) * 100);
       }
     }
-    if (dropTansho.length > 0) {
-      const dropSet = new Set(dropTansho);
-      bets = bets.filter(b => b.betType !== 'TANSYO' || !dropSet.has(b));
-    }
-    const tanshoAllocated = accumTansho;
-
-    // 馬連: 各点 perPoint で固定。残予算超過時はレース重み降順で切り捨て
-    const umarenBudget = budget - tanshoAllocated;
-    let umarenAllocated = 0;
-    if (umarenBets.length > 0 && umarenBudget > 0) {
-      // レース重み降順でソート、予算枠内まで採用
-      const sortedUmaren = [...umarenBets].sort((a, b) => (b.weight || 0) - (a.weight || 0));
-      const keep = new Set<typeof umarenBets[0]>();
-      let accum = 0;
-      for (const b of sortedUmaren) {
-        if (accum + b.amount <= umarenBudget) {
-          keep.add(b); accum += b.amount;
-        }
+    // 予算オーバーチェック (低weight順に削除)
+    let totalSpent = bets.reduce((s, b) => {
+      if (b.betType === 'WIDE') {
+        const n = b.horses.length;
+        const pairs = Math.max(1, n * (n - 1) / 2);
+        return s + b.amount * pairs;
       }
-      umarenAllocated = accum;
-      bets = bets.filter(b => b.betType !== 'UMAREN' || keep.has(b));
-    } else if (umarenBets.length > 0) {
-      // 予算ゼロなら全削除
-      bets = bets.filter(b => b.betType !== 'UMAREN');
+      return s + b.amount;
+    }, 0);
+    if (totalSpent > budget) {
+      const sorted = [...bets].sort((a, b) => (a.weight || 0) - (b.weight || 0));
+      for (const b of sorted) {
+        if (totalSpent <= budget) break;
+        const cost = b.betType === 'WIDE'
+          ? b.amount * Math.max(1, b.horses.length * (b.horses.length - 1) / 2)
+          : b.amount;
+        bets = bets.filter(x => x !== b);
+        totalSpent -= cost;
+      }
     }
-
-    console.log(`[budget] 予算${budget}円`);
-    console.log(`  単勝: ${tanshoAllocated}円 (${tanshoBets.length - dropTansho.length}点${dropTansho.length > 0 ? ` / ${dropTansho.length}点切り捨て` : ''}, 上限${tanshoCap}円)`);
-    console.log(`  馬連: ${umarenAllocated}円 (${bets.filter(b => b.betType === 'UMAREN').length}点 / 候補${umarenBets.length}点 / 残予算${umarenBudget}円)`);
+    const tCnt = bets.filter(b => b.betType === 'TANSYO').length;
+    const tSum = bets.filter(b => b.betType === 'TANSYO').reduce((s, b) => s + b.amount, 0);
+    const uCnt = bets.filter(b => b.betType === 'UMAREN').length;
+    const uSum = bets.filter(b => b.betType === 'UMAREN').reduce((s, b) => s + b.amount, 0);
+    console.log(`[budget] 予算${budget}円 → 単勝${tSum}円(${tCnt}点) + 馬連${uSum}円(${uCnt}点) = ${totalSpent}円 (重み配分)`);
   }
 
   // 各買い目の合計金額計算
