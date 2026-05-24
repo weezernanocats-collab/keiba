@@ -429,6 +429,23 @@ const SCHEMA_STATEMENTS: InStatement[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_bet_targets_date_user ON bet_targets(date, user_id, status)`,
 
+  // しょーさん候補の評価結果 (過去レース含めて再評価可能)
+  `CREATE TABLE IF NOT EXISTS shoshan_evaluations (
+    race_id TEXT PRIMARY KEY,
+    evaluated_at TEXT DEFAULT (datetime('now')),
+    version TEXT,                              -- shoshan-theoryのバージョン (再計算判定用)
+    candidates_json TEXT NOT NULL,             -- 全候補 [{horseNumber, matchScore, theory, restDays}]
+    rest_filtered_json TEXT NOT NULL,          -- 休養F通過候補
+    umaren_recommendations_json TEXT,          -- 内蔵の馬連推奨
+    candidate_count INTEGER NOT NULL DEFAULT 0,
+    rest_filtered_count INTEGER NOT NULL DEFAULT 0,
+    has_theory1 INTEGER NOT NULL DEFAULT 0,    -- 理論1ありフラグ
+    has_theory2 INTEGER NOT NULL DEFAULT 0,    -- 理論2ありフラグ
+    max_match_score INTEGER,
+    FOREIGN KEY (race_id) REFERENCES races(id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_shoshan_eval_count ON shoshan_evaluations(candidate_count, max_match_score)`,
+
   // マイグレーション: race_entries に odds/popularity カラム追加
   // ALTER TABLE ... ADD COLUMN はカラムが既に存在するとエラーになるため、
   // 存在チェック付きで実行する（SQLite は IF NOT EXISTS をサポートしないため try-catch で対応）
