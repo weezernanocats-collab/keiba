@@ -134,10 +134,24 @@ async function main() {
     }
   } catch (e) {
     log(`❌ エラー: ${(e as Error).message}`);
-    await page.screenshot({ path: '/tmp/ipat_test_error.png' }).catch(() => {});
-    log('スクショ: /tmp/ipat_test_error.png');
-    await new Promise(r => setTimeout(r, 5000));
-    await browser.close();
+    log(`stack: ${(e as Error).stack?.split('\n').slice(0, 5).join(' | ')}`);
+    try {
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const path = `/tmp/ipat_test_error_${ts}.png`;
+      await page.screenshot({ path, fullPage: true });
+      log(`スクショ: ${path}`);
+      // DOM 状態を抜粋
+      const url = page.url();
+      log(`URL: ${url}`);
+      const labelFors = await page.locator('label[for]').evaluateAll(els => (els as HTMLLabelElement[]).map(e => e.htmlFor).slice(0, 30)).catch(() => []);
+      log(`label[for]の最初の30個: ${labelFors.join(', ')}`);
+      const btnTexts = await page.locator('button').evaluateAll(els => (els as HTMLElement[]).map(e => e.textContent?.trim().slice(0, 30)).filter(Boolean).slice(0, 20)).catch(() => []);
+      log(`button textの最初の20個: ${btnTexts.join(' | ')}`);
+    } catch (e2) {
+      log(`診断スクショ失敗: ${(e2 as Error).message}`);
+    }
+    await new Promise(r => setTimeout(r, 3000));
+    await browser.close().catch(() => {});
     process.exit(1);
   }
 }
