@@ -119,7 +119,8 @@ interface StrategyConfig {
   tanshoCap: number;
   matchScoreThreshold: number;
   scoreWeight: { highThreshold: number; highAmount: number; lowAmount: number };
-  umaren?: { enabled: boolean; perPoint: number };
+  tansho?: { restDaysMin: number };
+  umaren?: { enabled: boolean; perPoint: number; strategy?: string; raceNumMin?: number; excludeGrades?: string[] };
   wideEnabled?: boolean;
   oddsRiseExcludeThreshold: number;
   raceWeight: {
@@ -138,7 +139,8 @@ function loadStrategyConfig(): StrategyConfig {
     tanshoCap: 0.5,
     matchScoreThreshold: 55,
     scoreWeight: { highThreshold: 65, highAmount: 200, lowAmount: 100 },
-    umaren: { enabled: true, perPoint: 100 },
+    tansho: { restDaysMin: 50 },
+    umaren: { enabled: true, perPoint: 100, strategy: 'top3_box_late', raceNumMin: 11, excludeGrades: ['G1','G2','G3'] },
     wideEnabled: false,
     oddsRiseExcludeThreshold: 0.3,
     raceWeight: {
@@ -148,8 +150,12 @@ function loadStrategyConfig(): StrategyConfig {
   };
 }
 const strategyConfig = loadStrategyConfig();
+const tanshoRestDaysMin = strategyConfig.tansho?.restDaysMin ?? 50;
 const umarenEnabled = strategyConfig.umaren?.enabled ?? true;
 const umarenPerPoint = strategyConfig.umaren?.perPoint ?? 100;
+const umarenStrategy = strategyConfig.umaren?.strategy ?? 'cand_x_top1';
+const umarenRaceNumMin = strategyConfig.umaren?.raceNumMin ?? 1;
+const umarenExcludeGrades = new Set<string>(strategyConfig.umaren?.excludeGrades ?? []);
 const wideEnabled = strategyConfig.wideEnabled ?? false;
 
 function computeRaceWeight(raceNumber: number, name: string, grade: string): number {
@@ -199,11 +205,11 @@ async function loadBetsFromDb(): Promise<Bet[]> {
     '中京': 'CHUKYO', '京都': 'KYOTO', '阪神': 'HANSHIN', '小倉': 'KOKURA',
   };
 
+  // 馬連top3 box戦略は 候補なしレースでも対象。races LEFT JOIN predictions に変更
   const rows = await db.execute({
-    sql: `SELECT p.race_id, p.analysis_json, r.racecourse_name, r.race_number, r.name, r.grade
-          FROM predictions p
-          JOIN races r ON p.race_id = r.id
-          WHERE r.date = ? AND p.analysis_json LIKE '%shosanPrediction%'
+    sql: `SELECT r.id AS race_id, p.analysis_json, r.racecourse_name, r.race_number, r.name, r.grade
+          FROM races r LEFT JOIN predictions p ON p.race_id = r.id
+          WHERE r.date = ?
           ORDER BY r.racecourse_name, r.race_number`,
     args: [date],
   });
@@ -217,69 +223,92 @@ async function loadBetsFromDb(): Promise<Bet[]> {
 
     let analysis: {
       shosanPrediction?: {
-        candidates?: Array<{ horseNumber: number; matchScore: number; theory?: number }>;
-        restFilteredCandidates?: Array<{ horseNumber: number; matchScore: number; theory?: number }>;
+        candidates?: Array<{ horseNumber: number; matchScore: number; theory?: number; restDays?: number }>;
       };
-    };
-    try { analysis = JSON.parse(String(row.analysis_json)); } catch { continue; }
+    } | null = null;
+    if (row.analysis_json) {
+      try { analysis = JSON.parse(String(row.analysis_json)); } catch {}
+    }
     const sp = analysis?.shosanPrediction;
-    if (!sp) continue;
     const raceName = String(row.name || '');
     const grade = String(row.grade || '');
-    const weight = computeRaceWeight(Number(row.race_number), raceName, grade);
+    const raceNumber = Number(row.race_number);
+    const weight = computeRaceWeight(raceNumber, raceName, grade);
 
-    // ── 馬連 候補×1番人気 (2024-2026バックテストROI 102.2%、Top3除外74.4%) ──
-    // しょーさん候補(matchScore>=55) と 1番人気 のペアを馬連で買う
-    // 候補が1番人気と被ったら丸ごとスキップ (ノイズ排除)
-    const allCandidates = (sp.candidates || []) as Array<{ horseNumber: number; matchScore: number; theory?: number }>;
-    const qualified = allCandidates.filter(c => (c.matchScore || 0) >= strategyConfig.matchScoreThreshold);
-    if (umarenEnabled && qualified.length > 0) {
-      const top1Row = await db.execute({
-        sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT 1`,
+    // ── 馬連: top3人気 ボックス (11-12R限定 + 重賞除外) ──
+    //   strategy=top3_box_late のとき、しょーさん候補不問で1〜3番人気を3点ボックス
+    if (umarenEnabled && umarenStrategy === 'top3_box_late'
+        && raceNumber >= umarenRaceNumMin
+        && !umarenExcludeGrades.has(grade)) {
+      const top3Rows = await db.execute({
+        sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT 3`,
         args: [raceId],
       });
-      if (top1Row.rows.length === 1) {
-        const top1 = Number(top1Row.rows[0].horse_number);
-        const candidateNums = qualified.map(c => Number(c.horseNumber));
-        if (!candidateNums.includes(top1)) {
-          for (const cn of candidateNums) {
-            const pair = [Math.min(cn, top1), Math.max(cn, top1)];
-            bets.push({
-              date,
-              venue: venueCode,
-              venueName: venue,
-              raceNumber: Number(row.race_number),
-              betType: 'UMAREN',
-              betTypeName: '馬連',
-              combo: pair.map(n => String(n).padStart(2, '0')).join('-'),
-              horses: pair,
-              amount: umarenPerPoint,
-              weight,
-            });
+      if (top3Rows.rows.length === 3) {
+        const top3 = top3Rows.rows.map(r => Number(r.horse_number)).sort((a, b) => a - b);
+        // 3頭ボックス: ペア (1-2, 1-3, 2-3) → IPATは「2頭ずつ馬連」を3点セット
+        for (let i = 0; i < 3; i++) for (let j = i + 1; j < 3; j++) {
+          const pair = [top3[i], top3[j]];
+          bets.push({
+            date,
+            venue: venueCode,
+            venueName: venue,
+            raceNumber,
+            betType: 'UMAREN',
+            betTypeName: '馬連',
+            combo: pair.map(n => String(n).padStart(2, '0')).join('-'),
+            horses: pair,
+            amount: umarenPerPoint,
+            weight,
+          });
+        }
+      }
+    } else if (umarenEnabled && sp) {
+      // 旧戦略 (候補×1番人気) は config で無効化されているが、互換のため残す
+      const allCandidates = (sp.candidates || []);
+      const qualified = allCandidates.filter(c => (c.matchScore || 0) >= strategyConfig.matchScoreThreshold);
+      if (qualified.length > 0) {
+        const top1Row = await db.execute({
+          sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT 1`,
+          args: [raceId],
+        });
+        if (top1Row.rows.length === 1) {
+          const top1 = Number(top1Row.rows[0].horse_number);
+          const candidateNums = qualified.map(c => Number(c.horseNumber));
+          if (!candidateNums.includes(top1)) {
+            for (const cn of candidateNums) {
+              const pair = [Math.min(cn, top1), Math.max(cn, top1)];
+              bets.push({
+                date, venue: venueCode, venueName: venue, raceNumber,
+                betType: 'UMAREN', betTypeName: '馬連',
+                combo: pair.map(n => String(n).padStart(2, '0')).join('-'),
+                horses: pair, amount: umarenPerPoint, weight,
+              });
+            }
           }
         }
       }
     }
 
-    // ── 単勝: 休養フィルター済み × 理論1（バックテストROI ~148%） ──
+    // ── 単勝: theory=1 ∩ 前走から N日以上空いた馬 (config: tansho.restDaysMin) ──
+    // 既存の休養F (0-27 OR 56-69 OR 91-120) は撤廃、>=50日 (デフォルト) 一本化
     // matchScore別重み: >=65 は 200円、<65 は 100円
-    const restCandidates = (sp.restFilteredCandidates || []) as Array<{ horseNumber: number; matchScore: number; theory?: number }>;
-    const tanshoTargets = restCandidates.filter(c => c.theory === 1);
-    for (const c of tanshoTargets) {
-      const score = c.matchScore || 0;
-      const tanshoAmount = score >= strategyConfig.scoreWeight.highThreshold ? strategyConfig.scoreWeight.highAmount : strategyConfig.scoreWeight.lowAmount;
-      bets.push({
-        date,
-        venue: venueCode,
-        venueName: venue,
-        raceNumber: Number(row.race_number),
-        betType: 'TANSYO',
-        betTypeName: '単勝',
-        combo: String(c.horseNumber).padStart(2, '0'),
-        horses: [c.horseNumber],
-        amount: tanshoAmount,
-        weight,
-      });
+    if (sp) {
+      const tanshoTargets = (sp.candidates || []).filter(c =>
+        c.theory === 1 && (c.restDays ?? 0) >= tanshoRestDaysMin
+      );
+      for (const c of tanshoTargets) {
+        const score = c.matchScore || 0;
+        const tanshoAmount = score >= strategyConfig.scoreWeight.highThreshold ? strategyConfig.scoreWeight.highAmount : strategyConfig.scoreWeight.lowAmount;
+        bets.push({
+          date, venue: venueCode, venueName: venue, raceNumber,
+          betType: 'TANSYO', betTypeName: '単勝',
+          combo: String(c.horseNumber).padStart(2, '0'),
+          horses: [c.horseNumber],
+          amount: tanshoAmount,
+          weight,
+        });
+      }
     }
   }
   db.close();
