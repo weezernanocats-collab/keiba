@@ -16,9 +16,9 @@
   "umaren": {
     "enabled": true,
     "perPoint": 100,
-    "strategy": "cand_nagashi",
+    "strategy": "cand_box",
     "popN": 3,
-    "_note": "馬連: しょーさん候補(matchScore>=55) 軸 × オッズ1〜N位 流し。候補が人気と被ったらそのペア除外。popN=流す人気数"
+    "_note": "馬連: しょーさん候補(matchScore>=55) ∪ オッズ1〜N位 を全頭混ぜてボックス(全ペア)。popN=絡める人気数"
   },
   "wideEnabled": false,
   "oddsRiseExcludeThreshold": 0.3,

@@ -71,7 +71,7 @@ function loadConfig(): StrategyConfig {
     matchScoreThreshold: 55,
     scoreWeight: { highThreshold: 65, highAmount: 200, lowAmount: 100 },
     tansho: { restDaysMin: 50 },
-    umaren: { enabled: true, perPoint: 100, strategy: 'cand_nagashi', popN: 3 },
+    umaren: { enabled: true, perPoint: 100, strategy: 'cand_box', popN: 3 },
     wideEnabled: false,
     oddsRiseExcludeThreshold: 0.3,
     raceWeight: {
@@ -86,7 +86,7 @@ const riseThreshold = parseFloat(getArg('--filter-odds-rise') || String(config.o
 const SCORE_THRESHOLD = config.matchScoreThreshold;
 const UMAREN_ENABLED = config.umaren?.enabled ?? true;
 const UMAREN_PER_POINT = config.umaren?.perPoint ?? 100;
-const UMAREN_STRATEGY = config.umaren?.strategy ?? 'cand_nagashi';
+const UMAREN_STRATEGY = config.umaren?.strategy ?? 'cand_box';
 const UMAREN_POP_N = config.umaren?.popN ?? 3;
 const TANSHO_REST_DAYS_MIN = config.tansho?.restDaysMin ?? 50;
 const WIDE_ENABLED = config.wideEnabled ?? false;
@@ -188,7 +188,7 @@ async function buildDayPlans(): Promise<RacePlan[]> {
     let candidateNums: number[] = [];
     let popularNums: number[] = [];
 
-    // ── 馬連: しょーさん候補(matchScore>=55) 軸 × オッズ1〜N位 流し ──
+    // ── 馬連: しょーさん候補(matchScore>=55) ∪ オッズ1〜N位 を全頭ボックス ──
     if (UMAREN_ENABLED && sp) {
       const qualified = (sp.candidates || []).filter((c: any) => (c.matchScore || 0) >= SCORE_THRESHOLD);
       if (qualified.length > 0) {
@@ -196,15 +196,12 @@ async function buildDayPlans(): Promise<RacePlan[]> {
         const popNums = popRows.rows.map(x => Number(x.horse_number));
         popularNums = popNums;
         candidateNums = qualified.map((c: any) => Number(c.horseNumber));
-        const seen = new Set<string>();
-        for (const cn of candidateNums) {
-          for (const pop of popNums) {
-            if (cn === pop) continue;
-            const pair = [Math.min(cn, pop), Math.max(cn, pop)];
-            const key = pair.join('-');
-            if (seen.has(key)) continue;
-            seen.add(key);
-            initialBets.push({ type: 'UMAREN', horses: pair, amount: UMAREN_PER_POINT, tag: `umaren:候補×オッズ1-${UMAREN_POP_N}位流し` });
+        const boxHorses = [...new Set([...candidateNums, ...popNums])].sort((a, b) => a - b);
+        if (boxHorses.length >= 2) {
+          for (let i = 0; i < boxHorses.length; i++) {
+            for (let j = i + 1; j < boxHorses.length; j++) {
+              initialBets.push({ type: 'UMAREN', horses: [boxHorses[i], boxHorses[j]], amount: UMAREN_PER_POINT, tag: `umaren:候補∪オッズ1-${UMAREN_POP_N}位box` });
+            }
           }
         }
       }

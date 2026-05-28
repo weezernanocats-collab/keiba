@@ -140,7 +140,7 @@ function loadStrategyConfig(): StrategyConfig {
     matchScoreThreshold: 55,
     scoreWeight: { highThreshold: 65, highAmount: 200, lowAmount: 100 },
     tansho: { restDaysMin: 50 },
-    umaren: { enabled: true, perPoint: 100, strategy: 'cand_nagashi', popN: 3 },
+    umaren: { enabled: true, perPoint: 100, strategy: 'cand_box', popN: 3 },
     wideEnabled: false,
     oddsRiseExcludeThreshold: 0.3,
     raceWeight: {
@@ -153,7 +153,7 @@ const strategyConfig = loadStrategyConfig();
 const tanshoRestDaysMin = strategyConfig.tansho?.restDaysMin ?? 50;
 const umarenEnabled = strategyConfig.umaren?.enabled ?? true;
 const umarenPerPoint = strategyConfig.umaren?.perPoint ?? 100;
-const umarenStrategy = strategyConfig.umaren?.strategy ?? 'cand_nagashi';
+const umarenStrategy = strategyConfig.umaren?.strategy ?? 'cand_box';
 const umarenPopN = strategyConfig.umaren?.popN ?? 3;
 const wideEnabled = strategyConfig.wideEnabled ?? false;
 
@@ -233,8 +233,7 @@ async function loadBetsFromDb(): Promise<Bet[]> {
     const raceNumber = Number(row.race_number);
     const weight = computeRaceWeight(raceNumber, raceName, grade);
 
-    // ── 馬連: しょーさん候補(matchScore>=55) 軸 × オッズ1〜N位 流し ──
-    //   候補が人気馬と被ったペアは除外
+    // ── 馬連: しょーさん候補(matchScore>=55) ∪ オッズ1〜N位 を全頭ボックス ──
     if (umarenEnabled && sp) {
       const qualified = (sp.candidates || []).filter(c => (c.matchScore || 0) >= strategyConfig.matchScoreThreshold);
       if (qualified.length > 0) {
@@ -244,20 +243,19 @@ async function loadBetsFromDb(): Promise<Bet[]> {
         });
         const popNums = popRows.rows.map(r => Number(r.horse_number));
         const candidateNums = qualified.map(c => Number(c.horseNumber));
-        const seen = new Set<string>();
-        for (const cn of candidateNums) {
-          for (const pop of popNums) {
-            if (cn === pop) continue;  // 候補が人気と同一ならそのペアskip
-            const pair = [Math.min(cn, pop), Math.max(cn, pop)];
-            const key = pair.join('-');
-            if (seen.has(key)) continue;  // 同一ペアの重複買い防止
-            seen.add(key);
-            bets.push({
-              date, venue: venueCode, venueName: venue, raceNumber,
-              betType: 'UMAREN', betTypeName: '馬連',
-              combo: pair.map(n => String(n).padStart(2, '0')).join('-'),
-              horses: pair, amount: umarenPerPoint, weight,
-            });
+        // 候補と人気を全部混ぜてボックス (全ペア)
+        const boxHorses = [...new Set([...candidateNums, ...popNums])].sort((a, b) => a - b);
+        if (boxHorses.length >= 2) {
+          for (let i = 0; i < boxHorses.length; i++) {
+            for (let j = i + 1; j < boxHorses.length; j++) {
+              const pair = [boxHorses[i], boxHorses[j]];
+              bets.push({
+                date, venue: venueCode, venueName: venue, raceNumber,
+                betType: 'UMAREN', betTypeName: '馬連',
+                combo: pair.map(n => String(n).padStart(2, '0')).join('-'),
+                horses: pair, amount: umarenPerPoint, weight,
+              });
+            }
           }
         }
       }
