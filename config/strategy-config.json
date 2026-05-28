@@ -1,7 +1,7 @@
 {
-  "version": "2026-05-27",
-  "lastUpdated": "2026-05-27T00:00:00Z",
-  "dailyBudget": 5000,
+  "version": "2026-05-28",
+  "lastUpdated": "2026-05-28T00:00:00Z",
+  "dailyBudget": 7000,
   "tanshoCap": 0.5,
   "matchScoreThreshold": 55,
   "scoreWeight": {
@@ -94,6 +94,20 @@
         "tansho_diff": -11.3,
         "umaren_top3box_late_no_grade_ROI": 100.7,
         "note": "単勝はROI-11pt悪化を覚悟、馬連はトントン狙い"
+      }
+    },
+    {
+      "date": "2026-05-28",
+      "change": "馬連を 候補∪オッズ1-3位 ボックス(cand_box, popN=3) に変更 + dailyBudget 5000→7000 (ユーザー指示)",
+      "params": {
+        "umaren.strategy": "cand_box",
+        "umaren.popN": 3,
+        "dailyBudget": 7000
+      },
+      "backtest": {
+        "umaren_cand_box_top3_ROI": 72.1,
+        "weekend_5_23_24_combinedROI": 158.2,
+        "note": "馬連boxは長期ROI 72%(赤字)だが直近土日は好調。予算7000で全点カットなし、最大1点100-300円"
       }
     }
   ]
