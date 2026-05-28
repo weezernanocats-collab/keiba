@@ -120,7 +120,7 @@ interface StrategyConfig {
   matchScoreThreshold: number;
   scoreWeight: { highThreshold: number; highAmount: number; lowAmount: number };
   tansho?: { restDaysMin: number };
-  umaren?: { enabled: boolean; perPoint: number; strategy?: string; raceNumMin?: number; excludeGrades?: string[] };
+  umaren?: { enabled: boolean; perPoint: number; strategy?: string; popN?: number; raceNumMin?: number; excludeGrades?: string[] };
   wideEnabled?: boolean;
   oddsRiseExcludeThreshold: number;
   raceWeight: {
@@ -140,7 +140,7 @@ function loadStrategyConfig(): StrategyConfig {
     matchScoreThreshold: 55,
     scoreWeight: { highThreshold: 65, highAmount: 200, lowAmount: 100 },
     tansho: { restDaysMin: 50 },
-    umaren: { enabled: true, perPoint: 100, strategy: 'top3_box_late', raceNumMin: 11, excludeGrades: ['G1','G2','G3'] },
+    umaren: { enabled: true, perPoint: 100, strategy: 'cand_nagashi', popN: 3 },
     wideEnabled: false,
     oddsRiseExcludeThreshold: 0.3,
     raceWeight: {
@@ -153,9 +153,8 @@ const strategyConfig = loadStrategyConfig();
 const tanshoRestDaysMin = strategyConfig.tansho?.restDaysMin ?? 50;
 const umarenEnabled = strategyConfig.umaren?.enabled ?? true;
 const umarenPerPoint = strategyConfig.umaren?.perPoint ?? 100;
-const umarenStrategy = strategyConfig.umaren?.strategy ?? 'cand_x_top1';
-const umarenRaceNumMin = strategyConfig.umaren?.raceNumMin ?? 1;
-const umarenExcludeGrades = new Set<string>(strategyConfig.umaren?.excludeGrades ?? []);
+const umarenStrategy = strategyConfig.umaren?.strategy ?? 'cand_nagashi';
+const umarenPopN = strategyConfig.umaren?.popN ?? 3;
 const wideEnabled = strategyConfig.wideEnabled ?? false;
 
 function computeRaceWeight(raceNumber: number, name: string, grade: string): number {
@@ -205,11 +204,10 @@ async function loadBetsFromDb(): Promise<Bet[]> {
     '中京': 'CHUKYO', '京都': 'KYOTO', '阪神': 'HANSHIN', '小倉': 'KOKURA',
   };
 
-  // 馬連top3 box戦略は 候補なしレースでも対象。races LEFT JOIN predictions に変更
   const rows = await db.execute({
-    sql: `SELECT r.id AS race_id, p.analysis_json, r.racecourse_name, r.race_number, r.name, r.grade
-          FROM races r LEFT JOIN predictions p ON p.race_id = r.id
-          WHERE r.date = ?
+    sql: `SELECT p.race_id, p.analysis_json, r.racecourse_name, r.race_number, r.name, r.grade
+          FROM predictions p JOIN races r ON p.race_id = r.id
+          WHERE r.date = ? AND p.analysis_json LIKE '%shosanPrediction%'
           ORDER BY r.racecourse_name, r.race_number`,
     args: [date],
   });
@@ -235,56 +233,31 @@ async function loadBetsFromDb(): Promise<Bet[]> {
     const raceNumber = Number(row.race_number);
     const weight = computeRaceWeight(raceNumber, raceName, grade);
 
-    // ── 馬連: top3人気 ボックス (11-12R限定 + 重賞除外) ──
-    //   strategy=top3_box_late のとき、しょーさん候補不問で1〜3番人気を3点ボックス
-    if (umarenEnabled && umarenStrategy === 'top3_box_late'
-        && raceNumber >= umarenRaceNumMin
-        && !umarenExcludeGrades.has(grade)) {
-      const top3Rows = await db.execute({
-        sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT 3`,
-        args: [raceId],
-      });
-      if (top3Rows.rows.length === 3) {
-        const top3 = top3Rows.rows.map(r => Number(r.horse_number)).sort((a, b) => a - b);
-        // 3頭ボックス: ペア (1-2, 1-3, 2-3) → IPATは「2頭ずつ馬連」を3点セット
-        for (let i = 0; i < 3; i++) for (let j = i + 1; j < 3; j++) {
-          const pair = [top3[i], top3[j]];
-          bets.push({
-            date,
-            venue: venueCode,
-            venueName: venue,
-            raceNumber,
-            betType: 'UMAREN',
-            betTypeName: '馬連',
-            combo: pair.map(n => String(n).padStart(2, '0')).join('-'),
-            horses: pair,
-            amount: umarenPerPoint,
-            weight,
-          });
-        }
-      }
-    } else if (umarenEnabled && sp) {
-      // 旧戦略 (候補×1番人気) は config で無効化されているが、互換のため残す
-      const allCandidates = (sp.candidates || []);
-      const qualified = allCandidates.filter(c => (c.matchScore || 0) >= strategyConfig.matchScoreThreshold);
+    // ── 馬連: しょーさん候補(matchScore>=55) 軸 × オッズ1〜N位 流し ──
+    //   候補が人気馬と被ったペアは除外
+    if (umarenEnabled && sp) {
+      const qualified = (sp.candidates || []).filter(c => (c.matchScore || 0) >= strategyConfig.matchScoreThreshold);
       if (qualified.length > 0) {
-        const top1Row = await db.execute({
-          sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT 1`,
-          args: [raceId],
+        const popRows = await db.execute({
+          sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT ?`,
+          args: [raceId, umarenPopN],
         });
-        if (top1Row.rows.length === 1) {
-          const top1 = Number(top1Row.rows[0].horse_number);
-          const candidateNums = qualified.map(c => Number(c.horseNumber));
-          if (!candidateNums.includes(top1)) {
-            for (const cn of candidateNums) {
-              const pair = [Math.min(cn, top1), Math.max(cn, top1)];
-              bets.push({
-                date, venue: venueCode, venueName: venue, raceNumber,
-                betType: 'UMAREN', betTypeName: '馬連',
-                combo: pair.map(n => String(n).padStart(2, '0')).join('-'),
-                horses: pair, amount: umarenPerPoint, weight,
-              });
-            }
+        const popNums = popRows.rows.map(r => Number(r.horse_number));
+        const candidateNums = qualified.map(c => Number(c.horseNumber));
+        const seen = new Set<string>();
+        for (const cn of candidateNums) {
+          for (const pop of popNums) {
+            if (cn === pop) continue;  // 候補が人気と同一ならそのペアskip
+            const pair = [Math.min(cn, pop), Math.max(cn, pop)];
+            const key = pair.join('-');
+            if (seen.has(key)) continue;  // 同一ペアの重複買い防止
+            seen.add(key);
+            bets.push({
+              date, venue: venueCode, venueName: venue, raceNumber,
+              betType: 'UMAREN', betTypeName: '馬連',
+              combo: pair.map(n => String(n).padStart(2, '0')).join('-'),
+              horses: pair, amount: umarenPerPoint, weight,
+            });
           }
         }
       }

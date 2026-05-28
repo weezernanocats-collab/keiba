@@ -50,7 +50,7 @@ interface StrategyConfig {
   matchScoreThreshold: number;
   scoreWeight: { highThreshold: number; highAmount: number; lowAmount: number };
   tansho?: { restDaysMin: number };
-  umaren?: { enabled: boolean; perPoint: number; strategy?: string; raceNumMin?: number; excludeGrades?: string[] };
+  umaren?: { enabled: boolean; perPoint: number; strategy?: string; popN?: number; raceNumMin?: number; excludeGrades?: string[] };
   wideEnabled?: boolean;
   oddsRiseExcludeThreshold: number;
   raceWeight: {
@@ -71,7 +71,7 @@ function loadConfig(): StrategyConfig {
     matchScoreThreshold: 55,
     scoreWeight: { highThreshold: 65, highAmount: 200, lowAmount: 100 },
     tansho: { restDaysMin: 50 },
-    umaren: { enabled: true, perPoint: 100, strategy: 'top3_box_late', raceNumMin: 11, excludeGrades: ['G1','G2','G3'] },
+    umaren: { enabled: true, perPoint: 100, strategy: 'cand_nagashi', popN: 3 },
     wideEnabled: false,
     oddsRiseExcludeThreshold: 0.3,
     raceWeight: {
@@ -86,9 +86,8 @@ const riseThreshold = parseFloat(getArg('--filter-odds-rise') || String(config.o
 const SCORE_THRESHOLD = config.matchScoreThreshold;
 const UMAREN_ENABLED = config.umaren?.enabled ?? true;
 const UMAREN_PER_POINT = config.umaren?.perPoint ?? 100;
-const UMAREN_STRATEGY = config.umaren?.strategy ?? 'cand_x_top1';
-const UMAREN_RACE_NUM_MIN = config.umaren?.raceNumMin ?? 1;
-const UMAREN_EXCLUDE_GRADES = new Set<string>(config.umaren?.excludeGrades ?? []);
+const UMAREN_STRATEGY = config.umaren?.strategy ?? 'cand_nagashi';
+const UMAREN_POP_N = config.umaren?.popN ?? 3;
 const TANSHO_REST_DAYS_MIN = config.tansho?.restDaysMin ?? 50;
 const WIDE_ENABLED = config.wideEnabled ?? false;
 
@@ -160,11 +159,10 @@ function parseRaceTime(timeStr: string, baseDate: Date): Date {
 
 // ── レース計画構築 ──
 async function buildDayPlans(): Promise<RacePlan[]> {
-  // 馬連top3 box戦略は 候補なしレースでも買うため、predictions LEFT JOIN に変更
   const rows = await db.execute({
-    sql: `SELECT r.id AS race_id, p.analysis_json, r.racecourse_name, r.race_number, r.name, r.grade, r.time
-          FROM races r LEFT JOIN predictions p ON p.race_id = r.id
-          WHERE r.date = ?
+    sql: `SELECT p.race_id, p.analysis_json, r.racecourse_name, r.race_number, r.name, r.grade, r.time
+          FROM predictions p JOIN races r ON p.race_id = r.id
+          WHERE r.date = ? AND p.analysis_json LIKE '%shosanPrediction%'
           ORDER BY r.time, r.racecourse_name, r.race_number`,
     args: [date],
   });
@@ -190,32 +188,23 @@ async function buildDayPlans(): Promise<RacePlan[]> {
     let candidateNums: number[] = [];
     let popularNums: number[] = [];
 
-    // ── 馬連 top3人気 3頭ボックス (11-12R限定 + 重賞除外) ──
-    if (UMAREN_ENABLED && UMAREN_STRATEGY === 'top3_box_late'
-        && raceNum >= UMAREN_RACE_NUM_MIN
-        && !UMAREN_EXCLUDE_GRADES.has(rgrade)) {
-      const top3 = await db.execute({ sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT 3`, args: [raceId] });
-      if (top3.rows.length === 3) {
-        const t3 = top3.rows.map(x => Number(x.horse_number)).sort((a, b) => a - b);
-        popularNums = t3;
-        for (let i = 0; i < 3; i++) for (let j = i + 1; j < 3; j++) {
-          initialBets.push({ type: 'UMAREN', horses: [t3[i], t3[j]], amount: UMAREN_PER_POINT, tag: `umaren:top3box` });
-        }
-      }
-    } else if (UMAREN_ENABLED && sp) {
-      // 旧戦略 (候補×1番人気) は互換のため残す
+    // ── 馬連: しょーさん候補(matchScore>=55) 軸 × オッズ1〜N位 流し ──
+    if (UMAREN_ENABLED && sp) {
       const qualified = (sp.candidates || []).filter((c: any) => (c.matchScore || 0) >= SCORE_THRESHOLD);
       if (qualified.length > 0) {
-        const top1 = await db.execute({ sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT 1`, args: [raceId] });
-        if (top1.rows.length === 1) {
-          const top1n = Number(top1.rows[0].horse_number);
-          popularNums = [top1n];
-          candidateNums = qualified.map((c: any) => Number(c.horseNumber));
-          if (!candidateNums.includes(top1n)) {
-            for (const cn of candidateNums) {
-              const pair = [Math.min(cn, top1n), Math.max(cn, top1n)];
-              initialBets.push({ type: 'UMAREN', horses: pair, amount: UMAREN_PER_POINT, tag: `umaren:候補×1番人気` });
-            }
+        const popRows = await db.execute({ sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT ?`, args: [raceId, UMAREN_POP_N] });
+        const popNums = popRows.rows.map(x => Number(x.horse_number));
+        popularNums = popNums;
+        candidateNums = qualified.map((c: any) => Number(c.horseNumber));
+        const seen = new Set<string>();
+        for (const cn of candidateNums) {
+          for (const pop of popNums) {
+            if (cn === pop) continue;
+            const pair = [Math.min(cn, pop), Math.max(cn, pop)];
+            const key = pair.join('-');
+            if (seen.has(key)) continue;
+            seen.add(key);
+            initialBets.push({ type: 'UMAREN', horses: pair, amount: UMAREN_PER_POINT, tag: `umaren:候補×オッズ1-${UMAREN_POP_N}位流し` });
           }
         }
       }
