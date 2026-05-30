@@ -53,6 +53,7 @@ interface StrategyConfig {
   umaren?: { enabled: boolean; perPoint: number; strategy?: string; popN?: number; scoreMin?: number; raceNumMin?: number; excludeGrades?: string[] };
   wideEnabled?: boolean;
   oddsRiseExcludeThreshold: number;
+  skipRaces?: string[];
   raceWeight: {
     ageMult_3yoOnly: number;
     ageMult_default: number;
@@ -91,6 +92,7 @@ const UMAREN_POP_N = config.umaren?.popN ?? 3;
 const UMAREN_SCORE_MIN = config.umaren?.scoreMin ?? config.matchScoreThreshold;
 const TANSHO_REST_DAYS_MIN = config.tansho?.restDaysMin ?? 50;
 const TANSHO_INCLUDE_T2 = config.tansho?.includeTheory2 ?? false;
+const SKIP_RACES = new Set<string>(config.skipRaces ?? []);
 const WIDE_ENABLED = config.wideEnabled ?? false;
 
 const NETKEIBA_BASE = 'https://race.netkeiba.com';
@@ -175,6 +177,9 @@ async function buildDayPlans(): Promise<RacePlan[]> {
     const venueName = String(row.racecourse_name);
     const venueCode = VENUE_MAP[venueName];
     if (!venueCode) continue;
+    // skipRaces 設定で個別レース除外 (例: "京都11R")
+    const raceLabel = `${venueName}${row.race_number}R`;
+    if (SKIP_RACES.has(raceLabel)) { log(`⏭ ${raceLabel}: skipRaces で除外`); continue; }
     const timeStr = String(row.time || '');
     if (!/^\d{2}:\d{2}/.test(timeStr)) continue;
     const raceTime = parseRaceTime(timeStr, today);

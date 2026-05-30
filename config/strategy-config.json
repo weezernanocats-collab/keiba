@@ -24,6 +24,8 @@
   },
   "wideEnabled": false,
   "oddsRiseExcludeThreshold": 999,
+  "skipRaces": ["京都11R"],
+  "_skipRaces_note": "venue+raceNumber形式 (例: 京都11R)。レース計画から除外",
   "raceWeight": {
     "ageMult_3yoOnly": 0.5,
     "ageMult_default": 1.0,
