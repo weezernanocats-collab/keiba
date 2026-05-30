@@ -245,8 +245,11 @@ async function loadBetsFromDb(): Promise<Bet[]> {
         });
         const popNums = popRows.rows.map(r => Number(r.horse_number));
         const candidateNums = qualified.map(c => Number(c.horseNumber));
-        // 候補と人気を全部混ぜてボックス (全ペア)
         const boxHorses = [...new Set([...candidateNums, ...popNums])].sort((a, b) => a - b);
+        // 候補の max matchScore で base をブースト (s50=1.0, s60=1.2, s75=1.5)
+        const maxScore = Math.max(...qualified.map(c => c.matchScore || 0));
+        const boost = 1 + Math.max(0, (maxScore - 50) / 50);  // s50:1.0, s60:1.2, s75:1.5
+        const baseAmt = umarenPerPoint * boost;  // float、最終100円丸めは allocateBudget で
         if (boxHorses.length >= 2) {
           for (let i = 0; i < boxHorses.length; i++) {
             for (let j = i + 1; j < boxHorses.length; j++) {
@@ -255,7 +258,7 @@ async function loadBetsFromDb(): Promise<Bet[]> {
                 date, venue: venueCode, venueName: venue, raceNumber,
                 betType: 'UMAREN', betTypeName: '馬連',
                 combo: pair.map(n => String(n).padStart(2, '0')).join('-'),
-                horses: pair, amount: umarenPerPoint, weight,
+                horses: pair, amount: baseAmt, weight,
               });
             }
           }

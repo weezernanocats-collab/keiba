@@ -199,10 +199,14 @@ async function buildDayPlans(): Promise<RacePlan[]> {
         popularNums = popNums;
         candidateNums = qualified.map((c: any) => Number(c.horseNumber));
         const boxHorses = [...new Set([...candidateNums, ...popNums])].sort((a, b) => a - b);
+        // 候補の max matchScore で base をブースト (s50=1.0, s60=1.2, s75=1.5)
+        const maxScore = Math.max(...qualified.map((c: any) => c.matchScore || 0));
+        const boost = 1 + Math.max(0, (maxScore - 50) / 50);  // s50:1.0, s60:1.2, s75:1.5
+        const baseAmt = UMAREN_PER_POINT * boost;  // float、最終100円丸めは allocateBudget で
         if (boxHorses.length >= 2) {
           for (let i = 0; i < boxHorses.length; i++) {
             for (let j = i + 1; j < boxHorses.length; j++) {
-              initialBets.push({ type: 'UMAREN', horses: [boxHorses[i], boxHorses[j]], amount: UMAREN_PER_POINT, tag: `umaren:候補∪オッズ1-${UMAREN_POP_N}位box` });
+              initialBets.push({ type: 'UMAREN', horses: [boxHorses[i], boxHorses[j]], amount: baseAmt, tag: `umaren:候補∪オッズ1-${UMAREN_POP_N}位box(maxS=${maxScore})` });
             }
           }
         }
@@ -264,6 +268,22 @@ function allocateBudget(plans: RacePlan[]) {
       total -= cost(x.bet);
     }
     for (const p of plans) p.initialBets = p.initialBets.filter(b => !drop.has(b));
+  }
+  // 余り予算を高weight順に +100円ずつ再配分 (消化率最大化)
+  const live = items.filter(x => plans.some(p => p.initialBets.includes(x.bet)));
+  if (total < budget && live.length > 0) {
+    const sorted = [...live].sort((a, b) => b.plan.weight - a.plan.weight);
+    let i = 0, safety = 0;
+    while (total < budget && safety < 1000) {
+      const x = sorted[i % sorted.length];
+      const add = x.bet.type === 'WIDE' ? 100 * Math.max(1, x.bet.horses.length * (x.bet.horses.length - 1) / 2) : 100;
+      if (total + add <= budget) {
+        x.bet.amount += 100;
+        total += add;
+      }
+      i++; safety++;
+      if (i > sorted.length && total + 100 > budget) break;
+    }
   }
   const finalItems = plans.flatMap(p => p.initialBets);
   const tCnt = finalItems.filter(b => b.type === 'TANSYO').length;
