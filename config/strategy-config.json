@@ -10,8 +10,9 @@
     "lowAmount": 100
   },
   "tansho": {
-    "restDaysMin": 50,
-    "_note": "単勝: theory=1 ∩ 前走から50日以上空いた馬。既存の好走ゾーン(0-27/56-69/91-120)を撤廃し >=50日 一本化 (ユーザー指示)"
+    "restDaysMin": 35,
+    "includeTheory2": true,
+    "_note": "単勝: 理論1+2 ∩ 前走から35日以上空いた馬 (5/30 50→35緩和 + 理論2解禁)"
   },
   "umaren": {
     "enabled": true,

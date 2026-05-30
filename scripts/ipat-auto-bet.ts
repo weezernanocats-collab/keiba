@@ -119,7 +119,7 @@ interface StrategyConfig {
   tanshoCap: number;
   matchScoreThreshold: number;
   scoreWeight: { highThreshold: number; highAmount: number; lowAmount: number };
-  tansho?: { restDaysMin: number };
+  tansho?: { restDaysMin: number; includeTheory2?: boolean };
   umaren?: { enabled: boolean; perPoint: number; strategy?: string; popN?: number; scoreMin?: number; raceNumMin?: number; excludeGrades?: string[] };
   wideEnabled?: boolean;
   oddsRiseExcludeThreshold: number;
@@ -151,6 +151,7 @@ function loadStrategyConfig(): StrategyConfig {
 }
 const strategyConfig = loadStrategyConfig();
 const tanshoRestDaysMin = strategyConfig.tansho?.restDaysMin ?? 50;
+const tanshoIncludeTheory2 = strategyConfig.tansho?.includeTheory2 ?? false;
 const umarenEnabled = strategyConfig.umaren?.enabled ?? true;
 const umarenPerPoint = strategyConfig.umaren?.perPoint ?? 100;
 const umarenStrategy = strategyConfig.umaren?.strategy ?? 'cand_box';
@@ -266,9 +267,10 @@ async function loadBetsFromDb(): Promise<Bet[]> {
     // 既存の休養F (0-27 OR 56-69 OR 91-120) は撤廃、>=50日 (デフォルト) 一本化
     // matchScore別重み: >=65 は 200円、<65 は 100円
     if (sp) {
-      const tanshoTargets = (sp.candidates || []).filter(c =>
-        c.theory === 1 && (c.restDays ?? 0) >= tanshoRestDaysMin
-      );
+      const tanshoTargets = (sp.candidates || []).filter(c => {
+        const theoryOk = tanshoIncludeTheory2 ? (c.theory === 1 || c.theory === 2) : (c.theory === 1);
+        return theoryOk && (c.restDays ?? 0) >= tanshoRestDaysMin;
+      });
       for (const c of tanshoTargets) {
         const score = c.matchScore || 0;
         const tanshoAmount = score >= strategyConfig.scoreWeight.highThreshold ? strategyConfig.scoreWeight.highAmount : strategyConfig.scoreWeight.lowAmount;

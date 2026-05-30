@@ -49,7 +49,7 @@ interface StrategyConfig {
   tanshoCap: number;
   matchScoreThreshold: number;
   scoreWeight: { highThreshold: number; highAmount: number; lowAmount: number };
-  tansho?: { restDaysMin: number };
+  tansho?: { restDaysMin: number; includeTheory2?: boolean };
   umaren?: { enabled: boolean; perPoint: number; strategy?: string; popN?: number; scoreMin?: number; raceNumMin?: number; excludeGrades?: string[] };
   wideEnabled?: boolean;
   oddsRiseExcludeThreshold: number;
@@ -90,6 +90,7 @@ const UMAREN_STRATEGY = config.umaren?.strategy ?? 'cand_box';
 const UMAREN_POP_N = config.umaren?.popN ?? 3;
 const UMAREN_SCORE_MIN = config.umaren?.scoreMin ?? config.matchScoreThreshold;
 const TANSHO_REST_DAYS_MIN = config.tansho?.restDaysMin ?? 50;
+const TANSHO_INCLUDE_T2 = config.tansho?.includeTheory2 ?? false;
 const WIDE_ENABLED = config.wideEnabled ?? false;
 
 const NETKEIBA_BASE = 'https://race.netkeiba.com';
@@ -210,7 +211,10 @@ async function buildDayPlans(): Promise<RacePlan[]> {
 
     // ── 単勝: theory=1 ∩ restDays >= N日 (config: tansho.restDaysMin) ──
     if (sp) {
-      const tanshoTargets = (sp.candidates || []).filter((c: any) => c.theory === 1 && (c.restDays ?? 0) >= TANSHO_REST_DAYS_MIN);
+      const tanshoTargets = (sp.candidates || []).filter((c: any) => {
+        const tok = TANSHO_INCLUDE_T2 ? (c.theory === 1 || c.theory === 2) : (c.theory === 1);
+        return tok && (c.restDays ?? 0) >= TANSHO_REST_DAYS_MIN;
+      });
       for (const c of tanshoTargets) {
         const score = (c.matchScore || 0);
         const tAmount = score >= config.scoreWeight.highThreshold ? config.scoreWeight.highAmount : config.scoreWeight.lowAmount;
