@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
 #
-# Slack DMからYouTube URLを受信してpaddock-watcherを起動
+# ⚠️ 廃止 (2026-05-30): paddock-watcher 自体が廃止のため、これも使えない。
 #
-# 使い方:
-#   bash scripts/paddock-launcher.sh
-#
-# SlackのDMにYouTube URLを送るとwatcherが自動起動。
-# 新しいURLが送られたら古いwatcherを停止して再起動。
-# 17時に自動終了。
-#
+
+echo "ERROR: paddock-launcher.sh は廃止されました (2026-05-30)。" >&2
+echo "  paddock-watcher が scheduler と並行実行で hang を引き起こすため。" >&2
+exit 1
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"

@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
 #
-# パドック解説リアルタイ��文字起こし + 発走7分前に予想一括再生成
+# ⚠️ 廃止 (2026-05-30): scheduler と並行実行するとリソース競合で
+#    scheduler の polling loop が hang する事象を確認。使用禁止。
 #
-# 使い方:
-#   bash scripts/paddock-watcher.sh <YouTube_URL>
-#
-# 動作:
-#   1. ライブ配信音声を60秒チャンクで継続取得・文字起こし
-#   2. 発走7分���になったレースを検知
-#   3. 当日の未発走レースをまとめて予想再生成
-#   4. 全テキストをログに保存
-#
+# 旧: パドック解説リアルタイム文字起こし + 発走7分前に予想一括再生成
+
+echo "ERROR: paddock-watcher.sh は廃止されました (2026-05-30)。" >&2
+echo "  理由: scheduler と並行実行するとリソース競合で scheduler が hang する。" >&2
+exit 1
 
 set -eo pipefail
 
