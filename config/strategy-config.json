@@ -1,7 +1,7 @@
 {
-  "version": "2026-05-28",
-  "lastUpdated": "2026-05-28T00:00:00Z",
-  "dailyBudget": 7000,
+  "version": "2026-05-30",
+  "lastUpdated": "2026-05-30T00:00:00Z",
+  "dailyBudget": 10000,
   "tanshoCap": 0.5,
   "matchScoreThreshold": 55,
   "scoreWeight": {
@@ -18,7 +18,8 @@
     "perPoint": 100,
     "strategy": "cand_box",
     "popN": 3,
-    "_note": "馬連: しょーさん候補(matchScore>=55) ∪ オッズ1〜N位 を全頭混ぜてボックス(全ペア)。popN=絡める人気数"
+    "scoreMin": 50,
+    "_note": "馬連: しょーさん候補(matchScore>=scoreMin) ∪ オッズ1〜N位 を全頭混ぜてボックス。scoreMin=50で除外レースも拾う"
   },
   "wideEnabled": false,
   "oddsRiseExcludeThreshold": 0.3,
@@ -109,6 +110,15 @@
         "weekend_5_23_24_combinedROI": 158.2,
         "note": "馬連boxは長期ROI 72%(赤字)だが直近土日は好調。予算7000で全点カットなし、最大1点100-300円"
       }
+    },
+    {
+      "date": "2026-05-30",
+      "change": "umaren.scoreMin=50 (旧55) で除外レース取り込み + dailyBudget 7000→10000 (ユーザー指示)",
+      "params": {
+        "umaren.scoreMin": 50,
+        "dailyBudget": 10000
+      },
+      "note": "matchScore 50-54候補も馬連boxに含める。除外4レース(全てs50)を取り込み"
     }
   ]
 }

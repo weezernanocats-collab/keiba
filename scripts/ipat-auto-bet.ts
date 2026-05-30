@@ -120,7 +120,7 @@ interface StrategyConfig {
   matchScoreThreshold: number;
   scoreWeight: { highThreshold: number; highAmount: number; lowAmount: number };
   tansho?: { restDaysMin: number };
-  umaren?: { enabled: boolean; perPoint: number; strategy?: string; popN?: number; raceNumMin?: number; excludeGrades?: string[] };
+  umaren?: { enabled: boolean; perPoint: number; strategy?: string; popN?: number; scoreMin?: number; raceNumMin?: number; excludeGrades?: string[] };
   wideEnabled?: boolean;
   oddsRiseExcludeThreshold: number;
   raceWeight: {
@@ -155,6 +155,7 @@ const umarenEnabled = strategyConfig.umaren?.enabled ?? true;
 const umarenPerPoint = strategyConfig.umaren?.perPoint ?? 100;
 const umarenStrategy = strategyConfig.umaren?.strategy ?? 'cand_box';
 const umarenPopN = strategyConfig.umaren?.popN ?? 3;
+const umarenScoreMin = strategyConfig.umaren?.scoreMin ?? strategyConfig.matchScoreThreshold;
 const wideEnabled = strategyConfig.wideEnabled ?? false;
 
 function computeRaceWeight(raceNumber: number, name: string, grade: string): number {
@@ -235,7 +236,7 @@ async function loadBetsFromDb(): Promise<Bet[]> {
 
     // ── 馬連: しょーさん候補(matchScore>=55) ∪ オッズ1〜N位 を全頭ボックス ──
     if (umarenEnabled && sp) {
-      const qualified = (sp.candidates || []).filter(c => (c.matchScore || 0) >= strategyConfig.matchScoreThreshold);
+      const qualified = (sp.candidates || []).filter(c => (c.matchScore || 0) >= umarenScoreMin);
       if (qualified.length > 0) {
         const popRows = await db.execute({
           sql: `SELECT horse_number FROM race_entries WHERE race_id = ? AND odds > 0 ORDER BY odds ASC LIMIT ?`,
