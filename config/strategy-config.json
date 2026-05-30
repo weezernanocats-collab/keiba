@@ -23,7 +23,7 @@
     "_note": "馬連: しょーさん候補(matchScore>=scoreMin) ∪ オッズ1〜N位 を全頭混ぜてボックス。scoreMin=50で除外レースも拾う"
   },
   "wideEnabled": false,
-  "oddsRiseExcludeThreshold": 0.3,
+  "oddsRiseExcludeThreshold": 999,
   "raceWeight": {
     "ageMult_3yoOnly": 0.5,
     "ageMult_default": 1.0,
