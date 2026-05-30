@@ -571,21 +571,34 @@ async function main() {
 
   log(`\n=== 計画 (${plans.length}レース) ===`);
   const planLines: string[] = [];
+  let tanTotal = 0, tanCount = 0;
+  let umaTotal = 0, umaCount = 0;
   for (const p of plans) {
     const tStr = p.raceTime.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
     const wide = p.initialBets.find(b => b.type === 'WIDE');
     const umaren = p.initialBets.filter(b => b.type === 'UMAREN');
     const tans = p.initialBets.filter(b => b.type === 'TANSYO');
     const wideStr = wide ? `ワイド[${wide.horses.join(',')}]×${wide.amount}円` : '';
-    const umarenStr = umaren.length > 0 ? `馬連[${umaren.map(u => u.horses.join('-')).join(',')}]×${umaren[0].amount}円` : '';
-    const tansStr = tans.length > 0 ? `単勝[${tans.map(t => t.horses[0]).join(',')}]` : '';
-    const line = `  ${tStr} ${p.venueName}${p.raceNumber}R w=${p.weight.toFixed(1)} ${tansStr} ${umarenStr}${wideStr}`;
-    log(line);
-    planLines.push(line);
+    const umaSum = umaren.reduce((s, u) => s + u.amount, 0);
+    const tansSum = tans.reduce((s, t) => s + t.amount, 0);
+    const umarenStr = umaren.length > 0
+      ? `馬連[${umaren.map(u => u.horses.join('-')).join(',')}]×${umaren[0].amount}円=${umaSum}円`
+      : '';
+    const tansStr = tans.length > 0
+      ? `単勝[${tans.map(t => `${t.horses[0]}番${t.amount}円`).join(',')}]=${tansSum}円`
+      : '';
+    const line = `  ${tStr} ${p.venueName}${p.raceNumber}R w=${p.weight.toFixed(1)} ${tansStr} ${umarenStr}${wideStr}`.replace(/\s+/g, ' ').trim();
+    log('  ' + line);
+    planLines.push('  ' + line);
+    tanTotal += tansSum; tanCount += tans.length;
+    umaTotal += umaSum;  umaCount += umaren.length;
   }
+  const grandTotal = tanTotal + umaTotal;
 
-  // 起動時の Slack 通知 (計画一覧)
-  await slackNotify(`📋 *本日 (${date}) の投票計画* — ${plans.length}レース、予算${budget.toLocaleString()}円\n\`\`\`${planLines.join('\n')}\`\`\``);
+  // 起動時の Slack 通知 (計画一覧 + 単勝/馬連合計)
+  const header = `📋 *本日 (${date}) の投票計画* — ${plans.length}レース、予算${budget.toLocaleString()}円`;
+  const totals = `合計: 単勝 ${tanTotal.toLocaleString()}円 (${tanCount}点) / 馬連 ${umaTotal.toLocaleString()}円 (${umaCount}点) = ${grandTotal.toLocaleString()}円`;
+  await slackNotify(`${header}\n${totals}\n\`\`\`${planLines.join('\n')}\`\`\``);
 
   // ── 起動時: 全レースの morning baseline odds を取得 ──
   log(`\n=== Morning baseline 取得 (全${plans.length}レース) ===`);
