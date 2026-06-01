@@ -19,9 +19,23 @@ TS=$(date '+%Y-%m-%d %H:%M:%S')
 
 echo "[$TS] === morning-ipat-check 起動 ===" >> "$LOG_FILE"
 
-# テスト対象: 朝なので 5/17 1R (or 当日の早いレース)
-# 当日の最初のレースを指す venue/race は変動するので、デフォルトは東京1R
-# (場合により本番に影響しない安全な値だが、当日開催してなければ failure になる)
+# 当日レース有無チェック (平日=レースなしなら何もせず終了、Slack通知も出さない)
+TODAY=$(date '+%Y-%m-%d')
+RACE_COUNT=$(/opt/homebrew/bin/node --env-file=.env.local -e "
+const { createClient } = require('@libsql/client');
+const db = createClient({ url: process.env.TURSO_DATABASE_URL.replace('libsql://', 'https://'), authToken: process.env.TURSO_AUTH_TOKEN });
+(async () => {
+  const r = await db.execute(\"SELECT COUNT(*) AS n FROM races WHERE date = '$TODAY'\");
+  console.log(r.rows[0].n);
+  db.close();
+})();
+" 2>/dev/null)
+
+if [ "${RACE_COUNT:-0}" -eq 0 ]; then
+  echo "[$TS] 当日($TODAY)のレースなし → セルフテスト skip, Slack通知なし" >> "$LOG_FILE"
+  exit 0
+fi
+
 VENUE="${1:-東京}"
 RACE="${2:-1}"
 
