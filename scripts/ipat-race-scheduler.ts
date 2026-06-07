@@ -620,6 +620,22 @@ async function main() {
 
   // ポーリングループ
   log('\n=== ポーリング開始 ===');
+  const heartbeatFile = `${logDir}/scheduler-heartbeat-${date}.json`;
+  const writeHeartbeat = (now: Date) => {
+    try {
+      writeFileSync(heartbeatFile, JSON.stringify({
+        last_poll: now.toISOString(),
+        pid: process.pid,
+        races: plans.map(p => ({
+          label: `${p.venueName}${p.raceNumber}R`,
+          raceTime: p.raceTime.toISOString(),
+          minsTo: Math.round((p.raceTime.getTime() - now.getTime()) / 60000),
+          status: p.status,
+        })),
+      }, null, 2));
+    } catch {}
+  };
+  writeHeartbeat(nowJst());
   while (true) {
     const now = nowJst();
     // 17:30 JST 以降は終了
@@ -637,6 +653,13 @@ async function main() {
       if (p.status !== 'pending' && p.status !== 'baselined') continue;
       const minsTo = (p.raceTime.getTime() - now.getTime()) / 60000;
 
+      // 起動時点で発走過ぎているレースは即skip(無音stuck対策)
+      if (minsTo <= 1 && p.status !== 'bet' && p.status !== 'error') {
+        log(`⏰ ${p.venueName}${p.raceNumber}R: 締切間近のためskip (minsTo=${minsTo.toFixed(1)})`);
+        p.status = 'skipped';
+        continue;
+      }
+
       // -20分: 中間スナップショット (時系列観察用、フィルタは朝baseline使用)
       if (p.status === 'pending' && minsTo <= minutesBeforeBaseline && minsTo > minutesBeforeBet + 1) {
         await processBaseline(p);
@@ -647,14 +670,9 @@ async function main() {
         log(`▶ ${p.venueName}${p.raceNumber}R 投票実行 (発走${minsTo.toFixed(1)}分前)`);
         await processBet(p);
       }
-
-      // -1分: 投票締切間近・諦め
-      if (minsTo <= 1 && p.status !== 'bet' && p.status !== 'error') {
-        log(`⏰ ${p.venueName}${p.raceNumber}R: 締切間近のためskip`);
-        p.status = 'skipped';
-      }
     }
 
+    writeHeartbeat(nowJst());
     await new Promise(r => setTimeout(r, 30_000));
   }
 
