@@ -54,6 +54,7 @@ interface StrategyConfig {
   wideEnabled?: boolean;
   oddsRiseExcludeThreshold: number;
   skipRaces?: string[];
+  gradeFilter?: string[];
   raceWeight: {
     ageMult_3yoOnly: number;
     ageMult_default: number;
@@ -93,6 +94,7 @@ const UMAREN_SCORE_MIN = config.umaren?.scoreMin ?? config.matchScoreThreshold;
 const TANSHO_REST_DAYS_MIN = config.tansho?.restDaysMin ?? 50;
 const TANSHO_INCLUDE_T2 = config.tansho?.includeTheory2 ?? false;
 const SKIP_RACES = new Set<string>(config.skipRaces ?? []);
+const GRADE_FILTER = config.gradeFilter && config.gradeFilter.length > 0 ? new Set<string>(config.gradeFilter) : null;
 const WIDE_ENABLED = config.wideEnabled ?? false;
 
 const NETKEIBA_BASE = 'https://race.netkeiba.com';
@@ -188,6 +190,12 @@ async function buildDayPlans(): Promise<RacePlan[]> {
     try { a = JSON.parse(String(row.analysis_json)); } catch {}
     const sp = a?.shosanPrediction;
     const rname = String(row.name || ''), rgrade = String(row.grade || '');
+
+    // gradeFilter 設定で grade 限定 (例: ["G1","G2","G3"])
+    if (GRADE_FILTER && !GRADE_FILTER.has(rgrade)) {
+      log(`⏭ ${raceLabel} (${rgrade || '無'}): gradeFilter で除外`);
+      continue;
+    }
     const raceNum = Number(row.race_number);
     const weight = computeRaceWeight(raceNum, rname, rgrade);
 
