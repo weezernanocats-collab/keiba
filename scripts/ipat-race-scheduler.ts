@@ -578,6 +578,16 @@ async function main() {
   const plans = await buildDayPlans();
   if (plans.length === 0) {
     log('対象の買い目があるレースがありません');
+    // watchdog誤検知防止: 対象0マーカーを heartbeat に残して exit
+    try {
+      writeFileSync(`${logDir}/scheduler-heartbeat-${date}.json`, JSON.stringify({
+        last_poll: new Date().toISOString(),
+        pid: process.pid,
+        finished: true,
+        no_plans: true,
+        races: [],
+      }, null, 2));
+    } catch {}
     return;
   }
   allocateBudget(plans);
@@ -629,11 +639,12 @@ async function main() {
   // ポーリングループ
   log('\n=== ポーリング開始 ===');
   const heartbeatFile = `${logDir}/scheduler-heartbeat-${date}.json`;
-  const writeHeartbeat = (now: Date) => {
+  const writeHeartbeat = (now: Date, finished = false) => {
     try {
       writeFileSync(heartbeatFile, JSON.stringify({
         last_poll: now.toISOString(),
         pid: process.pid,
+        finished,
         races: plans.map(p => ({
           label: `${p.venueName}${p.raceNumber}R`,
           raceTime: p.raceTime.toISOString(),
@@ -683,6 +694,9 @@ async function main() {
     writeHeartbeat(nowJst());
     await new Promise(r => setTimeout(r, 30_000));
   }
+
+  // ループ抜け = 正常終了 (17:30到達 or 全レース処理完了)
+  writeHeartbeat(nowJst(), true);
 
   // 最終サマリ
   log('\n=== 結果サマリ ===');

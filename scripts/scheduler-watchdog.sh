@@ -58,6 +58,12 @@ LAST_POLL=$(jq -r '.last_poll' "$HEARTBEAT_FILE" 2>/dev/null)
 LAST_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${LAST_POLL%.*}" "+%s" 2>/dev/null || echo 0)
 ELAPSED=$((NOW_EPOCH - LAST_EPOCH))
 
+# scheduler が正常終了済みなら異常扱いしない
+FINISHED=$(jq -r '.finished // false' "$HEARTBEAT_FILE" 2>/dev/null)
+if [[ "$FINISHED" == "true" ]]; then
+  exit 0
+fi
+
 # 異常判定
 ANOMALY=""
 
@@ -92,9 +98,15 @@ if [[ -f "$RESTART_COUNT_FILE" ]]; then
   RESTART_COUNT=$(cat "$RESTART_COUNT_FILE")
 fi
 
+NOTIFIED_FILE="${LOG_DIR}/watchdog-notified-${DATE}.flag"
+
 if [[ "$RESTART_COUNT" -ge 3 ]]; then
-  slack_notify "🚨 *scheduler watchdog* ${DATE} ${ANOMALY} — 再起動上限(3回)到達、手動確認お願いします"
-  log "再起動上限到達、通知のみ"
+  # 上限到達Slack通知は1日1回のみ (連射防止)
+  if [[ ! -f "$NOTIFIED_FILE" ]]; then
+    slack_notify "🚨 *scheduler watchdog* ${DATE} ${ANOMALY} — 再起動上限(3回)到達、手動確認お願いします"
+    touch "$NOTIFIED_FILE"
+  fi
+  log "再起動上限到達、通知済み (silent exit)"
   exit 1
 fi
 
