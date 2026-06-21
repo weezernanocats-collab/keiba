@@ -488,8 +488,9 @@ async function main() {
       await page.evaluate(() => window.scrollTo(0, 0));
       await wait(500);
 
+      // 投票直前タイミングだとDOM描画遅延がある。1000ms→5000msに延長
       const courseBtnVisible = await page.locator("button[ng-click*='selectCourse']").first()
-        .isVisible({ timeout: 1000 }).catch(() => false);
+        .isVisible({ timeout: 5000 }).catch(() => false);
 
       if (courseBtnVisible) {
         // ボタンモード（初回表示時）

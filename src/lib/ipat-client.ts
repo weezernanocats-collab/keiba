@@ -151,8 +151,10 @@ export async function selectVenueAndRace(page: Page, venueName: string, raceNumb
   await wait(500);
 
   // ボタンモード(初回) or プルダウンモード(セット後)
+  // 投票直前タイミングだとDOM描画が遅れることがあるので timeout 多めに取る
+  // (1000ms→5000ms。短いと button読込前にfalse判定→プルダウン分岐で詰む)
   const courseBtnVisible = await page.locator("button[ng-click*='selectCourse']").first()
-    .isVisible({ timeout: 1000 }).catch(() => false);
+    .isVisible({ timeout: 5000 }).catch(() => false);
 
   if (courseBtnVisible) {
     // ボタンモード

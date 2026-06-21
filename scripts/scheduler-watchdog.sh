@@ -54,8 +54,9 @@ fi
 # heartbeat ファイル解析
 NOW_EPOCH=$(date +%s)
 LAST_POLL=$(jq -r '.last_poll' "$HEARTBEAT_FILE" 2>/dev/null)
-# ISO 8601 → epoch (macOS の date 互換)
-LAST_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${LAST_POLL%.*}" "+%s" 2>/dev/null || echo 0)
+# ISO 8601 (UTC, "Z"付き) → epoch
+# scheduler は new Date().toISOString() で UTC 時刻を書く。date -j -u で UTC 解釈
+LAST_EPOCH=$(date -j -u -f "%Y-%m-%dT%H:%M:%S" "${LAST_POLL%.*}" "+%s" 2>/dev/null || echo 0)
 ELAPSED=$((NOW_EPOCH - LAST_EPOCH))
 
 # scheduler が正常終了済みなら異常扱いしない
