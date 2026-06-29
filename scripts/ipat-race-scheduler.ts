@@ -55,6 +55,7 @@ interface StrategyConfig {
   oddsRiseExcludeThreshold: number;
   skipRaces?: string[];
   gradeFilter?: string[];
+  flatAmount?: number;  // >0 で全bet金額をその額に固定。score別重み/boost/レース重み配分を無効化
   raceWeight: {
     ageMult_3yoOnly: number;
     ageMult_default: number;
@@ -95,6 +96,7 @@ const TANSHO_REST_DAYS_MIN = config.tansho?.restDaysMin ?? 50;
 const TANSHO_INCLUDE_T2 = config.tansho?.includeTheory2 ?? false;
 const SKIP_RACES = new Set<string>(config.skipRaces ?? []);
 const GRADE_FILTER = config.gradeFilter && config.gradeFilter.length > 0 ? new Set<string>(config.gradeFilter) : null;
+const FLAT_AMOUNT = config.flatAmount && config.flatAmount > 0 ? config.flatAmount : 0;
 const WIDE_ENABLED = config.wideEnabled ?? false;
 
 const NETKEIBA_BASE = 'https://race.netkeiba.com';
@@ -262,17 +264,26 @@ function allocateBudget(plans: RacePlan[]) {
   const items: Array<{ plan: RacePlan; bet: BetItem; base: number }> = [];
   for (const p of plans) for (const b of p.initialBets) items.push({ plan: p, bet: b, base: b.amount });
   if (items.length === 0) return;
-  const rawTotal = items.reduce((s, x) => s + x.base * x.plan.weight, 0);
-  if (rawTotal > 0) {
-    for (const x of items) {
-      const target = budget * (x.base * x.plan.weight) / rawTotal;
-      x.bet.amount = Math.max(100, Math.floor(target / 100) * 100);
-    }
-  }
+
   // コスト計算 (WIDEはペア数倍)
   const cost = (b: BetItem) => b.type === 'WIDE' ? b.amount * Math.max(1, b.horses.length * (b.horses.length - 1) / 2) : b.amount;
+
+  if (FLAT_AMOUNT > 0) {
+    // 全bet金額を flatAmount に統一
+    for (const x of items) x.bet.amount = FLAT_AMOUNT;
+  } else {
+    const rawTotal = items.reduce((s, x) => s + x.base * x.plan.weight, 0);
+    if (rawTotal > 0) {
+      for (const x of items) {
+        const target = budget * (x.base * x.plan.weight) / rawTotal;
+        x.bet.amount = Math.max(100, Math.floor(target / 100) * 100);
+      }
+    }
+  }
   let total = items.reduce((s, x) => s + cost(x.bet), 0);
-  if (total > budget) {
+  // flatAmount モードは予算オーバー許容 (1点100円固定なので削除すると box が崩れて不本意な買い方になる)
+  // 重み配分モードのみ予算カット
+  if (FLAT_AMOUNT === 0 && total > budget) {
     const sorted = [...items].sort((a, b) => a.plan.weight - b.plan.weight);
     const drop = new Set<BetItem>();
     for (const x of sorted) {
@@ -281,10 +292,13 @@ function allocateBudget(plans: RacePlan[]) {
       total -= cost(x.bet);
     }
     for (const p of plans) p.initialBets = p.initialBets.filter(b => !drop.has(b));
+  } else if (FLAT_AMOUNT > 0 && total > budget) {
+    log(`[budget] 予算超過 ${total - budget}円 (flatAmount モード: 全点購入を優先)`);
   }
   // 余り予算を高weight順に +100円ずつ再配分 (消化率最大化)
+  // flatAmount モードでは1点固定なので増額しない
   const live = items.filter(x => plans.some(p => p.initialBets.includes(x.bet)));
-  if (total < budget && live.length > 0) {
+  if (FLAT_AMOUNT === 0 && total < budget && live.length > 0) {
     const sorted = [...live].sort((a, b) => b.plan.weight - a.plan.weight);
     let i = 0, safety = 0;
     while (total < budget && safety < 1000) {
