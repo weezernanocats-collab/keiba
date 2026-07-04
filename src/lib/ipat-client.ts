@@ -151,10 +151,26 @@ export async function selectVenueAndRace(page: Page, venueName: string, raceNumb
   await wait(500);
 
   // ボタンモード(初回) or プルダウンモード(セット後)
-  // 投票直前タイミングだとDOM描画が遅れることがあるので timeout 多めに取る
-  // (1000ms→5000ms。短いと button読込前にfalse判定→プルダウン分岐で詰む)
-  const courseBtnVisible = await page.locator("button[ng-click*='selectCourse']").first()
-    .isVisible({ timeout: 5000 }).catch(() => false);
+  // isVisible({timeout}) は待たずに即bool返す仕様なので waitFor で明示的に待つ
+  // ボタン or プルダウンのどちらが先に visible になるかで判定
+  let courseBtnVisible = false;
+  try {
+    await Promise.race([
+      page.locator("button[ng-click*='selectCourse']").first()
+        .waitFor({ state: 'visible', timeout: 8000 })
+        .then(() => { courseBtnVisible = true; }),
+      page.locator("select[ng-model='vm.cSelectedCourseId']")
+        .waitFor({ state: 'visible', timeout: 8000 })
+        .then(() => { courseBtnVisible = false; }),
+    ]);
+  } catch {
+    // どちらも見つからない → デバッグ用スクショ
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const path = `/tmp/ipat_no_venue_${venueName}${raceNumber}_${ts}.png`;
+    await page.screenshot({ path, fullPage: false }).catch(() => {});
+    logFn(`📸 会場選択画面到達失敗: ${path}`);
+    throw new Error(`会場選択画面 (button/select どちらも見つからず)`);
+  }
 
   if (courseBtnVisible) {
     // ボタンモード

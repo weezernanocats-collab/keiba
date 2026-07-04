@@ -488,9 +488,21 @@ async function main() {
       await page.evaluate(() => window.scrollTo(0, 0));
       await wait(500);
 
-      // 投票直前タイミングだとDOM描画遅延がある。1000ms→5000msに延長
-      const courseBtnVisible = await page.locator("button[ng-click*='selectCourse']").first()
-        .isVisible({ timeout: 5000 }).catch(() => false);
+      // isVisible({timeout}) は待たずに即bool返す仕様なので waitFor で明示的に待つ
+      let courseBtnVisible = false;
+      try {
+        await Promise.race([
+          page.locator("button[ng-click*='selectCourse']").first()
+            .waitFor({ state: 'visible', timeout: 8000 })
+            .then(() => { courseBtnVisible = true; }),
+          page.locator("select[ng-model='vm.cSelectedCourseId']")
+            .waitFor({ state: 'visible', timeout: 8000 })
+            .then(() => { courseBtnVisible = false; }),
+        ]);
+      } catch {
+        console.warn(`  ⚠ 会場選択画面が出ない (button/select どちらも見つからず) → skip`);
+        continue;
+      }
 
       if (courseBtnVisible) {
         // ボタンモード（初回表示時）
