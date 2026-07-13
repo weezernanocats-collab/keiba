@@ -1,12 +1,12 @@
 {
   "version": "2026-05-30",
-  "lastUpdated": "2026-05-30T00:00:00Z",
+  "lastUpdated": "2026-07-13T06:01:38.634Z",
   "dailyBudget": 10000,
   "tanshoCap": 0.5,
-  "matchScoreThreshold": 55,
+  "matchScoreThreshold": 52,
   "scoreWeight": {
-    "highThreshold": 65,
-    "highAmount": 200,
+    "highThreshold": 66,
+    "highAmount": 150,
     "lowAmount": 100
   },
   "tansho": {
@@ -24,31 +24,57 @@
   },
   "wideEnabled": false,
   "oddsRiseExcludeThreshold": 999,
-  "skipRaces": ["京都11R"],
+  "skipRaces": [
+    "京都11R"
+  ],
   "_skipRaces_note": "venue+raceNumber形式 (例: 京都11R)。レース計画から除外",
-  "gradeFilter": ["G1", "G2", "G3"],
+  "gradeFilter": [
+    "G1",
+    "G2",
+    "G3"
+  ],
   "_gradeFilter_note": "指定gradeのレースのみ買い目対象。空配列or未指定で全レース。2026-06-08 重賞のみ運用 (ユーザー指示)",
   "raceWeight": {
     "ageMult_3yoOnly": 0.5,
-    "ageMult_default": 1.0,
+    "ageMult_default": 1,
     "gradeMult": {
       "G1": 0.7,
       "G2": 0.8,
       "G3": 0.9,
-      "リステッド": 1.0,
-      "OP": 1.0,
-      "オープン": 1.0,
+      "リステッド": 1,
+      "OP": 1,
+      "オープン": 1,
       "3勝クラス": 1.3,
       "2勝クラス": 1.5,
       "1勝クラス": 1.4,
-      "default": 1.0
+      "default": 1
     }
   },
   "tuneBounds": {
-    "matchScoreThreshold": { "min": 50, "max": 65, "step": 1, "maxWeeklyMove": 3 },
-    "scoreWeightHighAmount": { "min": 100, "max": 400, "step": 50, "maxWeeklyMove": 50 },
-    "scoreWeightHighThreshold": { "min": 60, "max": 75, "step": 1, "maxWeeklyMove": 3 },
-    "oddsRiseExcludeThreshold": { "min": 0.2, "max": 0.5, "step": 0.05, "maxWeeklyMove": 0.05 }
+    "matchScoreThreshold": {
+      "min": 50,
+      "max": 65,
+      "step": 1,
+      "maxWeeklyMove": 3
+    },
+    "scoreWeightHighAmount": {
+      "min": 100,
+      "max": 400,
+      "step": 50,
+      "maxWeeklyMove": 50
+    },
+    "scoreWeightHighThreshold": {
+      "min": 60,
+      "max": 75,
+      "step": 1,
+      "maxWeeklyMove": 3
+    },
+    "oddsRiseExcludeThreshold": {
+      "min": 0.2,
+      "max": 0.5,
+      "step": 0.05,
+      "maxWeeklyMove": 0.05
+    }
   },
   "history": [
     {
@@ -60,13 +86,15 @@
         "scoreWeight.highThreshold": 65,
         "oddsRiseExcludeThreshold": 0.3
       },
-      "trainRoi": 152.0,
+      "trainRoi": 152,
       "validateRoi": 154.9
     },
     {
       "date": "2026-05-15",
       "change": "dailyBudget 10000 → 5000 (ユーザー指示)",
-      "params": { "dailyBudget": 5000 }
+      "params": {
+        "dailyBudget": 5000
+      }
     },
     {
       "date": "2026-05-22",
@@ -92,10 +120,14 @@
         "tansho.restDaysMin": 50,
         "umaren.strategy": "top3_box_late",
         "umaren.raceNumMin": 11,
-        "umaren.excludeGrades": ["G1","G2","G3"]
+        "umaren.excludeGrades": [
+          "G1",
+          "G2",
+          "G3"
+        ]
       },
       "backtest": {
-        "tanshoROI_50days": 130.0,
+        "tanshoROI_50days": 130,
         "tanshoROI_prev": 141.3,
         "tansho_diff": -11.3,
         "umaren_top3box_late_no_grade_ROI": 100.7,
@@ -129,9 +161,24 @@
       "date": "2026-06-08",
       "change": "gradeFilter=[G1,G2,G3] で重賞のみ運用 + dailyBudget 5000→2000 (ユーザー指示)",
       "params": {
-        "gradeFilter": ["G1", "G2", "G3"]
+        "gradeFilter": [
+          "G1",
+          "G2",
+          "G3"
+        ]
       },
       "note": "しばらく重賞のみ。plist側 --budget 2000 で運用。解除する場合は gradeFilter を [] または削除し、plist の --budget も戻す"
+    },
+    {
+      "date": "2026-07-13",
+      "change": "matchScore:55→52, highThreshold:65→66, highAmount:200→150",
+      "params": {
+        "matchScoreThreshold": 52,
+        "scoreWeight.highThreshold": 66,
+        "scoreWeight.highAmount": 150
+      },
+      "trainRoi": 111.9,
+      "validateRoi": 137.5
     }
   ]
 }
