@@ -1,57 +1,57 @@
 {
   "model_type": "ranker_v6",
-  "train_samples": 72094,
-  "cal_samples": 15449,
-  "test_samples": 15449,
+  "train_samples": 72747,
+  "cal_samples": 15589,
+  "test_samples": 15589,
   "feature_count": 35,
   "calibration": "isotonic_regression",
   "odds_weighted_gain": true,
   "global_val_metrics": {
-    "ndcg_1": 0.4625,
-    "ndcg_3": 0.475,
-    "top1_accuracy": 0.2964,
-    "top3_accuracy": 0.5649
+    "ndcg_1": 0.4654,
+    "ndcg_3": 0.4778,
+    "top1_accuracy": 0.2957,
+    "top3_accuracy": 0.5717
   },
   "global_test_metrics": {
-    "brier_raw": 0.063738,
-    "brier_calibrated": 0.061357,
-    "ece_raw": 0.0194,
-    "ece_calibrated": 0.0116,
-    "ndcg_1": 0.4529,
-    "ndcg_3": 0.4682,
-    "top1_accuracy": 0.2869,
-    "top3_accuracy": 0.5486
+    "brier_raw": 0.065211,
+    "brier_calibrated": 0.063182,
+    "ece_raw": 0.013,
+    "ece_calibrated": 0.023,
+    "ndcg_1": 0.4739,
+    "ndcg_3": 0.4738,
+    "top1_accuracy": 0.3028,
+    "top3_accuracy": 0.5542
   },
   "category_metrics": {
     "turf_sprint": {
-      "ndcg_1": 0.3647,
-      "ndcg_3": 0.4158,
-      "top1_accuracy": 0.2189,
-      "top3_accuracy": 0.4856
+      "ndcg_1": 0.3707,
+      "ndcg_3": 0.4193,
+      "top1_accuracy": 0.2124,
+      "top3_accuracy": 0.4884
     },
     "dirt_short": {
-      "ndcg_1": 0.3647,
-      "ndcg_3": 0.4158,
-      "top1_accuracy": 0.2189,
-      "top3_accuracy": 0.4856
+      "ndcg_1": 0.3707,
+      "ndcg_3": 0.4193,
+      "top1_accuracy": 0.2124,
+      "top3_accuracy": 0.4884
     },
     "dirt_long": {
-      "ndcg_1": 0.3647,
-      "ndcg_3": 0.4158,
-      "top1_accuracy": 0.2189,
-      "top3_accuracy": 0.4856
+      "ndcg_1": 0.3707,
+      "ndcg_3": 0.4193,
+      "top1_accuracy": 0.2124,
+      "top3_accuracy": 0.4884
     },
     "turf_long": {
-      "ndcg_1": 0.4625,
-      "ndcg_3": 0.475,
-      "top1_accuracy": 0.2964,
-      "top3_accuracy": 0.5649
+      "ndcg_1": 0.4654,
+      "ndcg_3": 0.4778,
+      "top1_accuracy": 0.2957,
+      "top3_accuracy": 0.5717
     },
     "turf_mile": {
-      "ndcg_1": 0.4817,
-      "ndcg_3": 0.5339,
-      "top1_accuracy": 0.3099,
-      "top3_accuracy": 0.6378
+      "ndcg_1": 0.4942,
+      "ndcg_3": 0.5432,
+      "top1_accuracy": 0.3235,
+      "top3_accuracy": 0.6478
     }
   },
   "categories_trained": [
@@ -63,41 +63,41 @@
   ],
   "catboost": {
     "global_val_metrics": {
-      "ndcg_1": 0.5033,
-      "ndcg_3": 0.5459,
-      "top1_accuracy": 0.3261,
-      "top3_accuracy": 0.6604
+      "ndcg_1": 0.5021,
+      "ndcg_3": 0.5447,
+      "top1_accuracy": 0.3226,
+      "top3_accuracy": 0.6505
     },
     "category_metrics": {
       "turf_sprint": {
-        "ndcg_1": 0.4092,
-        "ndcg_3": 0.4629,
-        "top1_accuracy": 0.2486,
-        "top3_accuracy": 0.5423
+        "ndcg_1": 0.4023,
+        "ndcg_3": 0.4624,
+        "top1_accuracy": 0.2401,
+        "top3_accuracy": 0.5457
       },
       "dirt_short": {
-        "ndcg_1": 0.4092,
-        "ndcg_3": 0.4629,
-        "top1_accuracy": 0.2486,
-        "top3_accuracy": 0.5423
+        "ndcg_1": 0.4023,
+        "ndcg_3": 0.4624,
+        "top1_accuracy": 0.2401,
+        "top3_accuracy": 0.5457
       },
       "dirt_long": {
-        "ndcg_1": 0.4092,
-        "ndcg_3": 0.4629,
-        "top1_accuracy": 0.2486,
-        "top3_accuracy": 0.5423
+        "ndcg_1": 0.4023,
+        "ndcg_3": 0.4624,
+        "top1_accuracy": 0.2401,
+        "top3_accuracy": 0.5457
       },
       "turf_long": {
-        "ndcg_1": 0.5033,
-        "ndcg_3": 0.5459,
-        "top1_accuracy": 0.3261,
-        "top3_accuracy": 0.6604
+        "ndcg_1": 0.5021,
+        "ndcg_3": 0.5447,
+        "top1_accuracy": 0.3226,
+        "top3_accuracy": 0.6505
       },
       "turf_mile": {
-        "ndcg_1": 0.5072,
-        "ndcg_3": 0.5473,
+        "ndcg_1": 0.5084,
+        "ndcg_3": 0.5461,
         "top1_accuracy": 0.3306,
-        "top3_accuracy": 0.6559
+        "top3_accuracy": 0.6487
       }
     },
     "categories_trained": [
