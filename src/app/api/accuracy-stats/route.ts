@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbAll } from '@/lib/database';
 import { isBetHit } from '@/lib/bet-utils';
 import { getCacheHeaders } from '@/lib/api-helpers';
+import { getStats, putStats } from '@/lib/stats-cache';
 
 export const maxDuration = 30;
 export const dynamic = 'force-dynamic';
@@ -20,7 +21,7 @@ export const dynamic = 'force-dynamic';
  *   - betTypeStats: 推奨馬券種別の的中率・ROI
  */
 
-// インメモリキャッシュ（Turso Read量を削減）
+// インメモリキャッシュ（同一インスタンス内の連打用）
 const cache = new Map<string, { data: unknown; expires: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5分
 
@@ -29,12 +30,27 @@ export async function GET(request: NextRequest) {
     const daysParam = request.nextUrl.searchParams.get('days');
     const days = daysParam && daysParam !== 'all' ? parseInt(daysParam, 10) : 0;
     const cacheKey = `stats_${days}`;
+    const forceRefresh = request.nextUrl.searchParams.get('refresh') === '1';
 
-    // キャッシュヒット時は即座に返す
+    // 1段目: プロセス内キャッシュ
     const cached = cache.get(cacheKey);
-    if (cached && Date.now() < cached.expires) {
+    if (!forceRefresh && cached && Date.now() < cached.expires) {
       return NextResponse.json(cached.data, {
         headers: { 'Cache-Control': 'private, max-age=60' },
+      });
+    }
+
+    // 2段目: 永続キャッシュ（インスタンスが入れ替わっても効く）
+    // この集計は1回で約50万行読むため、ここで止めないと Turso の読み取り枠を食い潰す
+    const persisted = await getStats<Record<string, unknown>>(cacheKey, forceRefresh);
+    if (persisted) {
+      cache.set(cacheKey, { data: persisted.data, expires: Date.now() + CACHE_TTL_MS });
+      return NextResponse.json(persisted.data, {
+        headers: {
+          'Cache-Control': 'private, max-age=60',
+          'X-Stats-Cache': persisted.reason,
+          'X-Stats-Computed-At': persisted.computedAt,
+        },
       });
     }
 
@@ -889,11 +905,17 @@ export async function GET(request: NextRequest) {
       period: days > 0 ? `${days}日` : '全期間',
     };
 
-    // キャッシュに保存
+    // キャッシュに保存（プロセス内 + 永続）
     cache.set(cacheKey, { data: responseData, expires: Date.now() + CACHE_TTL_MS });
+    try {
+      await putStats(cacheKey, responseData);
+    } catch (e) {
+      // 永続キャッシュの失敗で統計表示そのものを落とさない
+      console.error('stats_cache 保存失敗:', e);
+    }
 
     return NextResponse.json(responseData, {
-      headers: { 'Cache-Control': 'private, max-age=60' },
+      headers: { 'Cache-Control': 'private, max-age=60', 'X-Stats-Cache': 'miss' },
     });
   } catch (error) {
     console.error('accuracy-stats エラー:', error);
