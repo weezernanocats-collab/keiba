@@ -240,8 +240,10 @@ export default function PredictionDetailPage() {
   }>(`/api/predictions/${raceId}`);
 
   // 補助データ: 遅延読み込み（メイン描画をブロックしない）
-  const { data: scoreData } = useDeferredApi<{ buckets: ScoreBucket[] }>('/api/score-lookup');
-  const { data: statsData } = useDeferredApi<{ betTypeStats: BetTypeStat[] }>('/api/accuracy-stats');
+  // 馬券種別の実績は過去集計なので、タブ復帰ごとに取り直さない（DB読み取り量の削減）
+  const deferredStatsConfig = { revalidateOnFocus: false, revalidateIfStale: false, dedupingInterval: 60 * 60 * 1000 };
+  const { data: scoreData } = useDeferredApi<{ buckets: ScoreBucket[] }>('/api/score-lookup', deferredStatsConfig);
+  const { data: statsData } = useDeferredApi<{ betTypeStats: BetTypeStat[] }>('/api/accuracy-stats', deferredStatsConfig);
 
   const prediction = predData?.prediction || null;
   const race = predData?.race || null;

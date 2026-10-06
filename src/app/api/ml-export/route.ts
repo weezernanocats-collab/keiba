@@ -216,9 +216,11 @@ export async function GET(request: NextRequest) {
              r.grade, r.track_type, r.distance, r.track_condition, r.weather, r.racecourse_name
       FROM predictions p
       JOIN races r ON r.id = p.race_id
+      -- レースごとの最新予想を1パスで求める (相関サブクエリは本番データ量で爆発するため禁止)
+      JOIN (SELECT race_id, MAX(id) AS id FROM predictions GROUP BY race_id) latest
+        ON latest.id = p.id
       WHERE r.status = '結果確定'
         AND r.date BETWEEN ? AND ?
-        AND p.id = (SELECT MAX(p2.id) FROM predictions p2 WHERE p2.race_id = r.id)
     `, [from, to]),
     dbAll<EntryRow>(`
       SELECT re.race_id, re.horse_number, re.post_position, re.age, re.sex,
@@ -269,12 +271,21 @@ export async function GET(request: NextRequest) {
   }
 
   // 過去成績データ取得（騎手乗替、コーナー、着差、休養日数用）
+  // 馬ID数は数万件になるため IN句に展開せず、対象馬の抽出をサブクエリに寄せる
   const pastPerfs = await dbAll<PastPerfRow>(`
-    SELECT horse_id, date, position, jockey_name, margin, corner_positions
-    FROM past_performances
-    WHERE horse_id IN (${horseIds.map(() => '?').join(',')})
-    ORDER BY horse_id, date DESC
-  `, horseIds);
+    SELECT pp.horse_id, pp.date, pp.position, pp.jockey_name, pp.margin, pp.corner_positions
+    FROM past_performances pp
+    WHERE pp.horse_id IN (
+      SELECT DISTINCT re.horse_id
+      FROM race_entries re
+      JOIN races r ON r.id = re.race_id
+      WHERE r.status = '結果確定'
+        AND r.date BETWEEN ? AND ?
+        AND re.result_position IS NOT NULL
+        AND re.horse_id IS NOT NULL
+    )
+    ORDER BY pp.horse_id, pp.date DESC
+  `, [from, to]);
 
   const ppByHorse = new Map<string, PastPerfRow[]>();
   for (const pp of pastPerfs) {
