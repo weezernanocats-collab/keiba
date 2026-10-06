@@ -109,10 +109,58 @@ function sanitizeRow(row: Row): Row {
   return result as Row;
 }
 
+// ==================== 読み取り行数の計測 ====================
+// 2026-09 に Turso の読み取り枠を使い切った反省から、どのクエリが行を食っているかを数える。
+// ここで数えるのは「返ってきた行数」なので Turso の課金対象(スキャン行数)の下限値。
+// 犯人探しの順位付けには十分使える。DB_READ_LOG=1 で1クエリごとに出力。
+
+let readRows = 0;
+let readQueries = 0;
+const readByQuery = new Map<string, { rows: number; calls: number }>();
+
+/** SQL を集計キー向けに短く正規化する */
+function queryKey(sql: string): string {
+  return sql.replace(/\s+/g, ' ').trim().slice(0, 120);
+}
+
+function recordRead(sql: string, rows: number): void {
+  readRows += rows;
+  readQueries++;
+  const key = queryKey(sql);
+  const cur = readByQuery.get(key) ?? { rows: 0, calls: 0 };
+  cur.rows += rows;
+  cur.calls++;
+  readByQuery.set(key, cur);
+  if (process.env.DB_READ_LOG === '1') {
+    console.log(`[db-read] ${rows} 行  ${key}`);
+  }
+}
+
+/** 計測結果を取得する（行数の多い順） */
+export function getReadStats(top = 10): {
+  totalRows: number;
+  totalQueries: number;
+  top: { rows: number; calls: number; sql: string }[];
+} {
+  const top_ = [...readByQuery.entries()]
+    .map(([sql, v]) => ({ sql, rows: v.rows, calls: v.calls }))
+    .sort((a, b) => b.rows - a.rows)
+    .slice(0, top);
+  return { totalRows: readRows, totalQueries: readQueries, top: top_ };
+}
+
+/** 計測をリセットする */
+export function resetReadStats(): void {
+  readRows = 0;
+  readQueries = 0;
+  readByQuery.clear();
+}
+
 /** SELECT → 複数行取得 */
 export async function dbAll<T = Row>(sql: string, args?: unknown[]): Promise<T[]> {
   const db = await ensureInitialized();
   const result = await db.execute({ sql, args: sanitizeArgs(args || []) });
+  recordRead(sql, result.rows.length);
   return result.rows.map(sanitizeRow) as T[];
 }
 
