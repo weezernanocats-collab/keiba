@@ -59,7 +59,8 @@ export async function calculateTodayTrackBias(
   date: string,
   trackType?: string,
 ): Promise<TodayTrackBias | null> {
-  const params: (string | number)[] = [racecourseName, date];
+  // 先頭2つは頭数サブクエリ用、次の2つは本体の WHERE 用
+  const params: (string | number)[] = [racecourseName, date, racecourseName, date];
   let trackTypeFilter = '';
   if (trackType) {
     trackTypeFilter = 'AND r.track_type = ?';
@@ -79,7 +80,10 @@ export async function calculateTodayTrackBias(
      FROM race_entries re
      JOIN races r ON re.race_id = r.id
      JOIN (
-       SELECT race_id, COUNT(*) as field_size FROM race_entries GROUP BY race_id
+       -- 頭数は対象日・対象場のレースだけ数える (全 race_entries の GROUP BY は約11万行スキャン)
+       SELECT race_id, COUNT(*) as field_size FROM race_entries
+       WHERE race_id IN (SELECT id FROM races WHERE racecourse_name = ? AND date = ?)
+       GROUP BY race_id
      ) fs ON fs.race_id = re.race_id
      WHERE r.racecourse_name = ?
        AND r.date = ?

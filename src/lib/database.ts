@@ -164,6 +164,34 @@ export async function dbAll<T = Row>(sql: string, args?: unknown[]): Promise<T[]
   return result.rows.map(sanitizeRow) as T[];
 }
 
+// ==================== 同一クエリの短時間キャッシュ ====================
+// 同じ日のレースを続けて予想生成すると、引数まで同一の重い集計クエリが毎レース走る
+// (例: 種牡馬統計。1回約10万行スキャン × 36レース)。プロセス内で短時間だけ結果を使い回す。
+// 返す配列は共有されるので、呼び出し側で変更しないこと。
+
+const CACHED_QUERY_TTL_MS = 10 * 60_000;
+const CACHED_QUERY_MAX = 200;
+const cachedQueries = new Map<string, { at: number; rows: Promise<unknown[]> }>();
+
+/** SELECT → 複数行取得（同一SQL・同一引数は TTL 内でキャッシュ） */
+export async function dbAllCached<T = Row>(sql: string, args?: unknown[]): Promise<T[]> {
+  const key = sql + '\u0000' + JSON.stringify(args ?? []);
+  const now = Date.now();
+  const hit = cachedQueries.get(key);
+  if (hit && now - hit.at < CACHED_QUERY_TTL_MS) return hit.rows as Promise<T[]>;
+
+  if (cachedQueries.size >= CACHED_QUERY_MAX) {
+    const oldest = cachedQueries.keys().next().value;
+    if (oldest !== undefined) cachedQueries.delete(oldest);
+  }
+  const rows = dbAll<T>(sql, args);
+  cachedQueries.delete(key);
+  cachedQueries.set(key, { at: now, rows });
+  // 失敗した結果はキャッシュに残さない
+  rows.catch(() => cachedQueries.delete(key));
+  return rows;
+}
+
 /** SELECT → 1行取得 */
 export async function dbGet<T = Row>(sql: string, args?: unknown[]): Promise<T | undefined> {
   const rows = await dbAll<T>(sql, args);
