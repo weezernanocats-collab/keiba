@@ -1,4 +1,4 @@
-import { dbAll, dbGet, dbRun, dbRunNamed, dbBatch } from './database';
+import { dbAll, dbAllCached, dbGet, dbRun, dbRunNamed, dbBatch } from './database';
 import type {
   Horse, Jockey, Race, RaceEntry, PastPerformance,
   Prediction, PredictionPick, RaceAnalysis, RecommendedBet,
@@ -1091,6 +1091,8 @@ export async function getJockeyStatsBatch(
 
   const placeholders = uniqueIds.map(() => '?').join(',');
 
+  // CROSS JOIN は SQLite で結合順を固定する書き方。普通の JOIN だと races 側から全件走査し
+  // race_entries を毎回全行スキャンする (Turso 読み取り枠枯渇の原因)。以下の騎手・調教師系も同じ。
   const rows = await dbAll<{ jockey_id: string; total: number; wins: number; places: number }>(`
     SELECT
       e.jockey_id,
@@ -1098,7 +1100,7 @@ export async function getJockeyStatsBatch(
       SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins,
       SUM(CASE WHEN e.result_position <= 3 THEN 1 ELSE 0 END) as places
     FROM race_entries e
-    JOIN races r ON e.race_id = r.id
+    CROSS JOIN races r ON e.race_id = r.id
     WHERE e.jockey_id IN (${placeholders}) AND r.status = '結果確定' AND e.result_position IS NOT NULL AND r.date < ?
     GROUP BY e.jockey_id
   `, [...uniqueIds, beforeDate]);
@@ -1168,7 +1170,7 @@ export async function getTrainerStatsBatch(
       SUM(CASE WHEN r.grade IN ('G3', 'G2', 'G1') THEN 1 ELSE 0 END) as grade_total,
       SUM(CASE WHEN r.grade IN ('G3', 'G2', 'G1') AND e.result_position = 1 THEN 1 ELSE 0 END) as grade_wins
     FROM race_entries e
-    JOIN races r ON e.race_id = r.id
+    CROSS JOIN races r ON e.race_id = r.id
     WHERE e.trainer_name IN (${placeholders}) AND r.status = '結果確定' AND e.result_position IS NOT NULL AND r.date < ?
     GROUP BY e.trainer_name
   `, [...uniqueNames, beforeDate]);
@@ -1215,7 +1217,7 @@ export async function getSireTrackWinRateBatch(
 
   const placeholders = uniqueNames.map(() => '?').join(',');
 
-  const rows = await dbAll<{ father_name: string; total: number; wins: number }>(`
+  const rows = await dbAllCached<{ father_name: string; total: number; wins: number }>(`
     SELECT h.father_name,
            COUNT(*) as total,
            SUM(CASE WHEN pp.position = 1 THEN 1 ELSE 0 END) as wins
@@ -1261,7 +1263,7 @@ export async function getJockeyDistanceWinRateBatch(
            COUNT(*) as total,
            SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins
     FROM race_entries e
-    JOIN races r ON e.race_id = r.id
+    CROSS JOIN races r ON e.race_id = r.id
     WHERE e.jockey_id IN (${placeholders}) AND r.status = '結果確定' AND e.result_position IS NOT NULL
       AND ABS(r.distance - ?) <= 200 AND r.date < ?
     GROUP BY e.jockey_id
@@ -1303,7 +1305,7 @@ export async function getJockeyCourseWinRateBatch(
            COUNT(*) as total,
            SUM(CASE WHEN e.result_position = 1 THEN 1 ELSE 0 END) as wins
     FROM race_entries e
-    JOIN races r ON e.race_id = r.id
+    CROSS JOIN races r ON e.race_id = r.id
     WHERE e.jockey_id IN (${placeholders}) AND r.racecourse_name = ? AND r.status = '結果確定' AND e.result_position IS NOT NULL AND r.date < ?
     GROUP BY e.jockey_id
   `, [...uniqueIds, courseName, beforeDate]);

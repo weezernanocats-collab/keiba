@@ -12,7 +12,7 @@
  *   5. 叩き良化パターン（休み明け→2走目の成績変化）
  */
 
-import { dbAll } from './database';
+import { dbAll, dbAllCached } from './database';
 import { computePaceProfile, type HistoricalPaceProfile } from './pace-analyzer';
 
 // ==================== インメモリキャッシュ (Task 1-6) ====================
@@ -518,7 +518,7 @@ async function getSireStatsBatch(sireNames: string[], raceDate?: string): Promis
   const args = [...sireNames, ...(raceDate ? [raceDate] : [])];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows: any[] = await dbAll(`
+  const rows: any[] = await dbAllCached(`
     SELECT h.father_name, pp.track_type, pp.distance, pp.track_condition, pp.position, pp.entries
     FROM past_performances pp
     JOIN horses h ON pp.horse_id = h.id
@@ -601,11 +601,13 @@ async function getTrainerStatsBatch(trainerNames: string[], raceDate?: string): 
   const placeholders = trainerNames.map(() => '?').join(',');
   const args = [...trainerNames, ...(raceDate ? [raceDate] : [])];
 
+  // CROSS JOIN は SQLite で結合順を固定する書き方。普通の JOIN だと races 側から全件走査し
+  // race_entries を毎回全行スキャンする (1レースの予想生成で約110万行 → Turso 読み取り枠枯渇の原因)。
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: any[] = await dbAll(`
     SELECT re.trainer_name, re.result_position, r.track_type, r.date
     FROM race_entries re
-    JOIN races r ON r.id = re.race_id
+    CROSS JOIN races r ON r.id = re.race_id
     WHERE r.status = '結果確定'
       AND re.trainer_name IN (${placeholders})
       AND re.result_position IS NOT NULL${dateFilter}
@@ -822,7 +824,7 @@ async function getJockeyRecentFormBatch(jockeyIds: string[], raceDate?: string):
   const rows: any[] = await dbAll(`
     SELECT re.jockey_id, re.result_position, r.date
     FROM race_entries re
-    JOIN races r ON r.id = re.race_id
+    CROSS JOIN races r ON r.id = re.race_id
     WHERE re.jockey_id IN (${placeholders})
     AND r.status = '結果確定'
     AND re.result_position IS NOT NULL${dateFilter}
@@ -904,7 +906,7 @@ async function getJockeyTrainerComboBatch(
   const rows: any[] = await dbAll(`
     SELECT re.jockey_id, h.trainer_name, re.result_position
     FROM race_entries re
-    JOIN races r ON r.id = re.race_id
+    CROSS JOIN races r ON r.id = re.race_id
     JOIN horses h ON re.horse_id = h.id
     WHERE re.jockey_id IN (${placeholders})
     AND r.status = '結果確定'
